@@ -81,10 +81,13 @@ describe("osgo unit CI entry point", function () {
     assert.equal(existsSync(resolve(result.buildDir)), false, "generated Go tree cleaned");
   });
   it("runs dynamic static RECEIVING and catchable signature errors on both hosts", () => {
-    for (const name of ["zcl_gogen_t_dynrecvstruct", "zcl_gogen_t_dynrecvany", "zcl_gogen_t_dynrecvcomposite", "zcl_gogen_dynbase", "zcl_gogen_t_dynrecvclosure", "zcl_gogen_t_dynrecvchild", "zcl_gogen_t_dynrecvalias", "zcl_gogen_t_dynrecvfs", "zcl_gogen_t_dynrecvdefault", "zcl_lnt_p_base_chai", "zcl_gogen_t_dynrecv", "zcl_gogen_t_dynrecvnf", "zcl_gogen_t_dynrecverr", "cx_sy_dyn_call_param_missing"])
+    for (const name of ["zcl_gogen_t_dynrecvcase", "zcl_gogen_t_dynrecvsupplied", "zcl_gogen_t_dynrecvstruct", "zcl_gogen_t_dynrecvany", "zcl_gogen_t_dynrecvcomposite", "zcl_gogen_dynbase", "zcl_gogen_t_dynrecvclosure", "zcl_gogen_t_dynrecvchild", "zcl_gogen_t_dynrecvalias", "zcl_gogen_t_dynrecvfs", "zcl_gogen_t_dynrecvdefault", "zcl_lnt_p_base_chai", "zcl_gogen_t_dynrecv", "zcl_gogen_t_dynrecvnf", "zcl_gogen_t_dynrecverr", "cx_sy_dyn_call_param_missing"])
       writeFileSync(join(input, `${name}.clas.abap`), readFileSync(join(root, "tools/gogen/testdata", `${name}.clas.abap`), "utf8"));
     writeFileSync(join(input, "zif_gogen_dynval.intf.abap"), readFileSync(join(root, "tools/gogen/testdata/zif_gogen_dynval.intf.abap")));
     fixture(input, "zcl_osgo_dynrecv", `
+      cl_abap_unit_assert=>assert_equals( act = zcl_gogen_t_dynrecvcase=>run( ) exp = '42' ).
+      cl_abap_unit_assert=>assert_equals( act = zcl_gogen_t_dynrecvsupplied=>run( )
+        exp = '42/7/CX_SY_DYN_CALL_PARAM_NOT_FOUND/literal' ).
       cl_abap_unit_assert=>assert_equals( act = zcl_gogen_t_dynrecvstruct=>run( ) exp = '42' ).
       cl_abap_unit_assert=>assert_equals( act = zcl_gogen_t_dynrecvany=>run( ) exp = '42' ).
       cl_abap_unit_assert=>assert_equals( act = zcl_gogen_t_dynrecvcomposite=>run( ) exp = '9' ).

@@ -3,10 +3,17 @@ import {Expressions, isTok, isExpr, S, Unsupported, goName} from "./frontend-bas
 // Static dispatch through a run-time class name. Parenthesized literal
 // method names share the same adapter as an ordinary identifier; the class
 // stays dynamic even when both names happen to be literals.
+/**
+ * @param {import("@abaplint/core").Nodes.StatementNode} node
+ * @param {import("./frontend-types.ts").MethodContext} ctx
+ * @param {{sourceOperand: (node: import("./frontend-types.ts").SyntaxNode, ctx: import("./frontend-types.ts").MethodContext) => import("./frontend-types.ts").ValueExpr, source: typeof import("./frontend-expressions-calls.mjs").source, convert: typeof import("./frontend.mjs").convert, lvalue: (node: import("./frontend-types.ts").SyntaxNode, ctx: import("./frontend-types.ts").MethodContext) => import("./frontend-types.ts").ValueExpr}} helpers
+ * @returns {Extract<import("./frontend-types.ts").FrontendStmt, {s: "call_dyn_static"}>}
+ */
 export function dynamicStaticCall(node, ctx, {sourceOperand, source, convert, lvalue}) {
   const text = node.concatTokens();
   const kids = node.findDirectExpression(Expressions.MethodSource).getChildren();
   if (kids.length !== 3 || !isTok(kids[1], "=>")) throw new Unsupported(`CALL METHOD form: ${text}`);
+  /** @param {import("./frontend-types.ts").SyntaxNode} dynamic */
   const operand = (dynamic) => {
     const inner = dynamic.getChildren().filter((c) => !isTok(c));
     if (inner.length !== 1) throw new Unsupported(`CALL METHOD form: ${text}`);
@@ -18,7 +25,7 @@ export function dynamicStaticCall(node, ctx, {sourceOperand, source, convert, lv
   else if (isExpr(kids[2], Expressions.Dynamic)) {
     const value = operand(kids[2]);
     if (value.e !== "str" && value.e !== "chars") throw new Unsupported(`CALL METHOD with nonliteral dynamic method: ${text}`);
-    method = value.value.trimEnd();
+    method = value.value.trimEnd().toUpperCase();
   } else throw new Unsupported(`CALL METHOD form: ${text}`);
   const body = node.findDirectExpression(Expressions.MethodCallBody);
   const mp = body?.findDirectExpression(Expressions.MethodParameters);
@@ -47,6 +54,10 @@ export function dynamicStaticCall(node, ctx, {sourceOperand, source, convert, lv
 // Resolve once during lowering: registration and result conversion consume the
 // same called-key -> implementation identity. Defaults must register constants
 // before either emitter writes program.consts.
+/**
+ * @param {import("./frontend-types.ts").FrontendProgram} program
+ * @param {{defaultValue: typeof import("./frontend.mjs").defaultValue, aliasTarget: (reg: import("@abaplint/core").IRegistry, owner: string, name: string) => string | undefined}} helpers
+ */
 export function prepareDynamicStatics(program, {defaultValue, aliasTarget}) {
   program.dynamicDispatch = [];
   for (const cls of program.classes) for (const method of program.dynStatics) {

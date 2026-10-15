@@ -33,3 +33,52 @@ test("dynamic defaults select their constants during lowering, independently of 
     }
   }
 });
+
+test("osabap selection grows through an initially unselected callee and its runtime exceptions", async () => {
+  const {mkdtempSync, writeFileSync, readFileSync, rmSync} = await import("node:fs");
+  const {tmpdir} = await import("node:os");
+  const {join} = await import("node:path");
+  const {libraryPath} = await import("../osd-lib-path.mjs");
+  const {compileClosedProgram} = await import("./frontend-closure.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "dynrecv-closure-"));
+  try {
+    // The pinned core lacks PARAM_MISSING; provide the same test-only class as semantics.
+    writeFileSync(join(dir, "cx_sy_dyn_call_param_missing.clas.abap"), readFileSync(new URL("./testdata/cx_sy_dyn_call_param_missing.clas.abap", import.meta.url)));
+    writeFileSync(join(dir, "zentry.clas.abap"), `CLASS zentry DEFINITION PUBLIC.
+ PUBLIC SECTION. CLASS-METHODS run. ENDCLASS.
+ CLASS zentry IMPLEMENTATION. METHOD run. zcallee=>run( ). ENDMETHOD. ENDCLASS.`);
+    writeFileSync(join(dir, "zcallee.clas.abap"), `CLASS zcallee DEFINITION PUBLIC.
+ PUBLIC SECTION. CLASS-METHODS run. ENDCLASS.
+ CLASS zcallee IMPLEMENTATION. METHOD run.
+ TRY. CALL METHOD ('ZABSENT')=>begin. CATCH cx_root. ENDTRY.
+ ENDMETHOD. ENDCLASS.`);
+    const program = compileClosedProgram({folders: [dir, join(libraryPath(process.cwd(), "open-abap-core"), "src")], objects: ["zentry"]});
+    const names = new Set(program.classes.map(c => c.name));
+    assert.ok(names.has("ZCALLEE"), "callee was outside initial object list");
+    for (const n of ["CX_ROOT", "CX_SY_DYN_CALL_ERROR", "CX_SY_DYN_CALL_PARAMETER_ERROR", "CX_SY_DYN_CALL_ILLEGAL_CLASS",
+      "CX_SY_DYN_CALL_ILLEGAL_METHOD", "CX_SY_DYN_CALL_PARAM_NOT_FOUND", "CX_SY_DYN_CALL_PARAM_MISSING", "CX_SY_DYN_CALL_ILLEGAL_TYPE"])
+      assert.ok(names.has(n), `${n} compiled, not just reported missing`);
+    assert.equal(program.classes.find(c => c.name === "ZCALLEE").stubs.length, 0);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+test("closure retains dependency diagnostics while explicit inputs keep strict syntax checking", async () => {
+  const {mkdtempSync, writeFileSync, rmSync} = await import("node:fs");
+  const {tmpdir} = await import("node:os");
+  const {join} = await import("node:path");
+  const {compileClosedProgram} = await import("./frontend-closure.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "dynrecv-broken-dependency-"));
+  try {
+    writeFileSync(join(dir, "zentry.clas.abap"), `CLASS zentry DEFINITION PUBLIC.
+ PUBLIC SECTION. CLASS-METHODS run. ENDCLASS.
+ CLASS zentry IMPLEMENTATION. METHOD run. zbroken=>run( ). ENDMETHOD. ENDCLASS.`);
+    writeFileSync(join(dir, "zbroken.clas.abap"), `CLASS zbroken DEFINITION PUBLIC.
+ PUBLIC SECTION. CLASS-METHODS run. ENDCLASS.
+ CLASS zbroken IMPLEMENTATION. METHOD run. DATA x TYPE any. ENDMETHOD. ENDCLASS.`);
+    const options = {folders: [dir], objects: ["zentry"]};
+    const program = compileClosedProgram(options);
+    assert.ok(program.diagnostics.some(d => d.object.toUpperCase() === "ZBROKEN"));
+    assert.ok(!program.classes.some(c => c.name === "ZBROKEN"));
+    assert.throws(() => compileClosedProgram({...options, objects: ["zbroken"]}), /cannot be generic/);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});

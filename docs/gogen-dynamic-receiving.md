@@ -22,6 +22,7 @@ rows deliberately follow the requested dynamic-call exception policy:
 | Case | Node measurement | Go and IR-JS |
 | --- | --- | --- |
 | Unknown class | CX_SY_DYN_CALL_ILLEGAL_CLASS | Same, caught by CX_ROOT |
+| Lowercase literal method name (`val`) | `42` | `42` |
 | Unknown method | CX_SY_DYN_CALL_ILLEGAL_METHOD | Same, caught by CX_ROOT |
 | Wrong RECEIVING name | Silent success | CX_SY_DYN_CALL_PARAM_NOT_FOUND |
 | No RETURNING parameter | JavaScript TypeError | CX_SY_DYN_CALL_PARAM_NOT_FOUND |
@@ -73,3 +74,34 @@ Each new row failed on at least one original backend. Node agreed with all eight
 expected results. The semantics harness now lowers JS independently so Go cannot
 populate its constants before JS emission. A frontend test also checks both
 emitter orders and rejects constant selection during emission.
+
+
+Round 3 rebases onto main's DDLS cache-key fix (#777). The native report
+builder now uses `frontend-closure.mjs`, shared with semantics: it consumes
+`program.missing` and superclass dependencies until selection stops growing.
+Previously only the semantics and unit hosts consumed those dependencies;
+`osabap` compiled its source-derived object list once. A dynamic call discovered
+in a subsequently selected class could therefore name an available exception
+that the native binary never compiled. The regression starts with only an
+entry class and checks the callee and every available dynamic-call exception
+are actually compiled. Explicit inputs retain strict syntax checking. Newly
+discovered unsupported library definitions retain their diagnostics and runtime
+refusals; a separate attempted set prevents endless retries of a broken
+dependency. Absent exception definitions still refuse at dispatch.
+
+Parenthesized literal method names are normalized to uppercase, matching the
+measured Node `val` row (`42`); SAP is unmeasured. Dynamic public signatures
+exclude hidden `suppliedOf` parameters on both emitters: `EXPORTING sup_p = 123`
+raises `CX_SY_DYN_CALL_PARAM_NOT_FOUND`, while ordinary optional arguments still
+set their hidden flags. IS SUPPLIED discovery and lowering read Compare nodes
+and direct tokens through a finite-state matcher, so `'p IS SUPPLIED'` inside a
+string comparison creates no hidden parameter and compiles normally.
+
+Round 3 validation: full semantics (229 rows on each emitter), dynamic-call
+and frontend tests, raw-DDLS cache tests with symlink preservation and serial
+tests, Go runtime tests, both unit-host suites, native optional-logger smoke,
+TypeScript, size budget and host-I/O guard pass. The single E.10 attempt failed
+during dependency syntax checking before the final dependency-policy correction
+was loaded; it created no database and did not establish rows greater than zero.
+The corrected policy passed the native smoke and full semantics afterwards.
+The real-system attempt was not repeated because the request allowed one run.

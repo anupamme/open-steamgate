@@ -752,7 +752,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
         `\t\t\t${v} = ${byRef(p) && p.optional && p.default === undefined ? `new(${goType(p.type)})` : absent}`, `\t\t}`);
       return v;
     });
-    append(out, [`\tabap.RegisterStatic(${JSON.stringify(key)}, ${goStrings(m.params.filter((p) => p.dir === "importing").map((p) => p.name))}, ${JSON.stringify(m.returning?.name ?? "")}, func(s *abap.Session, a map[string]abap.Data) any {`], lines, [`\t\t${m.returning ? "return " : ""}${funcName(cls.name, m.name)}(${["s", ...args].join(", ")})`, ...(m.returning ? [] : ["\t\treturn nil"]), "\t})"]);
+    append(out, [`\tabap.RegisterStatic(${JSON.stringify(key)}, ${goStrings(m.params.filter((p) => p.dir === "importing" && !p.suppliedOf).map((p) => p.name))}, ${JSON.stringify(m.returning?.name ?? "")}, func(s *abap.Session, a map[string]abap.Data) any {`], lines, [`\t\t${m.returning ? "return " : ""}${funcName(cls.name, m.name)}(${["s", ...args].join(", ")})`, ...(m.returning ? [] : ["\t\treturn nil"]), "\t})"]);
   }
   out.push("}", "");
   return out;

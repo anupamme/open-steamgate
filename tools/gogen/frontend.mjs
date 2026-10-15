@@ -37,7 +37,7 @@ import * as RIR from "../sqlscript-ir.mjs";
 import {lower as lowerRelation} from "../sqlscript-lower.mjs";
 import {hostPred as rangeHostPred} from "../ir-ranges.mjs";
 import * as WIR from "../ir-writes.mjs";
-import {samcOf, cdsMappingError, rearrangedClass, inlineTableLocals, nativeMethodBody} from "./frontend-analysis.mjs";
+import {samcOf, suppliedMethods, suppliedComparison, cdsMappingError, rearrangedClass, inlineTableLocals, nativeMethodBody} from "./frontend-analysis.mjs";
 import {join} from "./host-io.ts";
 import {caughtOnce, chainHas} from "./frontend-hierarchy.mjs";
 import {typeKindOf, typeOf, rttiNamed, structOf, fieldOf, namedType} from "./frontend-types-signatures.mjs";
@@ -408,24 +408,6 @@ export function whereColumns(t) {
  * filled in at each call. Keyed by the class that declares the method, so a
  * redefinition and the class interface keep one signature.
  */
-// per parsed file, the methods that ask IS SUPPLIED: a closure build calls
-// suppliedParams once a round over the same registry (abapiti's Registry
-// set, 2110 classes: 10 s of a 104 s build before this)
-/** @type {WeakMap<import("@abaplint/core").ABAPFile, import("./frontend-types.ts").SuppliedMethod[]>} */ const suppliedOfFile = new WeakMap();
-/** @param {import("@abaplint/core").ABAPFile} file @returns {import("./frontend-types.ts").SuppliedMethod[]} */ function suppliedMethods(file) {
-  let methods = suppliedOfFile.get(file);
-  if (methods) return methods;
-  methods = [];
-  // the parsed structure, not the raw text: a macro of another include can
-  // bring the IS SUPPLIED in (#694 critic)
-  for (const m of file.getStructure()?.findAllStructures(Structures.Method) ?? []) {
-    const found = [...m.concatTokens().matchAll(/(\w+)\s+IS\s+(?:NOT\s+)?SUPPLIED/gi)].map((x) => upper(x[1]));
-    methods.push({name: upper(m.findFirstExpression(Expressions.MethodName).concatTokens()), found});
-  }
-  suppliedOfFile.set(file, methods);
-  return methods;
-}
-
 /** the hidden SUP_<p> parameters of a method, after its own */
 /** @param {import("./frontend-types.ts").FrontendProgram} program @param {string} key @param {readonly import("./frontend-types.ts").FrontendParam[]} params @returns {readonly import("./frontend-types.ts").FrontendParam[]} */ function withSupplied(program, key, params) {
   /** @type {Set<string> | undefined} */ const set = suppliedAnswer(program, key);
@@ -5807,11 +5789,12 @@ const FUNCTIONS = {
     /** @type {import("./ir.ts").Condition} */ const result = {c: "instance_of", x: value, type: target, initial: upcastable(ctx.reg, value.type, target)};
     return /\bIS\s+NOT\s+INSTANCE\s+OF\b/.test(text) !== not ? {c: "not", x: result} : result;
   }
-  if (/\bIS\s+(NOT\s+)?SUPPLIED\b/.test(text)) {
-    const nm = upper(/^(?:NOT\s+)?(\S+)\s+IS\b/.exec(text)?.[1] ?? "");
+  const supplied = suppliedComparison(node);
+  if (supplied) {
+    const nm = supplied.name;
     if (!ctx.sig.params.some((p) => p.suppliedOf === nm)) throw new Unsupported(`${nm} IS SUPPLIED: not a parameter this method's declaration tracks`);
     /** @type {import("./ir.ts").Condition} */ const r = {c: "not", x: {c: "initial", x: {e: "var", name: `SUP_${nm}`, type: C(1)}}};
-    return /\bIS\s+NOT\s+SUPPLIED\b/.test(text) !== not ? {c: "not", x: r} : r;
+    return supplied.negated !== not ? {c: "not", x: r} : r;
   }
   if (/\bIS\s+(NOT\s+)?ASSIGNED\b/.test(text)) {
     const nm = /<[\w]+>/.exec(text)?.[0];

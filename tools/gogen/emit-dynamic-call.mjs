@@ -57,7 +57,7 @@ export function staticRegistryJs(program, {definable, zero, unwrapTo, composite,
       lines.push(`  const ${v} = ${JSON.stringify(p.name)} in a ? ${read} : ${absent};`);
       return v;
     });
-    append(out, [`abap.registerStatic(${JSON.stringify(key)}, ${JSON.stringify(m.params.filter((p) => p.dir === "importing").map((p) => p.name))}, ${JSON.stringify(m.returning?.name ?? "")}, (s, a) => {`], lines, [`  ${m.returning ? "return " : ""}${typeName(cls.name)}.${typeName(m.name)}(${["s", ...args].join(", ")});`, "});"]);
+    append(out, [`abap.registerStatic(${JSON.stringify(key)}, ${JSON.stringify(m.params.filter((p) => p.dir === "importing" && !p.suppliedOf).map((p) => p.name))}, ${JSON.stringify(m.returning?.name ?? "")}, (s, a) => {`], lines, [`  ${m.returning ? "return " : ""}${typeName(cls.name)}.${typeName(m.name)}(${["s", ...args].join(", ")});`, "});"]);
   }
   out.push("");
   return out;

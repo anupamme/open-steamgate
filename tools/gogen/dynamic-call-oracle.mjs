@@ -13,10 +13,10 @@ export async function dynamicCallOracle(home, core, fixtures) {
     (p.endsWith(".clas.abap") || p.endsWith(".intf.abap")) && (names.includes(p.split("/").at(-1).split(".")[0]) || p.endsWith("if_message.intf.abap"))
     || p.endsWith(".xml") && ["dtel", "doma", "tabl", "ttyp"].includes(p.split(".").at(-2)))
     .map((p) => ({filename: p.split("/").at(-1), contents: readFileSync(join(core, p), "utf8")}));
-  for (const n of ["zcl_gogen_t_dynrecvstruct", "zcl_gogen_t_dynrecvany", "zcl_gogen_t_dynrecvcomposite", "zcl_gogen_dynbase", "zcl_gogen_t_dynrecvclosure", "zcl_gogen_t_dynrecvchild", "zcl_gogen_t_dynrecvalias", "zcl_gogen_t_dynrecvfs", "zcl_gogen_t_dynrecvdefault", "zcl_lnt_p_base_chai", "zcl_gogen_t_dynrecv", "zcl_gogen_t_dynrecvnf", "zcl_gogen_t_dynrecverr", "cx_sy_dyn_call_param_missing"])
+  for (const n of ["zcl_gogen_t_dynrecvcase", "zcl_gogen_t_dynrecvstruct", "zcl_gogen_t_dynrecvany", "zcl_gogen_t_dynrecvcomposite", "zcl_gogen_dynbase", "zcl_gogen_t_dynrecvclosure", "zcl_gogen_t_dynrecvchild", "zcl_gogen_t_dynrecvalias", "zcl_gogen_t_dynrecvfs", "zcl_gogen_t_dynrecvdefault", "zcl_lnt_p_base_chai", "zcl_gogen_t_dynrecv", "zcl_gogen_t_dynrecvnf", "zcl_gogen_t_dynrecverr", "cx_sy_dyn_call_param_missing"])
     files.push({filename: `${n}.clas.abap`, contents: readFileSync(join(fixtures, `${n}.clas.abap`), "utf8")});
   files.push({filename: "zif_gogen_dynval.intf.abap", contents: readFileSync(join(fixtures, "zif_gogen_dynval.intf.abap"), "utf8")});
-  const matched = ["ZCL_GOGEN_T_DYNRECVSTRUCT", "ZCL_GOGEN_T_DYNRECVANY", "ZCL_GOGEN_T_DYNRECVCOMPOSITE", "ZCL_GOGEN_T_DYNRECVCLOSURE", "ZCL_GOGEN_T_DYNRECVCHILD", "ZCL_GOGEN_T_DYNRECVALIAS", "ZCL_GOGEN_T_DYNRECVFS", "ZCL_GOGEN_T_DYNRECVDEFAULT", "ZCL_GOGEN_T_DYNRECV", "ZCL_GOGEN_T_DYNRECVNF"];
+  const matched = ["ZCL_GOGEN_T_DYNRECVCASE", "ZCL_GOGEN_T_DYNRECVSTRUCT", "ZCL_GOGEN_T_DYNRECVANY", "ZCL_GOGEN_T_DYNRECVCOMPOSITE", "ZCL_GOGEN_T_DYNRECVCLOSURE", "ZCL_GOGEN_T_DYNRECVCHILD", "ZCL_GOGEN_T_DYNRECVALIAS", "ZCL_GOGEN_T_DYNRECVFS", "ZCL_GOGEN_T_DYNRECVDEFAULT", "ZCL_GOGEN_T_DYNRECV", "ZCL_GOGEN_T_DYNRECVNF"];
   const probes = [
     ["name", "TXT", "RECEIVING wrong = target", "success"],
     ["none", "VOID", "RECEIVING result = target", "TypeError"],
@@ -54,6 +54,10 @@ export async function dynamicCallOracle(home, core, fixtures) {
 }
 
 export const DYNAMIC_EXPECT = {
+  // Node measured; SAP unmeasured. Parenthesized literal method names ignore case.
+  ZCL_GOGEN_T_DYNRECVCASE: "42",
+  // Hidden parameters are compiler implementation details; SAP unmeasured.
+  ZCL_GOGEN_T_DYNRECVSUPPLIED: "42/7/CX_SY_DYN_CALL_PARAM_NOT_FOUND/literal",
   ZCL_GOGEN_T_DYNRECVSTRUCT: "42",
   ZCL_GOGEN_T_DYNRECVANY: "42",
   ZCL_GOGEN_T_DYNRECVCOMPOSITE: "9",

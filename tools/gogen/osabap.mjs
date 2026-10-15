@@ -7,7 +7,7 @@ import {writeGo, reportSymbols} from "./symbols.ts";
 import {execFileSync} from "node:child_process";
 import {copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {basename, dirname, join, resolve} from "node:path";
-import {compileProgram} from "./frontend.mjs";
+import {compileClosedProgram} from "./frontend-closure.mjs";
 import {home} from "./home.mjs";
 import {checkLibPins} from "./lib-pins.mjs";
 import {libraryPath} from "../osd-lib-path.mjs";
@@ -237,7 +237,7 @@ const rttiObjects = readdirSync(join(core, "rtti"))
   .filter((file) => /^cl_abap_.*\.clas\.abap$/i.test(file))
   .map((file) => file.replace(/\.clas\.abap$/i, ""));
 const appRuntime = join(here, "apps", "runtime");
-const program = compileProgram({
+const program = compileClosedProgram({
   folders: [...libs, appRuntime, join(gui, "framework"), join(gui, "src"), core, generated],
   objects: [className.toLowerCase(), ...ownObjects, ...coreObjects, ...hostObjects, ...rttiObjects, "zcl_gg_workbench_utility",
     "cl_gui_control", "cl_gui_container", "cl_gui_cfw", "cl_gui_frontend_services", "zcl_osabap_runtime"],
