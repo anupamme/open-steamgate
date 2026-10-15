@@ -1,4 +1,4 @@
-import {checkDemoCopies} from "./semantics-fixtures.mjs";
+import {checkDemoCopies, compileSemantics} from "./semantics-fixtures.mjs";
 import {DYNAMIC_EXPECT, checkDynamicCallOracle} from "./dynamic-call-oracle.mjs";
 import {copyJsRuntime} from "./copy-js-runtime.mjs";
 import {writeGo} from "./symbols.ts";
@@ -898,7 +898,7 @@ const groups = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".fu
 // the roots of the exception classes, and get_text( )'s helper, compiled
 // out of open-abap-core as the gateway compiles them
 // and RTTI (ultra/json: describe_by_data, ZCL_GOGEN_T_RTTI)
-const CORE = ["ZCL_LNT_P_BASE_CHAI", "CX_SY_DYN_CALL_ILLEGAL_CLASS", "CX_SY_DYN_CALL_ILLEGAL_METHOD", "CX_SY_DYN_CALL_PARAM_NOT_FOUND", "CX_SY_DYN_CALL_PARAM_MISSING", "CX_SY_DYN_CALL_ILLEGAL_TYPE", "CX_SY_ZERODIVIDE", "CX_SY_ARITHMETIC_ERROR", "CX_SY_CONVERSION_NO_NUMBER", "CX_SY_CONVERSION_ERROR", "KERNEL_INTERNAL_NAME", "CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER", "CL_ABAP_CONV_OUT_CE", "CL_ABAP_CONV_IN_CE", "CL_ABAP_REGEX", "CL_HTTP_UTILITY",
+const CORE = ["ZCL_LNT_P_BASE_CHAI", "CX_SY_ZERODIVIDE", "CX_SY_ARITHMETIC_ERROR", "CX_SY_CONVERSION_NO_NUMBER", "CX_SY_CONVERSION_ERROR", "KERNEL_INTERNAL_NAME", "CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER", "CL_ABAP_CONV_OUT_CE", "CL_ABAP_CONV_IN_CE", "CL_ABAP_REGEX", "CL_HTTP_UTILITY",
   "ZCL_AJSON", "ZIF_AJSON", "ZIF_AJSON_TYPES", "ZCX_AJSON_ERROR", "CL_ABAP_MESSAGE_DIGEST", "CX_ABAP_MESSAGE_DIGEST",
   "CL_ABAP_TYPEDESCR", "CL_ABAP_DATADESCR", "CL_ABAP_ELEMDESCR", "CL_ABAP_COMPLEXDESCR", "CL_ABAP_STRUCTDESCR", "CL_ABAP_TABLEDESCR", "CL_ABAP_REFDESCR", "CL_ABAP_OBJECTDESCR", "CL_ABAP_CLASSDESCR", "CL_ABAP_INTFDESCR",
   // and open-abap-core's JSON reader (ZCL_GOGEN_T_JSONDES)
@@ -906,7 +906,7 @@ const CORE = ["ZCL_LNT_P_BASE_CHAI", "CX_SY_DYN_CALL_ILLEGAL_CLASS", "CX_SY_DYN_
   // raw DEFLATE and zip (parity-wave2, ZCL_GOGEN_T_GZIP, ZCL_GOGEN_T_ZIP)
   "CL_ABAP_GZIP", "CL_ABAP_ZIP"];
 await checkDynamicCallOracle(selected, home, core, join(here, "testdata"));
-const program = compileProgram({folders: [join(here, "testdata"), core, ajson], objects: [...objects, ...(objects.includes("zcl_gogen_t__pilot") ? ["zcl_gogen_t_pilchild"] : []), ...groups, ...CORE]});
+const program = compileSemantics({folders: [join(here, "testdata"), core, ajson], objects: [...objects, ...(objects.includes("zcl_gogen_t__pilot") ? ["zcl_gogen_t_pilchild"] : []), ...groups, ...CORE]});
 // the classes that carry a test: a static RUN of their own (the others are
 // the classes those tests use)
 objects = objects.filter((o) => program.classes.find((c) => c.name === o.toUpperCase())?.methods.some((m) => m.name === "RUN" && m.static));
@@ -939,7 +939,8 @@ rmSync(datasetRoot, {recursive: true, force: true});
 mkdirSync(datasetRoot, {recursive: true});
 const goOut = execFileSync("go", ["run", "./cmd/semantics"], {cwd: join(here, "go"),
   env: {...process.env, OSD_DATASET_READ: "", OSD_DATASET_WRITE: datasetRoot, OSD_DATASET_HOME: ""}}).toString();
-writeFileSync(join(out, "t.mjs"), emitJs(program));
+// Independent lowering prevents Go emission from selecting constants for JS.
+writeFileSync(join(out, "t.mjs"), emitJs(compileSemantics({folders: [], registry: program.reg, objects: [...program.wanted]})));
 copyJsRuntime(out);
 const m = await import(pathToFileURL(join(out, "t.mjs")).href);
 let bad = 0;

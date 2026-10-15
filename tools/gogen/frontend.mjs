@@ -1,5 +1,5 @@
 import {normalizeSource} from "./frontend-source.mjs";
-import {dynamicStaticCall} from "./frontend-dynamic-call.mjs";
+import {dynamicStaticCall, prepareDynamicStatics} from "./frontend-dynamic-call.mjs";
 import {require, abaplint, Rearranger, Nodes, Statements, Structures, Expressions, BasicTypes,
   Unsupported, notInProgram, I, F, INT8, P31, S, C, X, XS, EXC, isExpr, isStmt, isStruct, isTok,
   tokenStr, upper, goName, refuseSorted, sameSort, sameType, composite, byRef, numeric, charlike} from "./frontend-base.mjs";
@@ -217,7 +217,7 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
     pending = [...program.interfaces].filter((n) => !program.interfaceMethods.has(n));
   }
   });
-  program.rtti = finalOutput(reg, "rtti", () => rttiTable(reg, program));
+  finalOutput(reg, "dynamic-statics", () => prepareDynamicStatics(program, {defaultValue, aliasTarget})); program.rtti = finalOutput(reg, "rtti", () => rttiTable(reg, program));
   program.exceptionSupers = finalOutput(reg, "exception-supers", () => exceptionSupers(reg, program));
   program.cdsViews = cdsViewsByRegistry.get(reg) ?? cdsViewsByRegistry.get(inputOrigin(reg)) ?? {};
   program.tables = finalOutput(reg, "tables", () => tableRegistry(reg, program));

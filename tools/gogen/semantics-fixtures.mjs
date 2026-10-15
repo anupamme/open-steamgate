@@ -1,3 +1,4 @@
+import {compileProgram} from "./frontend.mjs";
 import {existsSync, readFileSync, readdirSync} from "node:fs";
 import {join} from "node:path";
 
@@ -11,4 +12,16 @@ export function checkDemoCopies(here, home) {
     if (readFileSync(theirs, "utf8") !== readFileSync(join(here, "testdata", f), "utf8")) demoDrift.push(f);
   }
   return demoDrift;
+}
+
+// Exercise the same missing-class and superclass closure as the unit hosts,
+// without selecting runtime exception classes by name in the fixture roots.
+export function compileSemantics(options) {
+  let program = compileProgram(options);
+  for (;;) {
+    const supers = [...program.wanted].map(n => program.reg.getObject("CLAS", n)?.getDefinition()?.getSuperClass()?.toUpperCase()).filter(Boolean);
+    const more = [...program.missing, ...supers].filter(n => !program.wanted.has(n) && program.reg.getObject("CLAS", n));
+    if (!more.length) return program;
+    program = compileProgram({...options, folders: [], registry: program.reg, objects: [...program.wanted, ...more]});
+  }
 }

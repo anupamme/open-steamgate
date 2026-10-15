@@ -1,4 +1,4 @@
-import {dynamicResultMoves} from "./emit-dynamic-call.mjs";
+import {dynamicResultMoves, dynamicAdapters} from "./emit-dynamic-call.mjs";
 import {env} from "./host-io.ts";
 import {append} from "./append.ts";
 import {typeName, funcName} from "./go-symbols.ts";
@@ -6,7 +6,7 @@ export {typeName, funcName} from "./go-symbols.ts";
 import {localConstant, localConstantDeclarations} from "./emit-local-constants.ts";
 import {constructorFactories} from "./emit-constructors.ts";
 import {analyzeTableMoves} from "./emit-table-move.ts";
-import {defaultValue, omittedFactoryCall} from "./frontend.mjs";
+import {omittedFactoryCall} from "./frontend.mjs";
 import {sinkLocals, generatedBindings} from "./sink-locals.ts";
 import {analyzeOwnership} from "./frontend-owned.ts";
 import {ownedExpression, ownedStatement, emitByteConcat} from "./emit-owned.ts";
@@ -121,6 +121,7 @@ const GO_RESERVED = new Set(("break default func interface select case defer go 
 // classes some compiled class inherits from: a reference to one is the Go
 // interface I_<class>, so it can hold any subclass; a leaf class stays *T
 /** @type {Set<string>} */ let POLY = new Set();
+/** @type {{key: string, owner: string, method: string, defaults: {name: string, value: import("./ir.ts").Expr}[]}[]} */ let DYNAMIC_DISPATCH = [];
 /** @type {Map<string, import("./emit-go-types.ts").Class>} */ let CLASSES = new Map();
 /** @type {Map<string, import("./ir.ts").Event>} */ let EVENTS = new Map();
 // descriptors of the types generic data binds to, generated at the end
@@ -333,7 +334,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   DESCS = new Map();
   NAMED = new Map();
   STRUCTDEFS = Array.isArray(program) ? structs : program.structs;
-  CLASSES = new Map((Array.isArray(program) ? classes : program.classes).map((c) => [c.name, c]));
+  DYNAMIC_DISPATCH = Array.isArray(program) ? [] : program.dynamicDispatch ?? []; CLASSES = new Map((Array.isArray(program) ? classes : program.classes).map((c) => [c.name, c]));
   POLY = new Set([...CLASSES.values()].map((c) => c.super).filter(Boolean));
   movePair = (/** @type {import("./emit-go-types.ts").AnalyzeTableMoves} */ (analyzeTableMoves))(program, stable, goType);
   HELPER_IMPORTS.add("hostclass");
@@ -735,24 +736,23 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   const wanted = program.dynStatics ?? new Set();
   if (wanted.size === 0) return [];
   const out = ["func init() {", `\tabap.KnownClasses(${goStrings(classes.map((c) => c.name))}, ${goStrings([...(program.rtti?.known ?? [])].filter((n) => !n.includes("=>")))})`];
-  for (const cls of classes) {
-    for (const m of [...cls.methods, ...(cls.stubs ?? [])]) {
-      if (!m.static || !wanted.has(m.name) || !definable(program, m)) continue;
-      /** @type {string[]} */ const lines = [];
-      const args = m.params.map((p, i) => {
-        const v = `v${i}`;
-        if (p.dir !== "importing") { lines.push(`\t\t${v} := new(${goType(p.type)})`); return v; }
-        if (p.suppliedOf) { lines.push(`\t\t${v} := ""`, `\t\tif _, ok := a[${JSON.stringify(p.suppliedOf)}]; ok {`, `\t\t\t${v} = "X"`, `\t\t}`); return v; }
-        /** @param {string} d @returns {string} */ const read = (d) => (["i", "string", "c", "d", "t"].includes(p.type.k) ? unwrapTo(p.type, d)
-          : p.type.k === "data" ? d : byRef(p) ? `${d}.P.(*${goType(p.type)})` : `*${d}.P.(*${goType(p.type)})`);
-        const absent = p.default !== undefined ? expr(defaultValue(p, {reg: program.reg, program, className: cls.name}), {cls, method: m, loop: 0}) : p.optional ? zero(p.type)
-          : `func() ${byRef(p) ? "*" : ""}${goType(p.type)} { abap.DynCallError("CX_SY_DYN_CALL_PARAM_MISSING", ${JSON.stringify(`${cls.name}=>${m.name} ${p.name}`)}); return ${byRef(p) ? "nil" : zero(p.type)} }()`;
-        lines.push(`\t\tvar ${v} ${byRef(p) ? "*" : ""}${goType(p.type)}`, `\t\tif d, ok := a[${JSON.stringify(p.name)}]; ok {`, `\t\t\t${v} = ${read("d")}`, `\t\t} else {`,
-          `\t\t\t${v} = ${byRef(p) && p.optional && p.default === undefined ? `new(${goType(p.type)})` : absent}`, `\t\t}`);
-        return v;
-      });
-      append(out, [`\tabap.RegisterStatic(${JSON.stringify(`${cls.name}=>${m.name}`)}, ${goStrings(m.params.filter((p) => p.dir === "importing").map((p) => p.name))}, ${JSON.stringify(m.returning?.name ?? "")}, func(s *abap.Session, a map[string]abap.Data) any {`], lines, [`\t\t${m.returning ? "return " : ""}${funcName(cls.name, m.name)}(${["s", ...args].join(", ")})`, ...(m.returning ? [] : ["\t\treturn nil"]), "\t})"]);
-    }
+  for (const {key, cls, m, defaults} of dynamicAdapters(program)) {
+    if (!classes.some(c => key.startsWith(`${c.name}=>`)) || !definable(program, m)) continue;
+    /** @type {string[]} */ const lines = [];
+    const args = m.params.map((p, i) => {
+      const v = `v${i}`;
+      if (p.dir !== "importing") { lines.push(`\t\t${v} := new(${goType(p.type)})`); return v; }
+      if (p.suppliedOf) { lines.push(`\t\t${v} := ""`, `\t\tif _, ok := a[${JSON.stringify(p.suppliedOf)}]; ok {`, `\t\t\t${v} = "X"`, `\t\t}`); return v; }
+      /** @param {string} d @returns {string} */ const read = (d) => (["i", "string", "c", "d", "t"].includes(p.type.k) ? unwrapTo(p.type, d)
+        : p.type.k === "data" ? d : byRef(p) ? `${d}.P.(*${goType(p.type)})` : `*${d}.P.(*${goType(p.type)})`);
+      let absent = p.default !== undefined ? expr(defaults.find(d => d.name === p.name).value, {cls, method: m, loop: 0}) : p.optional ? zero(p.type)
+        : `func() ${byRef(p) ? "*" : ""}${goType(p.type)} { abap.DynCallError("CX_SY_DYN_CALL_PARAM_MISSING", ${JSON.stringify(`${cls.name}=>${m.name} ${p.name}`)}); return ${byRef(p) ? "nil" : zero(p.type)} }()`;
+      if (byRef(p) && p.default !== undefined) absent = `func() *${goType(p.type)} { v := ${absent}; return &v }()`;
+      lines.push(`\t\tvar ${v} ${byRef(p) ? "*" : ""}${goType(p.type)}`, `\t\tif d, ok := a[${JSON.stringify(p.name)}]; ok {`, `\t\t\t${v} = ${read("d")}`, `\t\t} else {`,
+        `\t\t\t${v} = ${byRef(p) && p.optional && p.default === undefined ? `new(${goType(p.type)})` : absent}`, `\t\t}`);
+      return v;
+    });
+    append(out, [`\tabap.RegisterStatic(${JSON.stringify(key)}, ${goStrings(m.params.filter((p) => p.dir === "importing").map((p) => p.name))}, ${JSON.stringify(m.returning?.name ?? "")}, func(s *abap.Session, a map[string]abap.Data) any {`], lines, [`\t\t${m.returning ? "return " : ""}${funcName(cls.name, m.name)}(${["s", ...args].join(", ")})`, ...(m.returning ? [] : ["\t\treturn nil"]), "\t})"]);
   }
   out.push("}", "");
   return out;
@@ -1879,11 +1879,12 @@ ${t}	}`));
         ...stmtList(st.body, ctx, d + 2), `${t}\t}`, `${t}\ts.Sy.Tabix = save${n}`, `${t}}`];
     });
     case "call_dyn_static": {
-      const moves = st.receiving ? dynamicResultMoves(CLASSES.values(), st.method, st.receiving.target.type) : [];
+      const moves = st.receiving ? dynamicResultMoves({classes: [...CLASSES.values()], dynamicDispatch: DYNAMIC_DISPATCH}, st.method, st.receiving.target.type) : [];
       const call = `abap.CallStatic(s, ${expr(st.cls, ctx)}, ${JSON.stringify(st.method)}, map[string]abap.Data{${st.args.map((a) => `${JSON.stringify(a.name)}: ${expr(a.value, ctx)}`).join(", ")}}, ${JSON.stringify(st.receiving?.name ?? "")}, ${goStrings(moves.map((m) => m.key))})`;
       if (!st.receiving) return [`${t}${call}`];
       return [`${t}{`, `${t}\tdynKey, dynValue := ${call}`, `${t}\t_ = dynValue`, `${t}\tswitch dynKey {`,
-        ...moves.flatMap((m) => [`${t}\tcase ${JSON.stringify(m.key)}:`, `${t}\t\t${place(st.receiving.target, ctx)} = func(${ident("dyn_result")} ${goType(m.type)}) ${goType(st.receiving.target.type)} { return ${expr(m.value, ctx)} }(abap.Cast[${goType(m.type)}](dynValue))`]), `${t}\t}`, `${t}}`];
+        ...moves.flatMap((m) => [`${t}\tcase ${JSON.stringify(m.key)}:`,
+          ...stmt({s: st.receiving.target.type.k === "data" ? "set_data" : "assign", target: st.receiving.target, value: m.value}, ctx, d + 2)]), `${t}\t}`, `${t}}`];
     }
     case "select_table": {
       // INTO TABLE replaces the table; each row is scanned column by column
@@ -2210,6 +2211,7 @@ ${t}	}`));
   if (owned !== null) return owned;
   switch (e.e) {
     case "static": return place(e, ctx);
+    case "dyn_result": return `abap.Cast[${goType(e.type)}](dynValue)`;
     case "var": case "attr": case "field": case "fs": case "row": case "row_key": case "refattr": case "dref_field": return place(e, ctx);
     case "zero": return zero(e.type) === "nil" ? `(${goType(e.type)})(nil)` : zero(e.type);
     case "case_fn": return `abap.${e.upper ? "ToUpper" : "ToLower"}(${expr(e.x, ctx)})`;

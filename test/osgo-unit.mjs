@@ -81,14 +81,18 @@ describe("osgo unit CI entry point", function () {
     assert.equal(existsSync(resolve(result.buildDir)), false, "generated Go tree cleaned");
   });
   it("runs dynamic static RECEIVING and catchable signature errors on both hosts", () => {
-    for (const name of ["zcl_lnt_p_base_chai", "zcl_gogen_t_dynrecv", "zcl_gogen_t_dynrecvnf", "zcl_gogen_t_dynrecverr", "cx_sy_dyn_call_param_missing"])
+    for (const name of ["zcl_gogen_t_dynrecvstruct", "zcl_gogen_t_dynrecvany", "zcl_gogen_t_dynrecvcomposite", "zcl_gogen_dynbase", "zcl_gogen_t_dynrecvclosure", "zcl_gogen_t_dynrecvchild", "zcl_gogen_t_dynrecvalias", "zcl_gogen_t_dynrecvfs", "zcl_gogen_t_dynrecvdefault", "zcl_lnt_p_base_chai", "zcl_gogen_t_dynrecv", "zcl_gogen_t_dynrecvnf", "zcl_gogen_t_dynrecverr", "cx_sy_dyn_call_param_missing"])
       writeFileSync(join(input, `${name}.clas.abap`), readFileSync(join(root, "tools/gogen/testdata", `${name}.clas.abap`), "utf8"));
-    // Explicit type references select the exception classes for both closures.
+    writeFileSync(join(input, "zif_gogen_dynval.intf.abap"), readFileSync(join(root, "tools/gogen/testdata/zif_gogen_dynval.intf.abap")));
     fixture(input, "zcl_osgo_dynrecv", `
-      DATA ex_class TYPE REF TO cx_sy_dyn_call_illegal_class.
-      DATA ex_method TYPE REF TO cx_sy_dyn_call_illegal_method.
-      DATA ex_name TYPE REF TO cx_sy_dyn_call_param_not_found.
-      DATA ex_type TYPE REF TO cx_sy_dyn_call_illegal_type.
+      cl_abap_unit_assert=>assert_equals( act = zcl_gogen_t_dynrecvstruct=>run( ) exp = '42' ).
+      cl_abap_unit_assert=>assert_equals( act = zcl_gogen_t_dynrecvany=>run( ) exp = '42' ).
+      cl_abap_unit_assert=>assert_equals( act = zcl_gogen_t_dynrecvcomposite=>run( ) exp = '9' ).
+      cl_abap_unit_assert=>assert_equals( act = zcl_gogen_t_dynrecvclosure=>run( ) exp = 'caught' ).
+      cl_abap_unit_assert=>assert_equals( act = zcl_gogen_t_dynrecvchild=>run( ) exp = '42' ).
+      cl_abap_unit_assert=>assert_equals( act = zcl_gogen_t_dynrecvalias=>run( ) exp = '42' ).
+      cl_abap_unit_assert=>assert_equals( act = zcl_gogen_t_dynrecvfs=>run( ) exp = '42' ).
+      cl_abap_unit_assert=>assert_equals( act = zcl_gogen_t_dynrecvdefault=>run( ) exp = '7' ).
       cl_abap_unit_assert=>assert_equals( act = zcl_gogen_t_dynrecv=>run( ) exp = 'chai/42/abc/bound/default/0/initial' ).
       cl_abap_unit_assert=>assert_equals( act = zcl_gogen_t_dynrecvnf=>run( )
         exp = 'CX_SY_DYN_CALL_ILLEGAL_CLASS;root;CX_SY_DYN_CALL_ILLEGAL_METHOD;root;' ).
@@ -105,6 +109,29 @@ describe("osgo unit CI entry point", function () {
     const rows = JSON.parse(readFileSync(join(out, "results.json"), "utf8"));
     assert.equal(rows.length, 1);
     assert.equal(rows[0].status, "SUCCESS", JSON.stringify(rows));
+  });
+  it("refuses a dynamic-call exception genuinely absent from the core on both hosts", () => {
+    writeFileSync(join(input, "zcl_missing_param.clas.abap"), `
+      CLASS zcl_missing_param DEFINITION PUBLIC FINAL CREATE PUBLIC.
+        PUBLIC SECTION. CLASS-METHODS need IMPORTING p TYPE i RETURNING VALUE(r) TYPE i.
+      ENDCLASS.
+      CLASS zcl_missing_param IMPLEMENTATION.
+        METHOD need. r = p. ENDMETHOD.
+      ENDCLASS.`);
+    fixture(input, "zcl_missing_caller", `DATA n TYPE i.
+      TRY. CALL METHOD ('ZCL_MISSING_PARAM')=>('NEED') RECEIVING r = n.
+      CATCH cx_root. cl_abap_unit_assert=>fail( ). ENDTRY.`);
+    const go = invoke(input, ["--json"]);
+    assert.equal(go.status, 2, go.stdout + go.stderr);
+    assert.equal(JSON.parse(go.stdout).totals.not_compiled, 1);
+    assert.match(go.stdout, /CX_SY_DYN_CALL_PARAM_MISSING/);
+    const out = join(temp, "missing-param-irjs");
+    const js = spawnSync(process.execPath, [join(root, "tools/gogen/unit-js.mjs"), "--fixture", input, "--out", out],
+      {cwd: root, encoding: "utf8", timeout: 180000, maxBuffer: 5e6});
+    assert.equal(js.error, undefined, js.stderr);
+    const rows = JSON.parse(readFileSync(join(out, "results.json"), "utf8"));
+    assert.equal(rows[0].status, "NOT_COMPILED", JSON.stringify(rows));
+    assert.match(JSON.stringify(rows), /CX_SY_DYN_CALL_PARAM_MISSING/);
   });
   it("runs character-set positions, fixed-width blanks and short circuits on both emitters", () => {
     const name = "zcl_gogen_t_setpos";

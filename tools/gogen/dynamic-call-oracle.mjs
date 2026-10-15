@@ -13,9 +13,10 @@ export async function dynamicCallOracle(home, core, fixtures) {
     (p.endsWith(".clas.abap") || p.endsWith(".intf.abap")) && (names.includes(p.split("/").at(-1).split(".")[0]) || p.endsWith("if_message.intf.abap"))
     || p.endsWith(".xml") && ["dtel", "doma", "tabl", "ttyp"].includes(p.split(".").at(-2)))
     .map((p) => ({filename: p.split("/").at(-1), contents: readFileSync(join(core, p), "utf8")}));
-  for (const n of ["zcl_lnt_p_base_chai", "zcl_gogen_t_dynrecv", "zcl_gogen_t_dynrecvnf", "zcl_gogen_t_dynrecverr", "cx_sy_dyn_call_param_missing"])
+  for (const n of ["zcl_gogen_t_dynrecvstruct", "zcl_gogen_t_dynrecvany", "zcl_gogen_t_dynrecvcomposite", "zcl_gogen_dynbase", "zcl_gogen_t_dynrecvclosure", "zcl_gogen_t_dynrecvchild", "zcl_gogen_t_dynrecvalias", "zcl_gogen_t_dynrecvfs", "zcl_gogen_t_dynrecvdefault", "zcl_lnt_p_base_chai", "zcl_gogen_t_dynrecv", "zcl_gogen_t_dynrecvnf", "zcl_gogen_t_dynrecverr", "cx_sy_dyn_call_param_missing"])
     files.push({filename: `${n}.clas.abap`, contents: readFileSync(join(fixtures, `${n}.clas.abap`), "utf8")});
-  const matched = ["ZCL_GOGEN_T_DYNRECV", "ZCL_GOGEN_T_DYNRECVNF"];
+  files.push({filename: "zif_gogen_dynval.intf.abap", contents: readFileSync(join(fixtures, "zif_gogen_dynval.intf.abap"), "utf8")});
+  const matched = ["ZCL_GOGEN_T_DYNRECVSTRUCT", "ZCL_GOGEN_T_DYNRECVANY", "ZCL_GOGEN_T_DYNRECVCOMPOSITE", "ZCL_GOGEN_T_DYNRECVCLOSURE", "ZCL_GOGEN_T_DYNRECVCHILD", "ZCL_GOGEN_T_DYNRECVALIAS", "ZCL_GOGEN_T_DYNRECVFS", "ZCL_GOGEN_T_DYNRECVDEFAULT", "ZCL_GOGEN_T_DYNRECV", "ZCL_GOGEN_T_DYNRECVNF"];
   const probes = [
     ["name", "TXT", "RECEIVING wrong = target", "success"],
     ["none", "VOID", "RECEIVING result = target", "TypeError"],
@@ -31,7 +32,7 @@ export async function dynamicCallOracle(home, core, fixtures) {
   const saved = globalThis.abap;
   const abap = globalThis.abap = new ABAP({console: new MemoryConsole()});
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-  const rank = (o) => { const i = ["if_message", ...names, "cx_sy_dyn_call_param_missing"].indexOf(o.filename.split(".")[0]); return i < 0 ? 99 : i; };
+  const rank = (o) => { const i = ["if_message", ...names, "cx_sy_dyn_call_param_missing", "zif_gogen_dynval", "zcl_gogen_dynbase"].indexOf(o.filename.split(".")[0]); return i < 0 ? 99 : i; };
   try {
     const chunks = output.objects.filter((o) => !o.filename.endsWith(".prog.mjs")).sort((a, b) => rank(a) - rank(b)).map((o) =>
       o.chunk.getCode().split("\n").filter((l) => !l.startsWith("import ")).join("\n").replaceAll("export class ", "class "));
@@ -53,6 +54,16 @@ export async function dynamicCallOracle(home, core, fixtures) {
 }
 
 export const DYNAMIC_EXPECT = {
+  ZCL_GOGEN_T_DYNRECVSTRUCT: "42",
+  ZCL_GOGEN_T_DYNRECVANY: "42",
+  ZCL_GOGEN_T_DYNRECVCOMPOSITE: "9",
+
+  ZCL_GOGEN_T_DYNRECVCLOSURE: "caught",
+  ZCL_GOGEN_T_DYNRECVCHILD: "42",
+  ZCL_GOGEN_T_DYNRECVALIAS: "42",
+  ZCL_GOGEN_T_DYNRECVFS: "42",
+  ZCL_GOGEN_T_DYNRECVDEFAULT: "7",
+
   // Node measured on 2026-10-15; SAP unmeasured; measure on A4H.
   ZCL_GOGEN_T_DYNRECV: "chai/42/abc/bound/default/0/initial",
   ZCL_GOGEN_T_DYNRECVNF: "CX_SY_DYN_CALL_ILLEGAL_CLASS;root;CX_SY_DYN_CALL_ILLEGAL_METHOD;root;",

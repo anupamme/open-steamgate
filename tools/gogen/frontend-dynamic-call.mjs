@@ -1,4 +1,5 @@
-import {Expressions, isTok, isExpr, S, Unsupported} from "./frontend-base.mjs";
+import {Expressions, isTok, isExpr, S, Unsupported, goName} from "./frontend-base.mjs";
+
 // Static dispatch through a run-time class name. Parenthesized literal
 // method names share the same adapter as an ordinary identifier; the class
 // stays dynamic even when both names happen to be literals.
@@ -31,6 +32,45 @@ export function dynamicStaticCall(node, ctx, {sourceOperand, source, convert, lv
   const rp = mp?.findDirectExpression(Expressions.ParameterT);
   const receiving = rp ? {name: rp.findDirectExpression(Expressions.ParameterName).concatTokens().toUpperCase(),
     target: lvalue(rp.findDirectExpression(Expressions.Target), ctx)} : null;
+  for (const name of ["CX_SY_DYN_CALL_ILLEGAL_CLASS", "CX_SY_DYN_CALL_ILLEGAL_METHOD", "CX_SY_DYN_CALL_PARAM_NOT_FOUND", "CX_SY_DYN_CALL_PARAM_MISSING", "CX_SY_DYN_CALL_ILLEGAL_TYPE"]) {
+    for (let n = name; n;) {
+      const def = ctx.reg.getObject("CLAS", n)?.getDefinition();
+      if (!def) break;
+      ctx.program.missing.add(n);
+      n = def.getSuperClass()?.toUpperCase();
+    }
+  }
   ctx.program.dynStatics.add(method);
   return {s: "call_dyn_static", cls, method, args, receiving};
+}
+
+// Resolve once during lowering: registration and result conversion consume the
+// same called-key -> implementation identity. Defaults must register constants
+// before either emitter writes program.consts.
+export function prepareDynamicStatics(program, {defaultValue, aliasTarget}) {
+  program.dynamicDispatch = [];
+  for (const cls of program.classes) for (const method of program.dynStatics) {
+    const name = aliasTarget(program.reg, cls.name, method) ?? method;
+    let owner = cls.name;
+    let impl;
+    const seen = new Set();
+    while (owner && !seen.has(owner)) {
+      seen.add(owner);
+      const c = program.classes.find((c) => c.name === owner);
+      impl = [...(c?.methods ?? []), ...(c?.stubs ?? [])].find((m) => m.name === name && m.static);
+      if (impl) break;
+      owner = c?.super;
+    }
+    if (!impl) continue;
+    const saved = [program.currentOwner, program.currentClass, program.currentTypes];
+    const defaults = [];
+    try {
+      program.currentOwner = owner.split(":")[0];
+      program.currentClass = goName(owner);
+      program.currentTypes = undefined;
+      for (const p of impl.params ?? []) if (p.default !== undefined)
+        defaults.push({name: p.name, value: defaultValue(p, {reg: program.reg, program, className: owner})});
+    } finally { [program.currentOwner, program.currentClass, program.currentTypes] = saved; }
+    program.dynamicDispatch.push({key: `${cls.name}=>${method}`, owner, method: name, defaults});
+  }
 }

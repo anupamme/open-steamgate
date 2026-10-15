@@ -39,6 +39,7 @@ export type Type = TypeMetadata & (
 
 export type Expr = ExprMetadata & (
   | { readonly e: 'field'; readonly base: Expr; readonly name: string; readonly type: Type }
+  | { readonly e: 'dyn_result'; readonly type: Type }
   | { readonly e: 'var'; readonly name: string; readonly type: Type; readonly ref?: boolean; readonly box?: boolean }
   | { readonly e: 'chars'; readonly value: string; readonly type: Type }
   | { readonly e: 'zero'; readonly type: Type }
@@ -293,6 +294,7 @@ export interface Program {
   readonly localInterfaces?: Map<string, {readonly def: ReturnType<abaplint.Objects.Interface['getDefinition']>; readonly source: string}>;
   readonly interfaceMethods?: Map<string, readonly Method[]>; readonly skipped?: readonly string[]; readonly missing?: Set<string>; readonly wanted?: Set<string>;
   readonly anonStructs?: Map<abaplint.AbstractType, string>; readonly badStructs?: Map<string, string>;
+  readonly dynamicDispatch?: {key: string; owner: string; method: string; defaults: {name: string; value: Expr}[]}[];
   readonly ddicOutputLen?: Map<string, number>; readonly excAttrs?: Set<string>; readonly dynStatics?: Set<string>;
   readonly intfOwnAttrs?: Map<string, readonly Attribute[]>; readonly interfaceAttrs?: Map<string, readonly Attribute[]>;
   readonly sigs?: Map<string, Method>; readonly broken?: readonly string[]; readonly partial?: readonly string[];

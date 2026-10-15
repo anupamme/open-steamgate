@@ -165,9 +165,10 @@ function bind(p, ctx) {
 }
 
 let DYNAMIC_CLASSES = [];
+let DYNAMIC_DISPATCH = [];
 
 export function emitJs(program, runtimeUrl = "./abap.mjs") {
-  DYNAMIC_CLASSES = program.classes;
+  DYNAMIC_CLASSES = program.classes; DYNAMIC_DISPATCH = program.dynamicDispatch;
   const factories = constructorFactories(program);
   STRUCTS = program.structs;
   DESCS = new Map();
@@ -554,7 +555,7 @@ function stmtLines(st, ctx, d) {
         `${t}    s.sy.tabix = i${n} + 1; s.sy.subrc = 0;`, `${t}    ${ident(st.fs)} = abap.Row(tab${n}, i${n});`,
         ...st.body.flatMap((x) => stmt(x, ctx, d + 2)), `${t}  }`, `${t}  s.sy.tabix = save${n};`, `${t}}`];
     }
-    case "call_dyn_static": return dynamicCallJs(st, ctx, t, DYNAMIC_CLASSES, {expr, place, ident});
+    case "call_dyn_static": return dynamicCallJs(st, ctx, t, {classes: DYNAMIC_CLASSES, dynamicDispatch: DYNAMIC_DISPATCH}, {expr, stmt});
     // the JS side has no database: a SELECT is refused, not guessed
     case "select_dyn":
       return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`dynamic SELECT: the JS backend has no database (the Go host has SQLite)`)});`];
@@ -971,6 +972,7 @@ const FN = new Map([["SIN", "Math.sin"], ["COS", "Math.cos"], ["TAN", "Math.tan"
 function expr(e, ctx) {
   switch (e.e) {
     case "static": return place(e, ctx);
+    case "dyn_result": return "$dynValue";
     case "var": case "attr": case "field": case "fs": case "row": case "row_key": case "refattr": case "dref_field": return place(e, ctx);
     case "zero": return zero(e.type);
     case "case_fn": return `abap.${e.upper ? "ToUpper" : "ToLower"}(${expr(e.x, ctx)})`;
