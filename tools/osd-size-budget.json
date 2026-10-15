@@ -14,6 +14,10 @@
     "tools/gogen/js/abap.mjs"
   ],
   "budgets": {
+    "go:dyncall": {
+      "lines": 74,
+      "reason": "Extract dynamic static method name/signature dispatch from go/abap; generic host values and injected exception/refusal callbacks keep the package independent of ABAP binding glue."
+    },
     "tools/gogen/semantics.mjs": {
       "lines": 1029,
       "reason": "#708 rebased onto #712/#713: IR-JS pilot, Latin-1 and reference-identity expectations beside the local-constant and byte-width ones; the EXPECT table is data and moves to its own module when it next grows. Inbox 046: plain PCRE, escape, anchor and refusal expectations. Inbox 046 Round 4: strict absolute PCRE anchor translation after validation and unmeasured Go/JS anchor/refusal fixtures. gx1: add the unmeasured hex escape and UTF-16 span expectation beside existing FIND/REPLACE parity rows. Inbox 048: one shared exception-chain oracle row and its unmeasured A4H annotation; kernel/core dependencies stay on the existing CORE line. gx3: add the unmeasured newline-independent PCRE fixture expectation."

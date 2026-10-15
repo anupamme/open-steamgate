@@ -80,6 +80,32 @@ describe("osgo unit CI entry point", function () {
     assert.deepEqual(snapshot(input), before);
     assert.equal(existsSync(resolve(result.buildDir)), false, "generated Go tree cleaned");
   });
+  it("runs dynamic static RECEIVING and catchable signature errors on both hosts", () => {
+    for (const name of ["zcl_lnt_p_base_chai", "zcl_gogen_t_dynrecv", "zcl_gogen_t_dynrecvnf", "zcl_gogen_t_dynrecverr", "cx_sy_dyn_call_param_missing"])
+      writeFileSync(join(input, `${name}.clas.abap`), readFileSync(join(root, "tools/gogen/testdata", `${name}.clas.abap`), "utf8"));
+    // Explicit type references select the exception classes for both closures.
+    fixture(input, "zcl_osgo_dynrecv", `
+      DATA ex_class TYPE REF TO cx_sy_dyn_call_illegal_class.
+      DATA ex_method TYPE REF TO cx_sy_dyn_call_illegal_method.
+      DATA ex_name TYPE REF TO cx_sy_dyn_call_param_not_found.
+      DATA ex_type TYPE REF TO cx_sy_dyn_call_illegal_type.
+      cl_abap_unit_assert=>assert_equals( act = zcl_gogen_t_dynrecv=>run( ) exp = 'chai/42/abc/bound/default/0/initial' ).
+      cl_abap_unit_assert=>assert_equals( act = zcl_gogen_t_dynrecvnf=>run( )
+        exp = 'CX_SY_DYN_CALL_ILLEGAL_CLASS;root;CX_SY_DYN_CALL_ILLEGAL_METHOD;root;' ).
+      cl_abap_unit_assert=>assert_equals( act = zcl_gogen_t_dynrecverr=>run( )
+        exp = 'CX_SY_DYN_CALL_PARAM_NOT_FOUND;root;CX_SY_DYN_CALL_PARAM_NOT_FOUND;root;CX_SY_DYN_CALL_PARAM_NOT_FOUND;root;CX_SY_DYN_CALL_PARAM_MISSING;root;CX_SY_DYN_CALL_ILLEGAL_TYPE;root;' ).`);
+    const go = invoke(input, ["--json"]);
+    assert.equal(go.status, 0, go.stdout + go.stderr);
+    assert.deepEqual(JSON.parse(go.stdout).totals, {success: 1, failure: 0, not_compiled: 0, error: 0, tests: 1});
+    const out = join(temp, "dynamic-irjs");
+    const js = spawnSync(process.execPath, [join(root, "tools/gogen/unit-js.mjs"), "--fixture", input, "--out", out],
+      {cwd: root, encoding: "utf8", timeout: 180000, maxBuffer: 5e6});
+    assert.equal(js.error, undefined, js.stderr);
+    assert.equal(js.status, 0, js.stdout + js.stderr);
+    const rows = JSON.parse(readFileSync(join(out, "results.json"), "utf8"));
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].status, "SUCCESS", JSON.stringify(rows));
+  });
   it("runs character-set positions, fixed-width blanks and short circuits on both emitters", () => {
     const name = "zcl_gogen_t_setpos";
     for (const suffix of ["clas.abap", "clas.testclasses.abap"]) {

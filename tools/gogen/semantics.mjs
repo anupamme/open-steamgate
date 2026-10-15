@@ -1,3 +1,5 @@
+import {checkDemoCopies} from "./semantics-fixtures.mjs";
+import {DYNAMIC_EXPECT, checkDynamicCallOracle} from "./dynamic-call-oracle.mjs";
 import {copyJsRuntime} from "./copy-js-runtime.mjs";
 import {writeGo} from "./symbols.ts";
 // Each testdata class's static RUN returns a string, checked on both emitters.
@@ -14,6 +16,7 @@ import {emitJs} from "./emit-js.mjs";
 import {home} from "./home.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  ...DYNAMIC_EXPECT,
   // Node/open-abap-core measured 2026-10-15; SAP root superclass is unmeasured (measure on A4H).
   ZCL_GOGEN_T_SUPERC: "\\CLASS=ZCL_GOGEN_T_SUPERB/\\CLASS=ZCL_GOGEN_T_SUPERC/0/\\CLASS=ZCL_GOGEN_T_SUPERB/0/\\CLASS=ZCL_GOGEN_T_SUPERA/1/",
   // unmeasured; measure on A4H: exception widening, identity and mixed PREVIOUS chains.
@@ -881,13 +884,7 @@ const core = `${libraryPath(home, "open-abap-core")}/src`;
 const ajson = `${libraryPath(home, "ajson")}/src/core`;
 // the demo-data classes in testdata/ are copies of src/demo_data: when the
 // checkout has them (OSG_HOME), a copy that drifted is a failure
-const demoCopies = readdirSync(join(here, "testdata")).filter((f) => /^zcl_osd_demo_\w+\.clas\.abap$/.test(f)).sort();
-const demoDrift = [];
-for (const f of demoCopies) {
-  const theirs = join(home, "src", "demo_data", f);
-  if (!existsSync(theirs)) { console.log(`skip copy check ${f}: not in ${home}/src/demo_data`); continue; }
-  if (readFileSync(theirs, "utf8") !== readFileSync(join(here, "testdata", f), "utf8")) demoDrift.push(f);
-}
+const demoDrift = checkDemoCopies(here, home);
 // sorted: zcl_gogen_t_uncaught_read reads what zcl_gogen_t_uncaught left
 let objects = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".clas.abap")).map((f) => f.split(".")[0]).sort();
 // the function groups (parity-wave1: ZGOGEN_T_FG, called by ZCL_GOGEN_T_FM)
@@ -901,13 +898,14 @@ const groups = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".fu
 // the roots of the exception classes, and get_text( )'s helper, compiled
 // out of open-abap-core as the gateway compiles them
 // and RTTI (ultra/json: describe_by_data, ZCL_GOGEN_T_RTTI)
-const CORE = ["CX_SY_ZERODIVIDE", "CX_SY_ARITHMETIC_ERROR", "CX_SY_CONVERSION_NO_NUMBER", "CX_SY_CONVERSION_ERROR", "KERNEL_INTERNAL_NAME", "CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER", "CL_ABAP_CONV_OUT_CE", "CL_ABAP_CONV_IN_CE", "CL_ABAP_REGEX", "CL_HTTP_UTILITY",
+const CORE = ["ZCL_LNT_P_BASE_CHAI", "CX_SY_DYN_CALL_ILLEGAL_CLASS", "CX_SY_DYN_CALL_ILLEGAL_METHOD", "CX_SY_DYN_CALL_PARAM_NOT_FOUND", "CX_SY_DYN_CALL_PARAM_MISSING", "CX_SY_DYN_CALL_ILLEGAL_TYPE", "CX_SY_ZERODIVIDE", "CX_SY_ARITHMETIC_ERROR", "CX_SY_CONVERSION_NO_NUMBER", "CX_SY_CONVERSION_ERROR", "KERNEL_INTERNAL_NAME", "CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER", "CL_ABAP_CONV_OUT_CE", "CL_ABAP_CONV_IN_CE", "CL_ABAP_REGEX", "CL_HTTP_UTILITY",
   "ZCL_AJSON", "ZIF_AJSON", "ZIF_AJSON_TYPES", "ZCX_AJSON_ERROR", "CL_ABAP_MESSAGE_DIGEST", "CX_ABAP_MESSAGE_DIGEST",
   "CL_ABAP_TYPEDESCR", "CL_ABAP_DATADESCR", "CL_ABAP_ELEMDESCR", "CL_ABAP_COMPLEXDESCR", "CL_ABAP_STRUCTDESCR", "CL_ABAP_TABLEDESCR", "CL_ABAP_REFDESCR", "CL_ABAP_OBJECTDESCR", "CL_ABAP_CLASSDESCR", "CL_ABAP_INTFDESCR",
   // and open-abap-core's JSON reader (ZCL_GOGEN_T_JSONDES)
   "/UI2/CL_JSON", "CL_SXML_STRING_READER", "CX_SXML_PARSE_ERROR", "CX_SXML_ERROR", "CL_ABAP_CODEPAGE",
   // raw DEFLATE and zip (parity-wave2, ZCL_GOGEN_T_GZIP, ZCL_GOGEN_T_ZIP)
   "CL_ABAP_GZIP", "CL_ABAP_ZIP"];
+await checkDynamicCallOracle(selected, home, core, join(here, "testdata"));
 const program = compileProgram({folders: [join(here, "testdata"), core, ajson], objects: [...objects, ...(objects.includes("zcl_gogen_t__pilot") ? ["zcl_gogen_t_pilchild"] : []), ...groups, ...CORE]});
 // the classes that carry a test: a static RUN of their own (the others are
 // the classes those tests use)

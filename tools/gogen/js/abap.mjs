@@ -1160,19 +1160,29 @@ export function knownClasses(compiled, known) {
   for (const c of compiled) compiledClasses.add(c);
   for (const c of known) registryClasses.add(c);
 }
-export function registerStatic(name, params, call) { statics.set(name, {params: new Set(params), call}); }
-export function CallStatic(s, cls, method, args) {
+export function registerStatic(name, params, returning, call) { statics.set(name, {params: new Set(params), returning, call}); }
+export function CallStatic(s, cls, method, args, receiving = "", compatible = []) {
   const c = String(cls).replace(/ +$/, "");
   if (!compiledClasses.has(c)) {
     if (registryClasses.has(c)) throw new AbapError("NOT_COMPILED", `CALL METHOD (${c})=>${method}: the class exists but is not compiled in this program`);
-    throw new AbapError("CX_SY_DYN_CALL_ILLEGAL_CLASS", `CALL METHOD (${c})=>${method}`);
+    dynCallError("CX_SY_DYN_CALL_ILLEGAL_CLASS", `CALL METHOD (${c})=>${method}`);
   }
   const e = statics.get(`${c}=>${method}`);
-  if (e === undefined) throw new AbapError("CX_SY_DYN_CALL_ILLEGAL_METHOD", `CALL METHOD (${c})=>${method}`);
-  for (const n of Object.keys(args)) if (!e.params.has(n)) throw new AbapError("CX_SY_DYN_CALL_PARAM_NOT_FOUND", `${c}=>${method} ${n}`);
-  e.call(s, args);
+  if (e === undefined) dynCallError("CX_SY_DYN_CALL_ILLEGAL_METHOD", `CALL METHOD (${c})=>${method}`);
+  for (const n of Object.keys(args)) if (!e.params.has(n)) dynCallError("CX_SY_DYN_CALL_PARAM_NOT_FOUND", `${c}=>${method} ${n}`);
+  // Node diverges here (silent success / JS TypeError); SAP behaviour per ABAP keyword documentation, unmeasured; measure on A4H
+  const key = `${c}=>${method}`;
+  if (receiving) {
+    if (receiving !== e.returning) dynCallError("CX_SY_DYN_CALL_PARAM_NOT_FOUND", `${key} ${receiving}`);
+    if (!compatible.includes(key)) dynCallError("CX_SY_DYN_CALL_ILLEGAL_TYPE", `${key} ${receiving}`);
+  }
+  return [key, e.call(s, args)];
 }
-export function paramMissing(op) { throw new AbapError("CX_SY_DYN_CALL_PARAM_MISSING", op); }
+export function paramMissing(op) { dynCallError("CX_SY_DYN_CALL_PARAM_MISSING", op); }
+export function dynCallError(cls, op) {
+  if (!compiledClasses.has(cls)) throw new AbapError("NOT_COMPILED", `${op}: ${cls} is not compiled`);
+  throw new AbapError(cls, op);
+}
 // t -> i: mirror go/abap/datesplit.go, including invalid digit/length moves.
 export function TToI(v) {
   if (!/^\d{6}$/.test(v)) return 0;

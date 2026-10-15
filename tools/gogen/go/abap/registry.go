@@ -1,6 +1,7 @@
 package abap
 
 import (
+	"osg/gogen/dyncall"
 	"strings"
 )
 
@@ -89,57 +90,25 @@ func Classic(s *Session, method string, m map[string]int32, others int32) {
 	panic(r)
 }
 
-// CALL METHOD (class)=>m: the classes the program compiled, the ones the
-// registry has (so a class that exists but was not compiled dumps instead of
-// reading as unknown), and adapters for the static methods dynamic calls name.
-var (
-	compiledClasses = map[string]bool{}
-	registryClasses = map[string]bool{}
-	statics         = map[string]staticEntry{}
-)
+// The dynamic registry owns name/signature resolution; this adapter owns
+// ABAP session values and the refusal/exception boundary.
+var dynamicRegistry = dyncall.New[*Session, Data]()
 
-type staticEntry struct {
-	params map[string]bool
-	call   func(*Session, map[string]Data)
+func KnownClasses(compiled, known []string) { dynamicRegistry.Known(compiled, known) }
+func RegisterStatic(name string, params []string, returning string, call func(*Session, map[string]Data) any) {
+	dynamicRegistry.Register(name, params, returning, call)
+}
+func CallStatic(s *Session, class, method string, args map[string]Data, receiving string, compatible []string) (string, any) {
+	return dynamicRegistry.Call(s, class, method, args, receiving, compatible, DynCallError,
+		func(op, reason string) { panic(NotCompiled(op, reason)) })
 }
 
-func KnownClasses(compiled, known []string) {
-	for _, c := range compiled {
-		compiledClasses[c] = true
+// DynCallError refuses when the requested exception is outside the closure.
+func DynCallError(class, op string) {
+	if !dynamicRegistry.Compiled(class) {
+		panic(NotCompiled(op, class+" is not compiled"))
 	}
-	for _, c := range known {
-		registryClasses[c] = true
-	}
-}
-
-func RegisterStatic(name string, params []string, call func(*Session, map[string]Data)) {
-	e := staticEntry{params: map[string]bool{}, call: call}
-	for _, p := range params {
-		e.params[p] = true
-	}
-	statics[name] = e
-}
-
-// CallStatic runs a static method named at run time. The class name is taken
-// as written, as for CREATE OBJECT ... TYPE (name) (measured there).
-func CallStatic(s *Session, class, method string, args map[string]Data) {
-	c := strings.TrimRight(class, " ")
-	if !compiledClasses[c] {
-		if registryClasses[c] {
-			panic(NotCompiled("CALL METHOD ("+c+")=>"+method, "the class exists but is not compiled in this program"))
-		}
-		panic(ArithmeticError{Class: "CX_SY_DYN_CALL_ILLEGAL_CLASS", Op: "CALL METHOD (" + c + ")=>" + method})
-	}
-	e, ok := statics[c+"=>"+method]
-	if !ok {
-		panic(ArithmeticError{Class: "CX_SY_DYN_CALL_ILLEGAL_METHOD", Op: "CALL METHOD (" + c + ")=>" + method})
-	}
-	for n := range args {
-		if !e.params[n] {
-			panic(ArithmeticError{Class: "CX_SY_DYN_CALL_PARAM_NOT_FOUND", Op: c + "=>" + method + " " + n})
-		}
-	}
-	e.call(s, args)
+	panic(ArithmeticError{Class: class, Op: op})
 }
 
 // Local RFC destination registrations belong to the registering internal session.

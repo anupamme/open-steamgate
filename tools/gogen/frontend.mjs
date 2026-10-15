@@ -2501,7 +2501,7 @@ function compiledFunctionCall(node, ctx, text, name) {
   // CALL METHOD (class)=>m EXPORTING ...: a static method by class name,
   // through the program's registry of static methods
   if (isStmt(node, Statements.Call) && node.findDirectExpression(Expressions.MethodSource)?.findDirectExpression(Expressions.Dynamic)) {
-    return dynamicStaticCall(node, ctx, {sourceOperand, source, convert});
+    return dynamicStaticCall(node, ctx, {sourceOperand, source, convert, lvalue});
   }
   if (isStmt(node, Statements.CallFunction)) return callFunction(node, ctx, text);
   if (isStmt(node, Statements.Call)) {

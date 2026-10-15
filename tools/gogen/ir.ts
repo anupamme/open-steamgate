@@ -187,7 +187,7 @@ export type Stmt =
   | { readonly s: 'get_runtime'; readonly target: Expr }
   | { readonly s: 'get_timestamp'; readonly target: Expr; readonly dec: number }
   | { readonly s: 'raise_classic'; readonly name: string; readonly method: string }
-  | { readonly s: 'call_dyn_static'; readonly cls: string; readonly method: string; readonly args: readonly Argument[] }
+  | { readonly s: 'call_dyn_static'; readonly cls: string; readonly method: string; readonly args: readonly Argument[]; readonly receiving?: {readonly name: string; readonly target: Expr} | null }
   | { readonly s: 'exit' }
   | { readonly s: 'continue' }
   | { readonly s: 'return' }

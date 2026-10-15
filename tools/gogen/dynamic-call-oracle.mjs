@@ -1,0 +1,70 @@
+import assert from "node:assert/strict";
+import {readFileSync, readdirSync} from "node:fs";
+import {join} from "node:path";
+import {ABAP, MemoryConsole} from "@abaplint/runtime";
+import {modulesOf} from "../osd-transpile.mjs";
+
+// Tiny programs through the repository's actual transpiler/runtime Node path.
+// Divergent results are observations, not the contract of the Go/JS hosts.
+export async function dynamicCallOracle(home, core, fixtures) {
+  const names = ["cx_root", "cx_dynamic_check", "cx_static_check", "cx_no_check", "cx_sy_dyn_call_error", "cx_sy_dyn_call_parameter_error",
+    "cx_sy_dyn_call_illegal_class", "cx_sy_dyn_call_illegal_method", "cx_sy_dyn_call_param_not_found", "cx_sy_dyn_call_illegal_type"];
+  const files = readdirSync(core, {recursive: true}).filter((p) =>
+    (p.endsWith(".clas.abap") || p.endsWith(".intf.abap")) && (names.includes(p.split("/").at(-1).split(".")[0]) || p.endsWith("if_message.intf.abap"))
+    || p.endsWith(".xml") && ["dtel", "doma", "tabl", "ttyp"].includes(p.split(".").at(-2)))
+    .map((p) => ({filename: p.split("/").at(-1), contents: readFileSync(join(core, p), "utf8")}));
+  for (const n of ["zcl_lnt_p_base_chai", "zcl_gogen_t_dynrecv", "zcl_gogen_t_dynrecvnf", "zcl_gogen_t_dynrecverr", "cx_sy_dyn_call_param_missing"])
+    files.push({filename: `${n}.clas.abap`, contents: readFileSync(join(fixtures, `${n}.clas.abap`), "utf8")});
+  const matched = ["ZCL_GOGEN_T_DYNRECV", "ZCL_GOGEN_T_DYNRECVNF"];
+  const probes = [
+    ["name", "TXT", "RECEIVING wrong = target", "success"],
+    ["none", "VOID", "RECEIVING result = target", "TypeError"],
+    ["export", "TXT", "EXPORTING wrong = target RECEIVING result = target", "success"],
+    ["missing", "NEED", "RECEIVING result = target", "TypeError"],
+    ["type", "TXT", "RECEIVING result = ref", "success"],
+  ];
+  for (const [i, cls] of matched.entries()) files.push({filename: `zmatched${i}.prog.abap`, contents: `REPORT zmatched${i}. WRITE ${cls.toLowerCase()}=>run( ).`});
+  for (const [label, method, params] of probes) files.push({filename: `zprobe_${label}.prog.abap`, contents:
+    `REPORT zprobe_${label}. DATA target TYPE string. DATA ref TYPE REF TO object. TRY. CALL METHOD ('ZCL_GOGEN_T_DYNRECVERR')=>('${method}') ${params}. WRITE 'success'. CATCH cx_root. WRITE 'caught-root'. ENDTRY.`});
+  const {Transpiler} = modulesOf(home);
+  const output = await new Transpiler({ignoreSyntaxCheck: true, unknownTypes: "runtimeError"}).runRaw(files);
+  const saved = globalThis.abap;
+  const abap = globalThis.abap = new ABAP({console: new MemoryConsole()});
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const rank = (o) => { const i = ["if_message", ...names, "cx_sy_dyn_call_param_missing"].indexOf(o.filename.split(".")[0]); return i < 0 ? 99 : i; };
+  try {
+    const chunks = output.objects.filter((o) => !o.filename.endsWith(".prog.mjs")).sort((a, b) => rank(a) - rank(b)).map((o) =>
+      o.chunk.getCode().split("\n").filter((l) => !l.startsWith("import ")).join("\n").replaceAll("export class ", "class "));
+    await new AsyncFunction("abap", chunks.join("\n"))(abap);
+    const run = async (filename) => {
+      abap.console.clear();
+      try { await new AsyncFunction("abap", output.objects.find((o) => o.filename === filename).chunk.getCode())(abap); return abap.console.get(); }
+      catch (e) { if (e instanceof TypeError) return "TypeError"; throw e; }
+    };
+    const rows = {};
+    for (const [i, cls] of matched.entries()) rows[cls] = await run(`zmatched${i}.prog.mjs`);
+    for (const [label, , , expected] of probes) {
+      const got = await run(`zprobe_${label}.prog.mjs`);
+      assert.equal(got, expected, `Node-divergent ${label}`);
+      console.log(`ok   Node-divergent ${label}: ${got}; SAP unmeasured; measure on A4H`);
+    }
+    return rows;
+  } finally { globalThis.abap = saved; }
+}
+
+export const DYNAMIC_EXPECT = {
+  // Node measured on 2026-10-15; SAP unmeasured; measure on A4H.
+  ZCL_GOGEN_T_DYNRECV: "chai/42/abc/bound/default/0/initial",
+  ZCL_GOGEN_T_DYNRECVNF: "CX_SY_DYN_CALL_ILLEGAL_CLASS;root;CX_SY_DYN_CALL_ILLEGAL_METHOD;root;",
+  // Node-divergent: silent success / JS TypeError. Keyword documentation policy;
+  // Go == JS, SAP unmeasured; measure on A4H.
+  ZCL_GOGEN_T_DYNRECVERR: "CX_SY_DYN_CALL_PARAM_NOT_FOUND;root;CX_SY_DYN_CALL_PARAM_NOT_FOUND;root;CX_SY_DYN_CALL_PARAM_NOT_FOUND;root;CX_SY_DYN_CALL_PARAM_MISSING;root;CX_SY_DYN_CALL_ILLEGAL_TYPE;root;",
+};
+export async function checkDynamicCallOracle(selected, home, core, fixtures) {
+  if (selected.length && !selected.some((n) => n.startsWith("zcl_gogen_t_dynrecv"))) return;
+  const rows = await dynamicCallOracle(home, core, fixtures);
+  for (const [name, value] of Object.entries(rows)) {
+    assert.equal(value, DYNAMIC_EXPECT[name], `Node ${name}`);
+    console.log(`ok   Node ${name}: ${value}`);
+  }
+}
