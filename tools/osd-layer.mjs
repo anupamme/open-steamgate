@@ -1,3 +1,4 @@
+import {publishChildEnv, devChildEnv} from './osd-env.mjs';
 import {validatePack} from "./osd-layer-pack.mjs";
 // Reproducible abapGit layers and ordered OCI systems (docs/oci-layers.md).
 import {execFileSync, spawnSync} from "node:child_process";
@@ -5,10 +6,11 @@ import {existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync
 import {fileURLToPath} from "node:url";
 import {tmpdir} from "node:os";
 import {basename, dirname, join, resolve} from "node:path";
-import {abapgitXml, zipFiles} from "./osd-abapgit-zip.mjs";
+import {abapgitXml} from "./osd-abapgit-xml.mjs";
+import {zipFiles} from "./osd-zip.mjs";
 import {archiveFiles} from "./osd-source-zip.mjs";
 import {MEDIA, OciError, client, formatRef, manifest, parseRef, pull, push, pushBlob, pushManifest, sha256, treeDigest} from "./osd-oci.mjs";
-import {toolCommand} from "./osd-host.mjs";
+import {hostedLeakScanner, toolCommandIn} from "./osd-host.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {CAPTURE, MAX_SCAN_BYTES} from "./osd-leak-scan.mjs";
 
@@ -44,7 +46,7 @@ function folderFiles(folder) {
   return files;
 }
 
-export function build(folder, {name, kind, source} = {}) {
+export function build(folder, {name, kind, source, annotations: extraAnnotations} = {}) {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name ?? "")) fail("BAD_NAME", "--name must be a simple filename");
   if (!["lib", "input", "pack", "customer"].includes(kind)) fail("BAD_KIND", "--kind must be lib, input, pack or customer");
   if (!lstatSync(resolve(folder)).isDirectory()) fail("UNSAFE_ENTRY", "input must be a folder");
@@ -61,6 +63,7 @@ export function build(folder, {name, kind, source} = {}) {
     config.source = {repo: m[1], commit: m[2], path: m[3]};
     annotations["org.opencontainers.image.source"] = m[1];
   }
+  Object.assign(annotations, extraAnnotations, {[NAME]: name, [KIND]: kind});
   files.sort((a, b) => Buffer.compare(Buffer.from(a.path), Buffer.from(b.path)));
   const zip = layerZip(files), configBytes = jsonBytes(config);
   // Apply the pull reader's path, collision and size rules before publishing.
@@ -73,7 +76,7 @@ export function build(folder, {name, kind, source} = {}) {
 }
 
 /**
- * A layer's own allow list: the format of .leak-allow.json, with `file` the
+ * A layer's reviewed byte/category/count exceptions, with `file` the
  * path inside the layer archive. The scan runs over neutral copies in a
  * temporary folder where the repository's list is not, so without this a
  * reviewed exception (a GUID in an upstream test vector) had no way through.
@@ -91,11 +94,13 @@ export function readLeakAllow(file) {
   for (const key of Object.keys(raw)) if (!["allow", "note"].includes(key)) fail("BAD_ALLOW", `${file}: unknown key ${JSON.stringify(key)}`);
   for (const [i, entry] of allow.entries()) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) fail("BAD_ALLOW", `${file}: entry ${i} is not an object`);
-    for (const key of Object.keys(entry)) if (!["file", "value", "reason", "layer"].includes(key)) fail("BAD_ALLOW", `${file}: entry ${i} has unknown key ${JSON.stringify(key)}`);
-    for (const key of ["file", "value", "reason"]) {
-      if (typeof entry?.[key] !== "string" || !entry[key].trim()) fail("BAD_ALLOW", `${file}: entry ${i} needs a non-empty ${key}`);
+    for (const key of Object.keys(entry)) if (!["file", "fileSha256", "category", "count", "reason", "layer"].includes(key)) fail("BAD_ALLOW", `${file}: entry ${i} has unknown key ${JSON.stringify(key)}`);
+    for (const key of ["file", "fileSha256", "category", "reason", "layer"]) {
+      const value = Object.entries(entry).find(([name]) => name === key)?.at(1);
+      if (typeof value !== "string" || !value.trim()) fail("BAD_ALLOW", `${file}: entry ${i} needs a non-empty ${key}`);
     }
-    if (entry.layer !== undefined && (typeof entry.layer !== "string" || !entry.layer.trim())) fail("BAD_ALLOW", `${file}: entry ${i} has an empty layer`);
+    if (!/^sha256:[0-9a-f]{64}$/.test(entry.fileSha256)) fail("BAD_ALLOW", `${file}: entry ${i} needs a full lowercase SHA-256 file digest`);
+    if (!Number.isSafeInteger(entry.count) || entry.count < 1) fail("BAD_ALLOW", `${file}: entry ${i} needs a positive match count`);
   }
   return allow;
 }
@@ -120,7 +125,7 @@ export function leakGate(trees, metadata, documents = [], allow = [], layerNames
         content(bytes, path);
         // recorded here, not inferred from labels: an archive file may be
         // called "OCI metadata", and its exception must not reach the documents
-        archive.push({name: `content/${basename(paths.at(-1))}`, path, layer: layerNames[i]});
+        archive.push({bytes, name: `content/${basename(paths.at(-1))}`, path, layer: layerNames.at(i)});
         archivePaths.push(path);
       }
     }
@@ -146,17 +151,23 @@ export function leakGate(trees, metadata, documents = [], allow = [], layerNames
       if (entry.layer !== undefined && repeated.has(entry.layer)) fail("BAD_ALLOW", `allow entry for ${entry.layer}:${entry.file}: more than one layer is called ${entry.layer}`);
       const hits = archive.filter(({path, layer}) => path === entry.file && (entry.layer === undefined || layer === entry.layer));
       if (!hits.length) fail("BAD_ALLOW", `allow entry for ${entry.layer ? `${entry.layer}:` : ""}${entry.file}: no such file in the layer`);
-      return hits.map(({name}) => ({file: name, value: entry.value, reason: entry.reason}));
+      return hits.map(({name, bytes}) => {
+        if (sha256(bytes) !== entry.fileSha256) fail("BAD_ALLOW", `allow entry for ${entry.layer}:${entry.file}: file content SHA-256 changed`);
+        return {file: name, category: entry.category, count: entry.count};
+      });
     });
-    if (translated.length) writeFileSync(join(temp, ".leak-allow.json"), JSON.stringify({allow: translated}));
-    const [command, ...args] = toolCommand(join(moduleDir, "osd-leak-scan.mjs"), ["--redact", "--paths", ...paths]);
+    writeFileSync(join(temp, ".leak-publication-allow.json"), JSON.stringify({allow: translated}));
     // run from the scan directory, which is in no checkout: the list is then
-    // OSD_LEAK_IDENTIFIERS or this tool's own checkout's, never the caller's cwd
-    const result = spawnSync(command, args, {cwd: temp, encoding: "utf8", maxBuffer: 4 * 1024 * 1024});
+    // the explicit list path or this tool's own checkout's, never the caller's cwd
+    const identifierArgs = process.env.OSD_LEAK_IDENTIFIERS ? ["--identifiers", resolve(process.env.OSD_LEAK_IDENTIFIERS)] : [];
+    const scannerEnv = publishChildEnv();
+    const [scannerCommand, ...scannerArgs] = toolCommandIn(scannerEnv, join(toolRoot, "tools/osd-leak-scan.mjs"), [...identifierArgs, "--redact", "--publication-allow", "--paths", ...paths]);
+    const result = hostedLeakScanner ? hostedLeakScanner(temp, paths) : spawnSync(scannerCommand, scannerArgs, {cwd: temp, env: scannerEnv, encoding: "utf8", maxBuffer: 4 * 1024 * 1024});
     const reason = result.error?.message ?? result.stderr?.trim() ?? result.stdout?.trim();
+    const named = (reason ?? "").replace(/content\/\d{6}\.txt/g, (n) => labels.get(n) ?? n);
+    if (result.status === 3) fail("BAD_ALLOW", named);
     if (result.error || result.status !== 0 && result.status !== 1) fail("SCAN_FAILED", `SCAN_FAILED: ${reason || `scanner exit ${result.status}, signal ${result.signal}`}`);
     // name what leaked by its archive path, not by the neutral file it was scanned as
-    const named = (reason ?? "").replace(/content\/\d{6}\.txt/g, (n) => labels.get(n) ?? n);
     if (result.status === 1) fail("LEAK", `publish refused: ${named || "scanner found identifiers"}`);
   } finally { rmSync(temp, {recursive: true, force: true}); }
 }
@@ -166,7 +177,7 @@ export function validateLayer(layer) {
   if (m.schemaVersion !== 2 || m.mediaType !== MEDIA.manifest || m.artifactType !== LAYER || m.config?.mediaType !== CONFIG
     || m.layers?.length !== 1 || m.layers[0].mediaType !== ZIP || c?.schema !== 1
     || !["lib", "input", "pack", "customer"].includes(c.kind) || typeof c.name !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(c.name)
-    || m.annotations?.[NAME] !== c.name || m.annotations?.[KIND] !== c.kind
+    || m.annotations?.["org.osd.layer.name"] !== c.name || m.annotations?.["org.osd.layer.kind"] !== c.kind
     || m.layers[0].annotations?.["org.opencontainers.image.title"] !== `${c.name}.zip`) fail("BAD_LAYER", "invalid OSD layer");
   const files = [...archiveFiles(layer.layers[0].bytes)].map(([path, bytes]) => ({path, bytes}));
   if (!files.some(f => f.path === ".abapgit.xml")) fail("BAD_LAYER", "a layer needs root .abapgit.xml");
@@ -181,17 +192,17 @@ export function validateLayer(layer) {
 /** Sort by declared order, refusing gaps, duplicates and ambiguous ordering. */
 export function systemLayers(index) {
   if (index.schemaVersion !== 2 || index.mediaType !== MEDIA.index || index.artifactType !== SYSTEM || !Array.isArray(index.manifests)) fail("BAD_SYSTEM", "expected an OSD system index");
-  const layers = [...index.manifests].sort((a, b) => Number(a.annotations?.[ORDER]) - Number(b.annotations?.[ORDER]));
+  const layers = [...index.manifests].sort((a, b) => Number(a.annotations?.["org.osd.layer.order"]) - Number(b.annotations?.["org.osd.layer.order"]));
   layers.forEach((d, i) => {
-    if (d.annotations?.[ORDER] !== String(i) || d.mediaType !== MEDIA.manifest || !d.annotations?.[NAME] || !d.annotations?.[KIND]
+    if (d.annotations?.["org.osd.layer.order"] !== String(i) || d.mediaType !== MEDIA.manifest || !d.annotations?.["org.osd.layer.name"] || !d.annotations?.["org.osd.layer.kind"]
       || !/^sha256:[0-9a-f]{64}$/.test(d.digest ?? "") || !Number.isSafeInteger(d.size) || d.size <= 0) fail("BAD_ORDER", "system layer orders must be contiguous starting at 0");
   });
   return layers;
 }
 
-function systemAnnotations(root) {
+function systemAnnotations(root, release = false) {
   const out = {};
-  try { out["org.osd.osg.commit"] = execFileSync("git", ["rev-parse", "HEAD"], {cwd: toolRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"]}).trim(); }
+  try { out["org.osd.osg.commit"] = execFileSync("git", ["rev-parse", "HEAD"], {env: release ? publishChildEnv('git') : devChildEnv(), cwd: toolRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"]}).trim(); }
   catch { /* A source distribution can have no Git metadata. */ }
   const lock = join(root, "libs.lock.json");
   if (existsSync(lock)) {
@@ -199,6 +210,16 @@ function systemAnnotations(root) {
     if (transpiler) out["org.osd.transpiler"] = `${transpiler.repo}@${transpiler.ref}`;
   }
   return out;
+}
+
+export function prepareSystem(target, layers, options = {}) {
+  const index = {schemaVersion: 2, mediaType: MEDIA.index, artifactType: SYSTEM,
+    manifests: layers.map(({layer}, i) => ({...descriptor(MEDIA.manifest, layer.manifest.bytes),
+      annotations: {[NAME]: layer.config.name, [KIND]: layer.config.kind, [ORDER]: String(i)}})),
+    annotations: {...systemAnnotations(options.root ?? process.env.OSD_ROOT ?? process.cwd(), options.release), ...options.annotations}};
+  leakGate(layers.map((l) => l.files), {destination: target, index, layers: layers.map(({layer}) => ({manifest: layer.manifest.json, config: layer.config}))},
+    [jsonBytes(index), ...layers.flatMap(({layer}) => [layer.configBytes, layer.manifest.bytes])], options.allow, layers.map(({layer}) => layer.config.name));
+  return index;
 }
 
 export async function pushSystem(target, refs, options = {}) {
@@ -209,12 +230,7 @@ export async function pushSystem(target, refs, options = {}) {
     const layer = await pull(ref, options);
     layers.push({ref, layer, files: validateLayer(layer)});
   }
-  const index = {schemaVersion: 2, mediaType: MEDIA.index, artifactType: SYSTEM,
-    manifests: layers.map(({layer}, i) => ({...descriptor(MEDIA.manifest, layer.manifest.bytes),
-      annotations: {[NAME]: layer.config.name, [KIND]: layer.config.kind, [ORDER]: String(i)}})),
-    annotations: systemAnnotations(options.root ?? process.env.OSD_ROOT ?? process.cwd())};
-  leakGate(layers.map((l) => l.files), {destination: target, index, layers: layers.map(({layer}) => ({manifest: layer.manifest.json, config: layer.config}))},
-    [jsonBytes(index), ...layers.flatMap(({layer}) => [layer.configBytes, layer.manifest.bytes])], options.allow, layers.map(({layer}) => layer.config.name));
+  const index = prepareSystem(target, layers, options);
   const c = client(target, {...options, push: true});
   for (const {ref, layer} of layers) {
     const src = parseRef(ref);
@@ -239,10 +255,16 @@ export async function inspect(ref, options = {}) {
   const layers = [];
   for (const d of systemLayers(m.json)) {
     const summary = await layerSummary(formatRef({...parseRef(ref), digest: d.digest}), d.size);
-    if (summary.name !== d.annotations[NAME] || summary.kind !== d.annotations[KIND]) fail("BAD_LAYER", "index identity differs from layer config");
+    if (summary.name !== d.annotations["org.osd.layer.name"] || summary.kind !== d.annotations["org.osd.layer.kind"]) fail("BAD_LAYER", "index identity differs from layer config");
     layers.push(summary);
   }
   return {digest: m.digest, artifactType: SYSTEM, annotations: m.json.annotations, layers};
+}
+
+function readAnnotations(file) {
+  const annotations = JSON.parse(readFileSync(file, "utf8"));
+  if (!annotations || Array.isArray(annotations) || typeof annotations !== "object" || Object.values(annotations).some(value => typeof value !== "string")) fail("USAGE", "annotations must be a JSON object of strings");
+  return annotations;
 }
 
 export async function main(args) {
@@ -254,9 +276,12 @@ export async function main(args) {
   if (command === "system" && rest[0] === "push") {
     const refs = [], options = {};
     for (let i = 1; i < rest.length; i++) {
-      if (rest[i] === "--leak-allow" && rest[i + 1] && !rest[i + 1].startsWith("--")) (options.allow ??= []).push(...readLeakAllow(rest[++i]));
-      else if (rest[i].startsWith("--")) fail("USAGE", `invalid option ${rest[i]}`);
-      else refs.push(rest[i]);
+      if (rest.at(i) === "--leak-allow" && rest.at(i + 1) && !rest.at(i + 1).startsWith("--")) (options.allow ??= []).push(...readLeakAllow(rest.at(++i)));
+      else if (rest.at(i) === "--annotations" && rest.at(i + 1)) {
+        options.annotations = readAnnotations(rest.at(++i));
+      }
+      else if (rest.at(i).startsWith("--")) fail("USAGE", `invalid option ${rest.at(i)}`);
+      else refs.push(rest.at(i));
     }
     const digest = await pushSystem(refs[0], refs.slice(1), options);
     console.log(formatRef({...parseRef(refs[0]), digest}));
@@ -265,13 +290,14 @@ export async function main(args) {
   if (!["build", "push"].includes(command)) fail("USAGE", "expected build, push, system push or inspect");
   const positionals = [], options = {};
   for (let i = 0; i < rest.length; i++) {
-    if (rest[i].startsWith("--")) {
-      const key = rest[i].slice(2);
-      if (!["name", "kind", "source", "out", "leak-allow"].includes(key) || !rest[i + 1] || rest[i + 1].startsWith("--")) fail("USAGE", `invalid option ${rest[i]}`);
+    if (rest.at(i).startsWith("--")) {
+      const key = rest.at(i).slice(2);
+      if (!["name", "kind", "source", "out", "leak-allow", "annotations"].includes(key) || !rest.at(i + 1) || rest.at(i + 1).startsWith("--")) fail("USAGE", `invalid option ${rest.at(i)}`);
       if (key === "leak-allow" && command === "build") fail("USAGE", "build has no leak gate; --leak-allow belongs to push");
-      if (key === "leak-allow") (options.allow ??= []).push(...readLeakAllow(rest[++i]));
-      else options[key] = rest[++i];
-    } else positionals.push(rest[i]);
+      if (key === "leak-allow") (options.allow ??= []).push(...readLeakAllow(rest.at(++i)));
+      else if (key === "annotations") options.annotations = readAnnotations(rest.at(++i));
+      else Object.assign(options, {[key]: rest.at(++i)});
+    } else positionals.push(rest.at(i));
   }
   if (positionals.length !== (command === "push" ? 2 : 1)) fail("USAGE", "expected a folder (and a destination for push)");
   if (command === "build" && !options.out) fail("USAGE", "build needs --out");

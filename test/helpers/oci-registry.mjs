@@ -76,7 +76,7 @@ export function registry({token = "t0k", tamper = false, gzip = false, mount = t
     res.end((tamper || key === tamperBlob) && type === "blobs" ? Buffer.concat([body, Buffer.from("x")]).subarray(1) : body);
   });
   return {
-    server, put,
+    server, put, tags, manifests,
     set tamperManifest(digest) { tamperManifest = digest; },
     set tamperBlob(digest) { tamperBlob = digest; },
     publish(layers, config, {mediaType = "application/vnd.osd.abapgit.zip", title, empty = false} = {}) {

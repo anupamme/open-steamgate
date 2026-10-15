@@ -1,11 +1,15 @@
 import {expect} from "chai";
-import {execFileSync, spawn, spawnSync} from "node:child_process";
+import childProcess, {execFileSync, spawn, spawnSync} from "node:child_process";
 import fs, {chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync} from "node:fs";
 import {syncBuiltinESMExports} from "node:module";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {MARKER, FetchFailed, describeUnfetched, fetchAll, fetchSource, unfetched} from "../tools/osd-fetch.mjs";
 import {SOURCE, sourceOf, BadPack, packsOf} from "../tools/osd-packs.mjs";
+
+import ts from 'typescript';
+import {releaseGitSource} from "../tools/osd-release-git.mjs";
+import {materialise} from "../tools/osd-libs.mjs";
 
 import {registry, listening} from "./helpers/oci-registry.mjs";
 import {treeDigest} from "../tools/osd-oci.mjs";
@@ -71,6 +75,70 @@ describe("tools/osd-fetch: a pack fetches a folder it does not carry", function 
     rmSync(repo, {recursive: true, force: true});
   });
 
+  it("rejects release Git option injection and non-HTTPS sources before fetching or reusing a folder", async () => {
+    const [pack] = packsOf(root, {});
+    const source = pack.sources[0];
+    for (const [url, ref] of [
+      ['https://example.invalid/repo.git', '--upload-pack=x'],
+      ['https://example.invalid/repo.git', '-c'],
+      ['ext::sh', commit], ['file://' + repo, commit], [repo, commit],
+    ]) {
+      const message = ref.startsWith('-') ? 'release source requires a full 40-hex commit SHA' : 'release source requires an https:// repository';
+      expect(() => releaseGitSource(url, ref)).to.throw(message);
+      let failure;
+      try { await fetchSource(pack, {...source, repo: url, ref}, {release: true}); } catch (error) { failure = error; }
+      expect(failure?.message).to.equal(message);
+      expect(existsSync(source.dir)).to.equal(false);
+      write(source.dir, SOURCE, JSON.stringify({repo: url, ref, commit, path: source.path, exclude: source.exclude}));
+      failure = undefined;
+      try { await fetchSource(pack, {...source, repo: url, ref}, {release: true}); } catch (error) { failure = error; }
+      expect(failure?.message).to.equal(message);
+      rmSync(source.dir, {recursive: true});
+    }
+    expect(() => releaseGitSource('https://example.invalid/repo.git', commit)).not.to.throw();
+    write(root, 'libs.lock.json', JSON.stringify({transpiler: {repo: 'example/transpiler', ref: commit}, libraries: [{folder: 'example', repo: 'example/library', ref: commit}]}));
+    write(root, 'abap_transpile.json', JSON.stringify({libs: [{folder: '.local/lars/example'}]}));
+    for (const url of ['ext::sh', 'file://' + repo, repo]) {
+      expect(() => materialise(root, () => {}, {release: true, remote: {example: url}})).to.throw('https://');
+    }
+  });
+  it('validates release library commits independently of readLock', () => {
+    // Bypass readLock's independent validation, so these cases must reach
+    // releaseGitSource in the real materialisation body.
+    const ast = ts.createSourceFile('osd-libs.mjs', readFileSync(new URL('../tools/osd-libs.mjs', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+    const body = ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'materialiseLibraries').getText(ast);
+    for (const ref of ['--upload-pack=x', '-c']) {
+      const run = new Function('libraries', 'releaseGitSource', `${body}; return materialiseLibraries;`)(
+        () => [{name: 'example', url: 'https://example.invalid/repo.git', ref}], releaseGitSource);
+      expect(() => run(root, () => {}, {ci: true, remote: {}, release: true})).to.throw('release source requires a full 40-hex commit SHA');
+    }
+  });
+  it("uses the restricted Git protocols and operand terminators for release fetches and libraries", async () => {
+    const original = childProcess.execFileSync, calls = [];
+    childProcess.execFileSync = (command, args, options) => {
+      expect(command).to.equal('git');
+      expect(args.slice(0, 4)).to.deep.equal(['-c', 'protocol.allow=never', '-c', 'protocol.https.allow=always']);
+      calls.push(args.slice(4));
+      write(options.cwd, 'src/public.abap', '* public fixture');
+      return commit + '\n';
+    };
+    syncBuiltinESMExports();
+    try {
+      const [pack] = packsOf(root, {});
+      await fetchSource(pack, {...pack.sources[0], repo: 'https://example.invalid/repo.git'}, {release: true});
+      write(root, 'libs.lock.json', JSON.stringify({transpiler: {repo: 'example/transpiler', ref: commit}, libraries: [{folder: 'example', repo: 'example/library', ref: commit}]}));
+      write(root, 'abap_transpile.json', JSON.stringify({libs: [{folder: '.local/lars/example'}]}));
+      materialise(root, () => {}, {ci: true, release: true});
+      const fetches = calls.filter(args => args[0] === 'fetch');
+      expect(fetches.length).to.equal(2);
+      for (const args of fetches) expect(args.slice(args.indexOf('--') + 1)).to.deep.equal(['origin', commit]);
+      for (const args of calls.filter(args => args[0] === 'remote')) expect(args.slice(args.indexOf('--') + 1)[0]).to.equal('origin');
+      for (const args of calls.filter(args => args[0] === 'switch')) expect(args.indexOf('--')).to.be.greaterThan(0);
+    } finally {
+      childProcess.execFileSync = original;
+      syncBuiltinESMExports();
+    }
+  });
   it("round3: actually transpiles a fetched folder with source identity", async () => {
     const [pack] = packsOf(root, {});
     await fetchSource(pack, pack.sources[0]);
@@ -297,6 +365,23 @@ describe("tools/osd-fetch: an OCI pack source", function () {
     rmSync(root, {recursive: true, force: true});
   });
 
+  it('requires a digest for release OCI sources before fetching or reusing a folder', async () => {
+    const digest = r.publish([bytes], {});
+    const pack = declare(digest);
+    expect((await fetchPack(pack, {release: true})).fetched).to.equal(true);
+    expect((await fetchPack(pack, {release: true})).fetched).to.equal(false);
+    const requests = r.requests;
+    for (const oci of [`${host}/osd/pack:v1`, `${host}/osd/pack`]) {
+      const source = {...pack.sources[0], oci};
+      writeFileSync(join(source.dir, SOURCE), JSON.stringify({...sourceOf(source.dir), oci}));
+      for (const force of [false, true]) {
+        let failure;
+        try { await fetchSource(pack, source, {release: true, force}); } catch (error) { failure = error; }
+        expect(failure?.message).to.equal('release OCI source requires an @sha256: digest');
+      }
+    }
+    expect(r.requests).to.equal(requests);
+  });
   it("round3: refuses an OCI reserved name after path and exclusion selection", async () => {
     write(`payload/src/${SOURCE}`, "untrusted");
     const pack = declare(r.publish([zipInProcess(join(root, "payload"))], {}));

@@ -1,3 +1,4 @@
+import {readEnvironment} from './osd-env.mjs';
 // What the process is running in: Node over a checkout, or one compiled
 // binary (bin/osd.mjs through scripts/build-binary.mjs, SP4).
 //
@@ -35,7 +36,13 @@ export function hosted() {
 
 // [command, ...args] that runs a tool script with arguments
 export function toolCommand(script, args = []) {
-  const me = self();
+  return toolCommandIn(process.env, script, args);
+}
+
+// Select the host from the environment the child will actually receive.
+export function toolCommandIn(env, script, args = []) {
+  const value = env.OSD_SELF;
+  const me = value === undefined || value === "" ? undefined : JSON.parse(value);
   return me !== undefined ? [...me, "gen", basename(script), ...args] : [process.execPath, script, ...args];
 }
 
@@ -66,21 +73,21 @@ export function hostModules() {
 }
 
 // The embedded system seed and caller layers for the standalone binary.
-export function dataDirOf(platform = process.platform, env = process.env, home = homedir()) {
+export function dataDirOf(platform = process.platform, env = readEnvironment(["LOCALAPPDATA", "XDG_DATA_HOME"]), home = homedir()) {
   if (platform === "win32") return join(env.LOCALAPPDATA || join(home, "AppData", "Local"), "open-steamgate");
   if (platform === "darwin") return join(home, "Library", "Application Support", "open-steamgate");
   return join(env.XDG_DATA_HOME || join(home, ".local", "share"), "open-steamgate");
 }
 
-export function layerList(args, env = process.env, cwd = process.cwd()) {
+export function layerList(args, env = readEnvironment(["OSD_LAYERS"]), cwd = process.cwd()) {
   const cli = [];
   const rest = [];
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--layer") {
-      if (!args[i + 1] || args[i + 1].startsWith("--")) throw new Error("--layer needs a folder or ZIP");
-      cli.push(args[++i]);
+    if (args.at(i) === "--layer") {
+      if (!args.at(i + 1) || args.at(i + 1).startsWith("--")) throw new Error("--layer needs a folder or ZIP");
+      cli.push(args.at(++i));
     } else {
-      rest.push(args[i]);
+      rest.push(args.at(i));
     }
   }
   const folders = [...(env.OSD_LAYERS || "").split(delimiter).filter(Boolean), ...cli]
@@ -150,4 +157,11 @@ export async function ensureBinaryHome(archivePath, dataDir) {
     rmSync(staging, {recursive: true, force: true});
   }
   return target;
+}
+
+// A compiled host registers its scanner invocation at startup. Plain Node
+// publication uses the fixed first-party script in osd-layer, never OSD_SELF.
+export let hostedLeakScanner;
+export function setHostedLeakScanner(run) {
+  hostedLeakScanner = run;
 }

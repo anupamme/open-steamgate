@@ -1,3 +1,4 @@
+import {layerEnvironment} from './osd-layer-env.mjs';
 // One installed index supplies the complete source closure. No Git or network here.
 import {existsSync, readFileSync} from "node:fs";
 import {dirname, isAbsolute, join, relative, resolve} from "node:path";
@@ -10,7 +11,7 @@ const digest = /^sha256:[0-9a-f]{64}$/;
 const name = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 const fail = (message) => { const e = new Error(`system mode: ${message}`); e.code = "BAD_SYSTEM"; throw e; };
 
-export function activeSystem(root, env = process.env) {
+export function activeSystem(root, env) {
   const file = join(root, ".local/system", SYSTEM_ID);
   if (!existsSync(file)) return undefined;
   const system = JSON.parse(readFileSync(file, "utf8"));
@@ -24,9 +25,10 @@ export function activeSystem(root, env = process.env) {
     const identity = join(root, ".local/system", layer.path, LAYER_ID);
     if (!existsSync(identity) || JSON.stringify(JSON.parse(readFileSync(identity, "utf8"))) !== JSON.stringify(layer)) fail(`layer identity differs: ${layer.name}`);
   });
-  for (const key of Object.keys(env)) {
+  env ??= layerEnvironment(root, system.layers.filter(layer => layer.kind === "lib").map(layer => layer.name));
+  for (const [key, value] of Object.entries(env)) {
     if (["OSD_PACKS", "OSD_WEB_PACKS", "OSD_LAYERS"].includes(key) || key.startsWith("OSD_LIB_")) {
-      if (env[key] !== undefined) fail(`${key} is refused; the system digest supplies all layers`);
+      if (value !== undefined) fail(`${key} is refused; the system digest supplies all layers`);
     }
   }
   if (existsSync(join(root, "local/tmp"))) fail("$TMP layer (local/tmp) is refused; the system digest supplies all layers");
@@ -53,7 +55,7 @@ export function logicalSystemPath(root, file, system = activeSystem(root) ?? nul
   return file;
 }
 
-export function systemFile(root, logical, env = process.env) {
+export function systemFile(root, logical, env) {
   const system = activeSystem(root, env);
   if (!system) return resolve(root, logical);
   const actual = resolve(root, logical);
@@ -101,4 +103,4 @@ export function sourceMapFile(generated, source) {
 }
 
 /** The root launchpad belongs to the src input repository. */
-export const rootWebappOf = (root, env = process.env) => systemFile(root, "webapp", env);
+export const rootWebappOf = (root, env) => systemFile(root, "webapp", env);

@@ -32,7 +32,15 @@ import {dirname, resolve} from "node:path";
 import {createRequire} from "node:module";
 import {buildIdentity} from "../tools/osd-transpiler.mjs";
 import {systemId} from "../tools/osd-identity.mjs";
-import {compiled, setHostModules, dataDirOf, ensureBinaryHome, homesIn, isCheckout, layerList} from "../tools/osd-host.mjs";
+import {spawnSync} from "node:child_process";
+import {toolCommand, setHostedLeakScanner, compiled, setHostModules, dataDirOf, ensureBinaryHome, homesIn, isCheckout, layerList} from "../tools/osd-host.mjs";
+
+// The binary owns hosted subprocess dispatch; the plain Node publisher has
+// no dependency on this entry point and always runs its fixed scanner script.
+setHostedLeakScanner((cwd, paths) => {
+  const [command, ...args] = toolCommand("tools/osd-leak-scan.mjs", ["--redact", "--publication-allow", "--paths", ...paths]);
+  return spawnSync(command, args, {cwd, encoding: "utf8", maxBuffer: 4 * 1024 * 1024});
+});
 
 // Bundles retain the identity of the packages actually embedded at build
 // time. Reading a later checkout here would falsely describe old code.

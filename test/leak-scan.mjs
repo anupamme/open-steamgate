@@ -4,7 +4,22 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {spawnSync} from "node:child_process";
 
+import {publicationFindings} from '../tools/osd-leak-scan.mjs';
+
 describe("leak scanner", () => {
+  it('supports publicationFindings as a library with explicit or discovered identifiers', () => {
+    const root = mkdtempSync(join(tmpdir(), 'leak-library-'));
+    try {
+      mkdirSync(join(root, '.local'));
+      const list = join(root, '.local/leak-identifiers.json');
+      writeFileSync(list, JSON.stringify({fixture: ['library_fixture_identifier']}));
+      const sources = [{file: 'content.txt', text: 'library_fixture_identifier'}];
+      for (const explicit of [undefined, list]) {
+        assert.deepEqual(publicationFindings(root, sources, explicit), [{file: 'content.txt', category: 'identifier'}]);
+        assert.deepEqual(publicationFindings(root, [{file: 'clean.txt', text: 'clean'}], explicit), []);
+      }
+    } finally { rmSync(root, {recursive: true, force: true}); }
+  });
   const folder = mkdtempSync(join(tmpdir(), "osd-leak-vector-"));
   const packedPrivateAddress = [
     "00112233445566778899aabb", "c0", "a8", "01", "2a", "ffeeddbbccaa9988",
@@ -14,6 +29,26 @@ describe("leak scanner", () => {
     ["tools/osd-leak-scan.mjs", ".", "--paths", file], {encoding: "utf8"});
 
   after(() => rmSync(folder, {recursive: true, force: true}));
+
+  it('accepts an explicit identifier list with a minimal environment and refuses invalid paths', () => {
+    const list = join(folder, 'explicit-list.json'), file = join(folder, 'explicit-content.txt');
+    writeFileSync(list, JSON.stringify({fixture: ['explicit_fixture_identifier']}));
+    writeFileSync(file, 'explicit_fixture_identifier');
+    const run = args => spawnSync(process.execPath, ['tools/osd-leak-scan.mjs', '--redact', ...args, '--paths', file],
+      {env: {PATH: process.env.PATH, HOME: process.env.HOME, LANG: process.env.LANG}, encoding: 'utf8'});
+    const found = run(['--identifiers', list]);
+    assert.equal(found.status, 1);
+    assert.match(found.stderr, /identifier/);
+    assert.ok(!(found.stdout + found.stderr).includes('explicit_fixture_identifier'));
+    const missing = run(['--identifiers', join(folder, 'missing-list.json')]);
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /not valid JSON/);
+    for (const args of [['--identifiers'], ['--identifiers', list, '--identifiers', list]]) {
+      const invalid = run(args);
+      assert.equal(invalid.status, 2);
+      assert.match(invalid.stderr, /needs one list path/);
+    }
+  });
 
   it("treats only declared embedding vector fields as opaque bytes", () => {
     const fixture = join(folder, "packs", "zvdb", "fixtures");
@@ -136,7 +171,7 @@ describe("leak scanner", () => {
     const category = "zz secret category";
     const name = "zzleakprobename";
     mkdirSync(join(root, ".local"), {recursive: true});
-    writeFileSync(join(root, ".local", "leak-identifiers.json"), JSON.stringify({[category]: [name]}));
+    writeFileSync(join(root, ".local", "leak-identifiers.json"), JSON.stringify({preceding: ["unused_fixture_identifier"], [category]: [name]}));
     const file = join(root, "draft.txt");
     writeFileSync(file, `text mentioning ${name.toUpperCase()} here\n`);
     const run = (...extra) => spawnSync(process.execPath,
@@ -154,7 +189,28 @@ describe("leak scanner", () => {
       assert.equal(result.status, 1);
       assert.doesNotMatch(result.stderr, new RegExp(name, "i"));
       assert.doesNotMatch(result.stderr, new RegExp(category));
-      assert.match(result.stderr, /категория #1 \(текст\): sha256:[0-9a-f]{8}/);
+      assert.match(result.stderr, /identifier/);
+      assert.doesNotMatch(result.stderr, /категория|identifier-\d|category #/);
+      assert.doesNotMatch(result.stderr, /sha256:|[0-9a-f]{8}/);
+    });
+
+    it("keeps CI-mode output free of value fingerprints", () => {
+      const result = spawnSync(process.execPath, ["tools/osd-leak-scan.mjs", root, "--paths", file],
+        {encoding: "utf8", env: {...process.env, OSD_LEAK_REDACT: "1"}});
+      assert.equal(result.status, 1);
+      assert.equal(!result.stderr.toLowerCase().includes(name.toLowerCase()), true);
+      assert.equal(!result.stderr.includes(category), true);
+      assert.equal(!/sha256:|[0-9a-f]{8}/.test(result.stderr), true);
+    });
+
+    it("rejects value fingerprints in the repository allow file as BAD_ALLOW", () => {
+      writeFileSync(join(root, '.leak-allow.json'), JSON.stringify({allow: [{file: 'draft.txt', value: `sha256:${'a'.repeat(64)}`, reason: 'fixture'}]}));
+      try {
+        const result = run('--paths', file, '--redact');
+        assert.equal(result.status, 3);
+        assert.match(result.stderr, /BAD_ALLOW/);
+        assert.doesNotMatch(result.stderr, /a{64}/);
+      } finally { rmSync(join(root, '.leak-allow.json')); }
     });
 
     it("does not quote a malformed list", () => {
@@ -198,7 +254,7 @@ describe("leak scanner", () => {
       const result = run("--print-masks");
       assert.equal(result.status, 0);
       assert.deepEqual(result.stdout.trim().split("\n").sort(),
-        [`::add-mask::${category}`, `::add-mask::${name}`].sort());
+        ["::add-mask::preceding", "::add-mask::unused_fixture_identifier", `::add-mask::${category}`, `::add-mask::${name}`].sort());
     });
   });
 });

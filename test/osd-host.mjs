@@ -4,7 +4,7 @@ import {mkdtempSync, mkdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {delimiter, join} from "node:path";
 import {inputFoldersOf} from "../tools/osd-packs.mjs";
-import {compiled, serveCommand, toolCommand, unitCommand, dataDirOf, homesIn, layerList, isCheckout} from "../tools/osd-host.mjs";
+import {compiled, serveCommand, toolCommand, toolCommandIn, unitCommand, dataDirOf, homesIn, layerList, isCheckout} from "../tools/osd-host.mjs";
 
 // The host module: which process starts which, in a checkout and in the
 // binary. Under mocha this is a checkout, so the commands are node + path;
@@ -18,6 +18,28 @@ describe("tools/osd-host: how a tool starts another tool", () => {
     expect(toolCommand("/x/tools/cds2ddic.mjs", ["--all"])).to.deep.equal([process.execPath, "/x/tools/cds2ddic.mjs", "--all"]);
     expect(serveCommand("/x/tools/osd-serve.mjs")).to.deep.equal([process.execPath, "/x/tools/osd-serve.mjs"]);
     expect(unitCommand("/x/tools/osd-unit.mjs", ["CLAS", "ZCL_X", "--json"])).to.deep.equal([process.execPath, "/x/tools/osd-unit.mjs", "CLAS", "ZCL_X", "--json"]);
+  });
+
+  it("selects an explicit child environment while preserving the inherited host for other callers", () => {
+    const saved = process.env.OSD_SELF;
+    const script = "/x/tools/cds2ddic.mjs", args = ["--all"];
+    const parent = ["/fixture/parent-host", "--parent"], child = ["/fixture/child-host"];
+    try {
+      delete process.env.OSD_SELF;
+      expect(toolCommand(script, args)).to.deep.equal([process.execPath, script, ...args]);
+      process.env.OSD_SELF = JSON.stringify(parent);
+      expect(toolCommand(script, args)).to.deep.equal([...parent, "gen", "cds2ddic.mjs", ...args]);
+      for (const env of [{}, {OSD_SELF: ""}]) {
+        expect(toolCommandIn(env, script, args)).to.deep.equal([process.execPath, script, ...args]);
+        expect(toolCommandIn(env, script)).to.deep.equal([process.execPath, script]);
+      }
+      expect(toolCommandIn({OSD_SELF: JSON.stringify(child)}, script, args)).to.deep.equal([...child, "gen", "cds2ddic.mjs", ...args]);
+      process.env.OSD_SELF = "invalid parent JSON";
+      expect(toolCommandIn({}, script, args)).to.deep.equal([process.execPath, script, ...args]);
+      expect(() => toolCommand(script, args)).to.throw(SyntaxError);
+    } finally {
+      if (saved === undefined) delete process.env.OSD_SELF; else process.env.OSD_SELF = saved;
+    }
   });
 });
 

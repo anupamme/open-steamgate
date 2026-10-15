@@ -6,7 +6,7 @@ const crcTable = Array.from({length: 256}, (_, n) => {
 });
 const crc32 = bytes => {
   let n = 0xffffffff;
-  for (const b of bytes) n = crcTable[(n ^ b) & 255] ^ (n >>> 8);
+  for (const b of bytes) n = crcTable.at((n ^ b) & 255) ^ (n >>> 8);
   return (n ^ 0xffffffff) >>> 0;
 };
 export function archiveFiles(bytes) {

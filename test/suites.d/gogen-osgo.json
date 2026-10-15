@@ -1,5 +1,8 @@
 {
   "files": [
+    "test/osd-system-publish.mjs",
+    "test/oci-release-workflow.mjs",
+    "test/oci-publish-imports.mjs",
     "test/irjs-progress.mjs",
     "test/generation-diff.mjs",
     "test/generation-hash.mjs",

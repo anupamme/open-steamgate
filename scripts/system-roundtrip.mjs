@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Dev proof only: all registry traffic stays in the in-process loopback fixture.
 import {spawn, execFileSync} from "node:child_process";
-import {cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync} from "node:fs";
+import {cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {dirname, join, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
@@ -9,10 +9,8 @@ import {registry, listening} from "../test/helpers/oci-registry.mjs";
 import {build} from "../tools/osd-layer.mjs";
 import {MEDIA, push, pushManifest, sha256} from "../tools/osd-oci.mjs";
 import {fetchSystem} from "../tools/osd-system-fetch.mjs";
-import {packsOf} from "../tools/osd-packs.mjs";
 import {readLock} from "../tools/osd-lock.mjs";
-import {libraryPath} from "../tools/osd-lib-path.mjs";
-import {abapgitXml} from "../tools/osd-abapgit-zip.mjs";
+import {stageSystem} from "./system-stage.mjs";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const started = Date.now(), temp = mkdtempSync(join(process.env.OSD_ROUNDTRIP_DIR ?? tmpdir(), "system-roundtrip-"));
 const log = message => console.log(`system-roundtrip: ${message}`);
@@ -48,23 +46,7 @@ try {
     layers.push({name, kind, digest, size: l.manifestBytes.length, zipBytes: l.zip.length, files: l.files.length});
     log(`${kind} ${name}: ${l.files.length} files, ${l.zip.length} bytes`);
   };
-  for (const lib of readLock(root).libraries) await add(realpathSync(libraryPath(root, lib.folder)), lib.folder, "lib");
-  // The src layer is a repository with src/ and the tree's seed rows/pages.
-  const own = join(temp, "own"); mkdirSync(own);
-  for (const folder of ["src", "data", "webapp"]) if (existsSync(join(root, folder))) cpSync(join(root, folder), join(own, folder), {recursive: true});
-  writeFileSync(join(own, ".abapgit.xml"), abapgitXml());
-  await add(own, "src", "input");
-  await add(join(root, "test"), "test", "input");
-  for (const pack of packsOf(root)) {
-    if (pack.missing.length) throw new Error(`unfetched pack: ${pack.name}`);
-    const folder = join(temp, "resolved-packs", pack.name);
-    cpSync(pack.dir, folder, {recursive: true, filter: path => ![".osd-source.json", ".osd-fetched.json"].includes(path.split("/").at(-1))});
-    const declared = JSON.parse(readFileSync(join(folder, "osd-pack.json")));
-    // Preserve fetched folders, including sources not listed in the ABAP projection.
-    delete declared.sources;
-    writeFileSync(join(folder, "osd-pack.json"), JSON.stringify(declared, null, 2) + "\n");
-    await add(folder, pack.name, "pack");
-  }
+  for (const layer of stageSystem(root, temp)) await add(layer.folder, layer.name, layer.kind);
   const lock = readLock(root), index = {schemaVersion: 2, mediaType: MEDIA.index, artifactType: "application/vnd.osd.system.v1",
     manifests: layers.map((l, order) => ({mediaType: MEDIA.manifest, digest: l.digest, size: l.size,
       annotations: {"org.osd.layer.name": l.name, "org.osd.layer.kind": l.kind, "org.osd.layer.order": String(order)}})),

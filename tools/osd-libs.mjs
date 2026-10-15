@@ -1,16 +1,17 @@
 #!/usr/bin/env node
+import {publishChildEnv, devChildEnv, isolatedGitEnv} from './osd-env.mjs';
 // Materialise locked library commits and keep .local/lars as the public path.
 import {execFileSync} from "node:child_process";
 import {chmodSync, closeSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync} from "node:fs";
 import {basename, dirname, isAbsolute, join, relative, resolve, sep} from "node:path";
-import {pathToFileURL} from "node:url";
 import {runsAs} from "./osd-main.mjs";
 import {librariesFromLock} from "./osd-lock.mjs";
 import {libraryPath} from "./osd-lib-path.mjs";
 
-const git = (cwd, ...args) => execFileSync("git", args, {cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
-  env: {...process.env, GIT_CEILING_DIRECTORIES: dirname(resolve(cwd)),
-    ...(args[0] === "init" ? {} : {GIT_DIR: resolve(cwd, ".git"), GIT_WORK_TREE: resolve(cwd)})}}).trim();
+import {releaseGitSource, releaseGitConfig} from "./osd-release-git.mjs";
+
+let releaseMode = false;
+const git = (cwd, ...args) => execFileSync("git", [...(releaseMode ? releaseGitConfig : []), ...args], {env: isolatedGitEnv(releaseMode ? publishChildEnv('git') : devChildEnv(), cwd, args), cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"]}).trim();
 const exists = (path) => { try { lstatSync(path); return true; } catch { return false; } };
 const head = (path) => { try { return git(path, "rev-parse", "HEAD"); } catch { return "missing"; } };
 const SHARED_CMD = "node tools/osd-libs.mjs --sync --shared";
@@ -52,13 +53,13 @@ function repairWorktreePin(lib) {
     if (!lstatSync(join(lib.pin, ".git")).isFile()) return;
     link = readFileSync(join(lib.pin, ".git"), "utf8");
   } catch { return; }
-  const match = /^gitdir:\s*(.+?)\s*$/m.exec(link);
-  if (!match || exists(match[1])) return;
-  const id = basename(match[1]);
+  const gitdir = link.split("\n").find(line => line.startsWith("gitdir:"))?.slice("gitdir:".length).trim();
+  if (!gitdir || exists(gitdir)) return;
+  const id = basename(gitdir);
   chmodSync(join(lib.pin, ".git"), (lstatSync(join(lib.pin, ".git")).mode & 0o7777) | 0o200); // repair rewrites it
   for (const clone of [lib.dev, lib.at]) {
     if (exists(join(clone, ".git", "worktrees", id)) && isClone(clone)) {
-      git(clone, "worktree", "repair", resolve(lib.pin));
+      git(clone, "worktree", "repair", "--", resolve(lib.pin));
       return;
     }
   }
@@ -83,9 +84,9 @@ export function missing(root = ".") {
 
 function cloneInto(path, lib) {
   git(path, "init", "--quiet");
-  git(path, "remote", "add", "origin", lib.url);
-  git(path, "fetch", "--quiet", "--depth", "1", "origin", lib.ref);
-  git(path, "checkout", "--quiet", "--detach", "FETCH_HEAD");
+  git(path, "remote", "add", "--", "origin", lib.url);
+  git(path, "fetch", "--quiet", "--depth", "1", "--", "origin", lib.ref);
+  git(path, "switch", "--quiet", "--detach", "--", "FETCH_HEAD");
   if (head(path) !== lib.ref) throw new Error(`${lib.name}: fetched a different commit`);
 }
 
@@ -159,7 +160,14 @@ function pointAtPin(lib, shared = false, say = () => {}) {
 }
 
 /** CI keeps real .local/lars clones for the existing artifact and restore path. */
-export function materialise(root = ".", say = () => {}, {ci = process.env.CI === "true", remote = {}, shared = false} = {}) {
+export function materialise(root = ".", say = () => {}, {ci = process.env.CI === "true", remote = {}, shared = false, release = false} = {}) {
+  const previousMode = releaseMode;
+  releaseMode = release;
+  try { return materialiseLibraries(root, say, {ci, remote, shared, release}); }
+  finally { releaseMode = previousMode; }
+}
+
+function materialiseLibraries(root, say, {ci, remote, shared, release}) {
   if (shared) ci = false; // an explicit migration is never the CI clone path
   const made = [];
   const libs = libraries(root);
@@ -168,7 +176,9 @@ export function materialise(root = ".", say = () => {}, {ci = process.env.CI ===
     if (sharedClone) throw new Error(`${sharedClone.name}: ${sharedClone.at} is shared by worktrees; run ${SHARED_CMD} to migrate it (from any checkout)`);
   }
   for (const lib of libs) {
-    if (remote[lib.name]) lib.url = remote[lib.name];
+    const override = Object.entries(remote).find(([name]) => name === lib.name)?.at(1);
+    if (override) lib.url = override;
+    if (release) releaseGitSource(lib.url, lib.ref);
     if (ci) {
       if (!exists(lib.at)) {
         mkdirSync(dirname(lib.at), {recursive: true});
@@ -182,7 +192,7 @@ export function materialise(root = ".", say = () => {}, {ci = process.env.CI ===
       pointAtPin(lib, shared, say);
       made.push(lib.name);
     }
-    libraryPath(root, lib.name);
+    libraryPath(root, lib.name, undefined, release);
     say(`osd-libs: ${lib.name} @ ${lib.ref} via ${lib.at}`);
   }
   return made;
@@ -203,7 +213,7 @@ export function status(root = ".", say = console.log) {
 export async function checkLicences(root = ".") {
   const module = join(resolve(root), "docker", "image", "license-assumptions.mjs");
   if (!exists(module)) return false;
-  const {checkLockLicences} = await import(pathToFileURL(module).href);
+  const {checkLockLicences} = await import("./osd-license-assumptions.mjs");
   checkLockLicences(root);
   return true;
 }
@@ -215,5 +225,5 @@ if (runsAs("osd-libs.mjs")) {
   else if (process.argv.includes("--check")) {
     for (const lib of libraries(root)) libraryPath(root, lib.name);
     console.log(`${libraries(root).length} libraries at locked commits`);
-  } else materialise(root, console.log, {shared: process.argv.includes("--shared")});
+  } else materialise(root, console.log, {shared: process.argv.includes("--shared"), release: process.argv.includes("--release")});
 }
