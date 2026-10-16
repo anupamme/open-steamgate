@@ -116,6 +116,7 @@ export type OwnershipSafetyMap = ReadonlyMap<string, OwnershipSafety>;
 export interface FindState extends Omit<Mutable<Extract<FrontendStmt, {s: "find"}>>, "subs"> {
   subs: {target: Expr; value: Expr}[];
 }
+export interface StaticMethodIdentity { readonly name: string; readonly static?: boolean }
 export interface MethodName { getName: () => string }
 export interface ComparisonText { concatTokens: () => string }
 export interface LineExistsHead {

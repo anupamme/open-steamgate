@@ -12,7 +12,7 @@ export function dynamicAdapters(program) {
 
 // A missing MOVE conversion becomes an ABAP dynamic-call type error at dispatch.
 export function dynamicResultMoves(program, method, target) {
-  const moves = [];
+  /** @type {import("./emit-go-types.ts").DynamicResultMove[]} */ const moves = [];
   for (const {key, m} of dynamicAdapters(program)) {
     if (!key.endsWith(`=>${method}`) || !m.returning) continue;
     try {
