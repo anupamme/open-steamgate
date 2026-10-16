@@ -207,8 +207,8 @@ import {textLiteral} from "./frontend-literals.ts";
 
 // Shared with an ordinary method call whose importing argument is omitted.
 /** @param {import("./frontend-types.ts").FrontendParam} p @param {import("./frontend-types.ts").NamedContext} ctx @returns {import("./ir.ts").Argument} */ function omittedArgument(p, ctx) {
-  return {dir: "importing", byValue: p.byValue, type: p.type,
-    value: p.default !== undefined ? defaultValue(p, ctx) : {e: "zero", type: p.type}};
+  if (p.default !== undefined) return {dir: "importing", byValue: p.byValue, type: p.type, value: defaultValue(p, ctx)};
+  return {dir: "importing", byValue: p.byValue, type: p.type, value: {e: "zero", type: p.type}};
 }
 
 // Host exceptions use the ordinary call IR, including defaults, references,

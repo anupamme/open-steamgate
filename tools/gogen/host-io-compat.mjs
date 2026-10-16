@@ -13,8 +13,10 @@ export function readFileSync(file, _encoding) {
 
 export const isSourceIdentity = (file) => basename(file) === SOURCE;
 export function readdirSync(dir, options) {
-  return options?.withFileTypes
-    ? listEntries(dir).map(([name, directory]) => {
-      /** @type {import("./host-io.ts").DirectoryEntry} */ const entry = {name, isDirectory: () => directory}; return entry; })
-    : listDir(dir);
+  if (options?.withFileTypes) {
+    return listEntries(dir).map(([name, directory]) => {
+      /** @type {import("./host-io.ts").DirectoryEntry} */ const entry = {name, isDirectory: () => directory}; return entry;
+    });
+  }
+  return listDir(dir);
 }

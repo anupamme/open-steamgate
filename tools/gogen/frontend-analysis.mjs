@@ -52,11 +52,14 @@ export function samcOf(folders) {
 // Keep failures out of the serializable map and defer them until SQL uses a
 // view. The map belongs to the registry, including reused registry compiles.
 /** @type {WeakMap<Record<string, string>, Map<string, string>>} */ const cdsFailures = new WeakMap();
-const cdsObservers = new WeakMap();
+/** @type {WeakMap<Record<string, string>, (name: string) => void>} */ const cdsObservers = new WeakMap();
 // Registry/provenance hooks are injected so these analyses stay source-only.
+/** @param {Record<string, string> | undefined} views @param {(name: string) => void} observe */
 export const bindCdsRegistry = (views, observe) => { if (views) cdsObservers.set(views, observe); };
+/** @param {Record<string, string>} views @param {string} name */
 export const cdsMappingError = (views, name) => {
-  cdsObservers.get(views)?.(name);
+  const observe = cdsObservers.get(views);
+  if (observe) observe(name);
   return cdsFailures.get(views)?.get(name);
 };
 function sqlViewName(annotations) {
