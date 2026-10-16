@@ -1,4 +1,5 @@
 import {parseObserved} from "./frontend-inventory.mjs";
+import {projectionAnswer} from "./frontend-query-contract.mjs";
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {mkdtempSync, writeFileSync, rmSync, readdirSync, readFileSync} from "node:fs";
@@ -9,7 +10,7 @@ import {classSource, syntheticCorpus} from "./cache-oracle-corpus.mjs";
 import {compareArtifacts, artifactsOf} from "./cache-oracle-capture.mjs";
 import {provenanceOf, recordProvenance} from "./frontend-provenance.mjs";
 import {core} from "./frontend-inventory.mjs";
-import {keyComputer} from "./frontend-v3-key.mjs";
+import {keyComputer, sealDependencyGraph, hashV3} from "./frontend-v3-key.mjs";
 
 function scratch(run) {
   const dir = mkdtempSync(join(tmpdir(), "gogen-v3-"));
@@ -151,3 +152,73 @@ test("completeness is recomputed: every dependency/raw hash and unknown marker m
   node.rows.push({role: "artifact", kind: "getFileByName", args: ["z.clas.abap"], result: ["z.clas.abap"]});
   assert.match(compute(graph, "CLAS Z", value).reason, /missing-raw-hash/);
 });
+
+
+test("component keys ignore traversal numbering and guard every member of a dependency cycle", () => {
+  const reg = {getObjects: () => [], getConfig: () => ({get: () => ({})})};
+  const program = {reg, supplied: new Map()}, value = {name: "A", replay: {ops: []}};
+  const node = (owner, digest, dependencies = []) => ({owner, digest, dependencies, rows: []});
+  const nodes = {"CLAS A": node("CLAS A", "a", ["CLAS B"]), "CLAS B": node("CLAS B", "b", ["CLAS A"]),
+    "CLAS OTHER": node("CLAS OTHER", "other")};
+  const compute = keyComputer(reg, "components-test", program);
+  const before = compute({nodes}, "CLAS A", value);
+  const reordered = compute({nodes: Object.fromEntries(Object.entries(nodes).reverse())}, "CLAS A", value);
+  assert.equal(before.complete, true); assert.equal(reordered.key, before.key);
+  const changed = {nodes: {...nodes, "CLAS B": node("CLAS B", "changed", ["CLAS A"])}};
+  assert.notEqual(compute(changed, "CLAS A", value).key, before.key);
+  const other = compute({nodes}, "CLAS OTHER", {...value, name: "OTHER"});
+  assert.equal(compute(changed, "CLAS OTHER", {...value, name: "OTHER"}).key, other.key);
+});
+
+test("thousands of consumers share a cyclic certificate instead of rewalking global inventories", () => {
+  const reg = {getObjects: () => [], getConfig: () => ({get: () => ({})})};
+  const count = 3000, nodes = {}, roots = [];
+  const globalRows = Array.from({length: count}, (_, i) => ({role: "final-output", kind: "test-inventory", args: [], result: [String(i)]}));
+  for (let i = 0; i < count; i++) {
+    const owner = `CLAS K${i}`, root = `lowering:${owner}`; roots.push(root);
+    nodes[owner] = {owner, digest: `digest-${i}`, dependencies: [`CLAS K${(i + 1) % count}`], rows: globalRows};
+    nodes[root] = {owner, digest: `digest-${i}`, dependencies: [owner], rows: globalRows};
+  }
+  const graph = sealDependencyGraph({nodes}), compute = keyComputer(reg, "large-components", {reg, supplied: new Map()});
+  const started = performance.now(), keys = new Set();
+  for (const root of roots) {
+    const result = compute(graph, root, {name: root, replay: {ops: []}});
+    assert.equal(result.complete, true); keys.add(result.key);
+  }
+  assert.equal(keys.size, count);
+  assert.ok(performance.now() - started < 10000, "shared closure hashing must not revisit every inventory per consumer");
+});
+
+
+test("supplied projection certificates observe mutable data and ignore contributor ordering", () => {
+  const providers = ["CLAS B", "CLAS A"], answer = {providers, result: providers, parameters: ["IV"]};
+  const before = hashV3(projectionAnswer(answer));
+  assert.equal(hashV3(projectionAnswer({...answer, providers: [...providers].reverse(), result: [...providers].reverse()})), before);
+  providers[0] = "CLAS CHANGED";
+  assert.notEqual(hashV3(projectionAnswer(answer)), before);
+  const nested = {value: 1}, shallow = Object.freeze([nested]);
+  const old = hashV3(projectionAnswer({result: shallow})); nested.value = 2;
+  assert.notEqual(hashV3(projectionAnswer({result: shallow})), old);
+});
+
+test("an implementation body edit does not invalidate every reader of an interface's supplied projection", () => scratch((dir) => {
+  put(dir, {"zif_work.intf.abap": "INTERFACE zif_work PUBLIC. METHODS work IMPORTING iv TYPE i OPTIONAL RETURNING VALUE(rv) TYPE i. ENDINTERFACE.",
+    "zreader.clas.abap": "CLASS zreader DEFINITION PUBLIC. PUBLIC SECTION. CLASS-METHODS run IMPORTING obj TYPE REF TO zif_work RETURNING VALUE(rv) TYPE i. ENDCLASS. CLASS zreader IMPLEMENTATION. METHOD run. rv = obj->work( ). ENDMETHOD. ENDCLASS."});
+  const implementation = (body) => `CLASS zprovider DEFINITION PUBLIC. PUBLIC SECTION. INTERFACES zif_work. ENDCLASS. CLASS zprovider IMPLEMENTATION. METHOD zif_work~work. ${body} ENDMETHOD. ENDCLASS.`;
+  const names = ["ZREADER"];
+  for (let i = 0; i < 32; i++) {
+    const name = `ZP${String(i).padStart(2, "0")}`; names.push(name);
+    put(dir, {[`${name.toLowerCase()}.clas.abap`]: implementation("rv = 1.").replaceAll("zprovider", name.toLowerCase())});
+  }
+  const options = {dependencyCache: true, provenance: false};
+  build(dir, names, options);
+  assert.equal(build(dir, names, options).frontendCounts.lowered, 0);
+  put(dir, {"zp00.clas.abap": implementation("rv = 2.").replaceAll("zprovider", "zp00")});
+  const edited = build(dir, names, options);
+  assert.deepEqual(edited.frontendCounts.loweredClasses, ["ZP00"]);
+  assert.equal(compareArtifacts(artifactsOf(edited), artifactsOf(build(dir, names, {cacheDir: undefined}))).equal, true);
+  put(dir, {"zp00.clas.abap": implementation("IF iv IS SUPPLIED. rv = iv. ELSE. rv = 2. ENDIF.").replaceAll("zprovider", "zp00")});
+  const supplied = build(dir, names, options);
+  assert.ok(supplied.frontendCounts.loweredClasses.includes("ZREADER"));
+  assert.equal(compareArtifacts(artifactsOf(supplied), artifactsOf(build(dir, names, {cacheDir: undefined}))).equal, true);
+}));

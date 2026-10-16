@@ -12,6 +12,15 @@ const definition = (v) => v && typeof v === "object" && definitions.has(v.constr
 const MAX_VALUES = 65536, MAX_FINGERPRINT_CHARS = 1 << 20;
 const MAX_OPS = 65536, MAX_TRANSCRIPT_CHARS = 1 << 24;
 function fingerprint(value, registry) {
+  const kind = typeof value;
+  if (value === undefined) return undefined;
+  if (value === null || kind === "boolean") return value === null ? "null" : value ? "true" : "false";
+  if (kind === "number" || kind === "string") {
+    if (kind === "string" && value.length > MAX_FINGERPRINT_CHARS) throw new RangeError("replay fingerprint budget");
+    const encoded = JSON.stringify(value);
+    if (encoded.length > MAX_FINGERPRINT_CHARS) throw new RangeError("replay fingerprint budget");
+    return encoded;
+  }
   let values = 0, characters = 0;
   const fault = process.env.GOGEN_CACHE_ORACLE_FAULT;
   const locationOnly = fault === "fingerprint-location-only" || fault === "no-version,fingerprint-location-only";
@@ -64,10 +73,11 @@ export function recordLowering(program, lower) {
     // values, so aliases changed and restored between reads remain unsafe.
     if (op.kind === "assign" || op.kind === "effect") seen.delete(op.key);
     else if ((op.args ?? []).every((a) => a === null || ["undefined", "string", "number", "boolean"].includes(typeof a))) {
-      if (!seen.has(op.key)) seen.set(op.key, new Set());
-      const reads = seen.get(op.key), id = JSON.stringify([op.kind, op.method, op.args, op.value]);
-      if (reads.has(id)) return;
-      reads.add(id);
+      if (!seen.has(op.key)) seen.set(op.key, new Map());
+      const reads = seen.get(op.key), id = JSON.stringify([op.kind, op.method, op.args]);
+      if (!reads.has(id)) reads.set(id, new Set());
+      if (reads.get(id).has(op.value)) return;
+      reads.get(id).add(op.value);
     }
     characters += typeof op.value === "string" ? op.value.length : 0;
     for (const arg of op.args ?? []) if (typeof arg === "string") characters += arg.length;

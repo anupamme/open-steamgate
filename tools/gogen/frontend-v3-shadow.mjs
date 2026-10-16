@@ -7,7 +7,7 @@ import {join} from "node:path";
 import {createHash, randomUUID} from "node:crypto";
 import {serialize, deserialize} from "node:v8";
 import {deflateRawSync, inflateRawSync} from "node:zlib";
-import {keyComputer, hashV3, mismatchReason, borrowedOwners} from "./frontend-v3-key.mjs";
+import {keyComputer, hashV3, mismatchReason, borrowedOwners, sealDependencyGraph} from "./frontend-v3-key.mjs";
 import {recordLowering, replayLowering, copyReplayProgram} from "./frontend-replay.mjs";
 import {auditedBookkeeping, auditBuiltArtifacts} from "./frontend-provenance.mjs";
 const checksum = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -47,7 +47,7 @@ export function shadowCache(reg, root, namespace, portable) {
     if (!graphs.has(id)) {
       const bytes = readFileSync(join(dir(), `${id}.provenance`));
       if (checksum(bytes) !== id) throw new Error("bad v3 graph checksum");
-      graphs.set(id, deserialize(inflateRawSync(bytes)));
+      graphs.set(id, sealDependencyGraph(deserialize(inflateRawSync(bytes))));
     }
     return graphs.get(id);
   };
@@ -121,6 +121,7 @@ export function shadowCache(reg, root, namespace, portable) {
       }
     },
     finish(graph, entries, program) {
+      sealDependencyGraph(graph);
       begin(program, false);
       if (auditBuiltArtifacts(reg)) {
         stats.persistenceRefused = "audit-built-artifact";

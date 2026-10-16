@@ -153,11 +153,11 @@ export type Role = 'artifact' | 'scheduling' | 'final-output';
 export type QueryScalar = string | number | boolean | null | undefined;
 export interface QueryBase {
   args: QueryScalar[];
-  result: QueryScalar[];
+  result: readonly QueryScalar[];
   role?: Role;
   phase?: string;
   artifact?: string;
-  providers?: string[];
+  providers?: readonly string[];
   scan?: string;
   complete?: boolean;
   policy?: string;

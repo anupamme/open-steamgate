@@ -26,14 +26,22 @@ import {enumerateObjects, semanticQuery, withArtifact, withRole, recordingProven
       }
     }, "supplied-index");
   }
-  suppliedIndexes.set(reg, recording ? {reg, providers, declarations} : undefined);
+  suppliedIndexes.set(reg, recording ? {reg, providers, declarations, providerLists: new Map()} : undefined);
   return out;
 }
 
+const emptyProviders = Object.freeze([]);
+/** @param {import("./frontend-cache-types.ts").SuppliedIndex} index @param {string} key @returns {readonly string[]} */ function providerList(index, key) {
+  if (!index.providerLists.has(key)) index.providerLists.set(key, Object.freeze([...index.providers.get(key) ?? []]));
+  return index.providerLists.get(key) ?? emptyProviders;
+}
 /** @param {import("./frontend-cache-types.ts").QueryProgram} program @param {string} key @returns {Set<string> | undefined} */ export function suppliedAnswer(program, key) {
   const set = program.supplied?.get(key), index = suppliedIndexes.get(program.reg);
-  if (index) semanticQuery(index.reg, "supplied", key.split("=>"), set?.size ? [...index.providers.get(key) ?? []] : [],
-    {parameters: [...set ?? []], providers: [...index.providers.get(key) ?? []], policy: "selected-contributions"});
+  if (index) {
+    const providers = providerList(index, key);
+    semanticQuery(index.reg, "supplied", key.split("=>"), set?.size ? providers : emptyProviders,
+      {parameters: [...set ?? []], providers, policy: "selected-contributions"});
+  }
   return set;
 }
 
@@ -54,7 +62,7 @@ import {enumerateObjects, semanticQuery, withArtifact, withRole, recordingProven
   if (query.kind === "supplied") {
     const key = query.args.join("=>"), index = suppliedIndexes.get(program.reg);
     if (!index) throw new Error("supplied index unavailable");
-    const parameters = [...program.supplied.get(key) ?? []], providers = [...index.providers.get(key) ?? []];
+    const parameters = [...program.supplied.get(key) ?? []], providers = providerList(index, key);
     return {result: parameters.length ? providers : [], parameters, providers};
   }
   if (query.kind === "locals") {

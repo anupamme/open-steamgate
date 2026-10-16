@@ -71,6 +71,23 @@ case that consumes their result; reads and owner/friend writes avoid that scan.
 Emission indexes dynamic adapters and filters by the requested method before
 resolving result conversions, rather than rebuilding every adapter per call.
 
+Dependency keys now hash strongly connected components once per immutable
+graph, then combine their content certificates. Traversal numbers never enter
+the key; sorted symbolic members, artifact digests, query answers and child
+certificates do. Mutable graphs supplied by callers are recomputed. The preserved
+first-pass graph contains 6,184,673 artifact query rows; an offline probe computed
+877 saved entry keys in 43.0 seconds, rather than revisiting the shared closure
+for each entry.
+
+The `supplied/selected-contributions` query guards its actual projection:
+provider identities and the complete supplied-parameter set rebuilt from parsed
+methods. An unrelated implementation-body edit no longer becomes a raw-source
+dependency of every consumer of that projection. Other query contracts retain
+their artifact/raw-file guards. Frozen provider lists are shared, and only
+immutable scalar arrays receive memoized set certificates. Tests cover body
+edits, added `IS SUPPLIED`, new implementors, dependency cycles, mutable answers
+and the existing mutation oracle.
+
 ## Reproduction and evidence
 
 `GOGEN_CACHE_DIAGNOSTICS=<file>` appends opt-in NDJSON with per-class hit/miss,

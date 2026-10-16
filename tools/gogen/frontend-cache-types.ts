@@ -7,6 +7,7 @@ export interface CaughtEntry {size: number; own: string[]}
 export interface SuppliedIndex {
   reg: Registry;
   providers: Map<string, Set<string>>;
+  providerLists: Map<string, readonly string[]>;
   declarations: Map<string, string>;
 }
 export interface QueryProgram {
@@ -16,8 +17,8 @@ export interface QueryProgram {
 }
 export interface QueryContext {reg: Registry; program: QueryProgram}
 export interface CurrentQueryAnswer {
-  result: (string | number | boolean | null | undefined)[];
-  providers: string[];
+  result: readonly (string | number | boolean | null | undefined)[];
+  providers: readonly string[];
   parameters?: string[];
   descriptor?: LockDescriptor | 'MISSING';
 }

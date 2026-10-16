@@ -1,3 +1,4 @@
+import {projectedQuery, projectionAnswer} from "./frontend-query-contract.mjs";
 // Observational tracing only: no cache key, parser invalidation or replay decisions.
 import {inputSnapshot, objectKey, artifactIdentity as artifacts, sameArtifactIdentity} from "./frontend-inventory.mjs";
 import {createRequire} from "node:module";
@@ -93,11 +94,11 @@ class Recorder {
     const entry = role === "scheduling" ? state.scheduling : role === "final-output" ? state.finalOutput : this.own(state, owner);
     const simple = ["getObject", "getFileByName", "findObjectForFile", "getFirstObject"].includes(query.kind);
     const id = simple ? `${role}\0${phase}\0${owner ?? "<registry>"}\0${query.kind}\0${query.args.join("\0")}\u0001${query.result.join("\0")}`
-      : JSON.stringify([role, phase, owner, query]);
+      : JSON.stringify([role, phase, owner, projectedQuery(query) ? projectionAnswer(query) : query]);
     if (entry.queries.has(id)) return;
     const row = {role, artifact: owner ?? "<registry>", phase, ...query};
     entry.queries.set(id, row);
-    if (role === "artifact" && owner && !row.scan) for (const key of [...row.result, ...row.providers ?? []]) {
+    if (role === "artifact" && owner && !row.scan && !projectedQuery(row)) for (const key of [...row.result, ...row.providers ?? []]) {
       if (key !== owner && state.entries.has(key)) entry.edges.add(key);
     }
   }
@@ -338,7 +339,7 @@ class Recorder {
   }
   return objects;
 }
-/** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').Query['kind']} kind @param {import('./frontend-session-types.ts').QueryScalar[]} args @param {import('./frontend-session-types.ts').QueryScalar[]} result @param {Partial<import('./frontend-session-types.ts').Query>} details @returns {void} */ export function semanticQuery(reg, kind, args, result, details = {}) {
+/** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').Query['kind']} kind @param {import('./frontend-session-types.ts').QueryScalar[]} args @param {readonly import('./frontend-session-types.ts').QueryScalar[]} result @param {Partial<import('./frontend-session-types.ts').Query>} details @returns {void} */ export function semanticQuery(reg, kind, args, result, details = {}) {
   if (active) active.query(active.state(reg), {kind, args, result, ...details});
 }
 /** @template T @param {import('./frontend-session-types.ts').Role} role @param {() => T} run @returns {T} */ export function withRole(role, run) {
