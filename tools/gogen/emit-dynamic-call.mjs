@@ -4,18 +4,26 @@ import {convert, Unsupported} from "./frontend.mjs";
 // Registration and RECEIVING conversion share the identities resolved in lowering.
 /** @param {Pick<import("./emit-go-types.ts").ProgramInput, "classes" | "dynamicDispatch">} program */
 export function dynamicAdapters(program) {
+  const classes = new Map(), methods = new Map();
+  for (const cls of program.classes) if (!classes.has(cls.name)) classes.set(cls.name, cls);
   return (program.dynamicDispatch ?? []).map((entry) => {
-    const cls = program.classes.find((c) => c.name === entry.owner);
-    const m = [...cls.methods, ...(cls.stubs ?? [])].find((m) => m.name === entry.method);
-    return {...entry, cls, m};
+    const cls = classes.get(entry.owner);
+    if (!methods.has(cls)) {
+      const index = new Map();
+      for (const method of [...cls.methods, ...(cls.stubs ?? [])])
+        if (!index.has(method.name)) index.set(method.name, method);
+      methods.set(cls, index);
+    }
+    return {...entry, cls, m: methods.get(cls).get(entry.method)};
   });
 }
 
 // A missing MOVE conversion becomes an ABAP dynamic-call type error at dispatch.
 export function dynamicResultMoves(program, method, target) {
   /** @type {import("./emit-go-types.ts").DynamicResultMove[]} */ const moves = [];
-  for (const {key, m} of dynamicAdapters(program)) {
-    if (!key.endsWith(`=>${method}`) || !m.returning) continue;
+  const dynamicDispatch = (program.dynamicDispatch ?? []).filter((entry) => entry.key.endsWith(`=>${method}`));
+  for (const {key, m} of dynamicAdapters({classes: program.classes, dynamicDispatch})) {
+    if (!m.returning) continue;
     try {
       const value = convert({e: "dyn_result", type: m.returning.type}, target);
       moves.push({key, type: m.returning.type, value});

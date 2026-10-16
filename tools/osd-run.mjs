@@ -231,7 +231,9 @@ export function main(args) {
     console.error(e.message);
     return 2;
   }
+  const started = performance.now();
   const result = spawnSync(bin, run.args, {stdio: "inherit"});
+  if (process.env.OSABAP_TIMING === "1") console.error(`OSABAP_TIMING ${JSON.stringify({phase: "run", ms: Math.round(performance.now() - started)})}`);
   if (result.error) {
     console.error(`osd run: ${result.error.message}`);
     return 2;

@@ -311,7 +311,7 @@ test("compacted replay retains input guards across writes and rejects changed in
     return {name: "BASE"};
   });
   const compact = compactLowering(value);
-  assert.ok(compact.replay.ops.length < value.replay.ops.length / 10);
+  assert.ok(compact.replay.ops.length < 20, "recording compacts repeated reads before budgeting");
   const next = program();
   assert.ok(replayLowering(next, compact.replay));
   assert.deepEqual(next, first);
@@ -574,3 +574,37 @@ for (const mode of ["automatic disk", "explicit memory", "explicit memory direct
     } finally { rmSync(dir, {recursive: true, force: true}); }
   });
 }
+
+
+for (const dependencyCache of [false, true]) test(`concurrent fresh compilers publish complete entries (dependency mode ${dependencyCache})`, async () => {
+  const {spawn} = await import("node:child_process");
+  const dir = mkdtempSync(join(tmpdir(), "gogen-cache-concurrent-"));
+  try {
+    const input = join(dir, "input"), cacheDir = join(dir, "cache"); mkdirSync(input);
+    writeFileSync(join(input, "zcl_parallel.clas.abap"), source("zcl_parallel", "rv = 7."));
+    const options = {folders: [input], objects: ["ZCL_PARALLEL"], cacheDir, dependencyCache, provenance: false};
+    const code = `
+      import {compileProgram} from ${JSON.stringify(new URL("frontend.mjs", import.meta.url).href)};
+      import {emitGo} from ${JSON.stringify(new URL("emit-go.mjs", import.meta.url).href)};
+      const program = compileProgram(JSON.parse(process.argv[1]));
+      console.log(JSON.stringify({go: emitGo(program), counts: program.frontendCounts}));
+    `;
+    const run = () => new Promise((resolveResult, reject) => {
+      const child = spawn(process.execPath, ["--input-type=module", "-e", code, JSON.stringify(options)]);
+      let stdout = "", stderr = "";
+      child.stdout.on("data", (chunk) => { stdout += chunk; });
+      child.stderr.on("data", (chunk) => { stderr += chunk; });
+      child.on("error", reject);
+      child.on("close", (status) => {
+        try { assert.equal(status, 0, stderr); resolveResult(JSON.parse(stdout)); }
+        catch (error) { reject(error); }
+      });
+    });
+    const results = await Promise.all([run(), run()]);
+    assert.equal(results[0].go, results[1].go);
+    const warm = await run();
+    assert.equal(warm.go, results[0].go);
+    assert.deepEqual(warm.counts.reusedClasses, ["ZCL_PARALLEL"]);
+    assert.equal(readdirSync(cacheDir, {recursive: true}).some((f) => f.endsWith(".pending")), false);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});

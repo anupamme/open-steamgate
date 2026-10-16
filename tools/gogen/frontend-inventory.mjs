@@ -161,9 +161,9 @@ export function parseObservedAsync(reg, ...args) { return observeParse(reg, args
   const cdsIdentity = cdsInputIdentity(reg);
   if (session && session.cdsInputs !== cdsIdentity) {
     // Compare what this session cached, even if another compile updated the origin.
-    const root = session.cacheDir;
+    const root = session.cacheDir, dependencyCache = session.dependencyCache;
     for (const key of Object.keys(session)) delete session[key];
-    if (root) session.cacheDir = root;
+    if (root) { session.cacheDir = root; session.dependencyCache = dependencyCache; }
   }
   // Preparation can clear session fields, so the caller retains this identity afterwards.
   return cdsIdentity;

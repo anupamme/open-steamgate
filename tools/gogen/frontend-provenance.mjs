@@ -23,7 +23,7 @@ function loadRecorder() {
       finishInputs(program.reg);
       return program;
     };
-    /** @type {boolean | string | undefined} */ const record = expose || (options.cacheDir && options.provenance !== false);
+    /** @type {boolean | string | undefined} */ const record = expose || (options.cacheDir && (options.provenance !== false || options.dependencyCache === true));
     return record ? recordProvenance(run, {expose}) : run();
   };
 }

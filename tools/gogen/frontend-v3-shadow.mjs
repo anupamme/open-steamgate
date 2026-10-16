@@ -1,5 +1,7 @@
-// Observational candidates only. Production object-cache read() never consults
-// this namespace. A missing/corrupt/racing index is an ordinary shadow miss.
+// Dependency candidates. Ordinary object-cache lookup remains global; the
+// runner opt-in may replay a complete, revalidated candidate after a miss.
+// Missing/corrupt/racing indexes always fall back to ordinary lowering.
+import {cacheDiagnostic} from "./frontend-cache-diagnostics.mjs";
 import {mkdirSync, readFileSync, writeFileSync, renameSync, rmSync} from "node:fs";
 import {join} from "node:path";
 import {createHash, randomUUID} from "node:crypto";
@@ -86,6 +88,9 @@ export function shadowCache(reg, root, namespace, portable) {
           if (value.supplied !== suppliedGuard(program, name) || !auditedBookkeeping("v3-shadow-replay-validation", () => replayLowering(trial, value.replay))) {
             refuse("replay-refused"); continue;
           }
+          const own = graph.nodes[owner], lowering = graph.nodes[candidate.root];
+          value.provenance = {rows: [...own.rows, ...lowering.rows],
+            edges: [...new Set([...own.dependencies, ...lowering.dependencies].filter((k) => k !== owner))]};
           row.wouldReuseV3 = true; row.currentComplete = true; row.reason = "would-reuse-v3"; row.key = key;
           return {row, value, trial};
         }
@@ -130,6 +135,7 @@ export function shadowCache(reg, root, namespace, portable) {
       for (const entry of entries) {
         const value = deserialize(entry.valueBytes), root = `lowering:${entry.owner}`;
         const result = computer(program)(graph, root, value);
+        cacheDiagnostic({event: "dependency-key", name: value.name, complete: result.complete, reason: result.reason, key: result.key});
         const row = stats.entries.findLast((r) => r.name === value.name);
         if (row) { row.currentComplete = result.complete; row.completenessReason = result.reason; }
         if (!result.complete) continue;

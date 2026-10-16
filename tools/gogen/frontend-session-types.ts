@@ -118,6 +118,7 @@ export interface CacheDisk {
   shadow?: CacheShadow;
 }
 export interface CacheSession {
+  dependencyCache?: boolean;
   // Preparation clears all own fields, including disk-cache extensions.
   [key: string]: unknown;
   registry: Registry;
@@ -130,7 +131,7 @@ export interface CacheSession {
 export type SessionInput = Partial<CacheSession> | null | undefined;
 // The three disk-cache entry points compileProgram holds when cacheDir is set.
 export interface DiskFrontend {
-  cacheSession(session: SessionInput, registry: Registry, cacheDir: string | undefined): SessionInput;
+  cacheSession(session: SessionInput, registry: Registry, cacheDir: string | undefined, dependencyCache?: boolean): SessionInput;
   prepareDiskSession(session: SessionInput, registry: Registry): void;
   compileDiskClass(ctx: LoweringContext, obj: ClassObject, lower: ClassLowering, session: CacheSession | null | undefined): ClassIR;
 }
@@ -143,6 +144,7 @@ export interface CompileOptions {
   [key: string]: unknown;
   provenance?: boolean;
   cacheDir?: string;
+  dependencyCache?: boolean;
   registry?: Registry;
   session?: Partial<CacheSession> | null;
 }

@@ -61,7 +61,7 @@ const HOST_REPLACED = new Set(["ZCL_OSD_ENQ_KERNEL"]);
  */
 // skip(path): a file not to load, for a layered build where a later folder
 // hides an object an earlier one holds (osg-build.mjs; ultra/packs)
-export const compileProgram = withProvenance(/** @param {import("./frontend-session-types.ts").CompileOptions} options */ function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry, session, cacheDir}) {
+export const compileProgram = withProvenance(/** @param {import("./frontend-session-types.ts").CompileOptions} options */ function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry, session, cacheDir, dependencyCache = false}) {
   const config = abaplint.Config.getDefault().get();
   config.syntax = {...config.syntax, version: "v758", errorNamespace: "."};
   // only the syntax check and parser errors are read below (parser_error is a
@@ -89,10 +89,10 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
         // Later rounds can select any loaded object. Normalize once before
         // parsing so newly selected app classes match a fresh final registry.
         reg.addFile(new abaplint.MemoryFile(e.name,
-          normalizeSource(source, e.name, abaplint)));
+          auditedBookkeeping("input-normalization", () => normalizeSource(source, e.name, abaplint))));
       }
       // a CDS view's source: its SQL view name, for the table registry
-      else if (/\.ddls\.asddls$/i.test(e.name)) ddls.push({filename: path, source: readFileSync(path, "utf8")});
+      else if (/\.ddls\.asddls$/i.test(e.name)) ddls.push({filename: e.name, source: readFileSync(path, "utf8")});
     }
   };
   for (const folder of folders) walk(folder);
@@ -106,7 +106,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
     const {cacheSession, prepareDiskSession, compileDiskClass} = /** @type {typeof import("./frontend-object-cache.mjs")} */ (require("./frontend-object-cache.mjs"));
     diskFrontend = {cacheSession, prepareDiskSession, compileDiskClass};
   }
-  if (diskFrontend) session = diskFrontend.cacheSession(session, reg, cacheDir);
+  if (diskFrontend) session = diskFrontend.cacheSession(session, reg, cacheDir, dependencyCache);
   const cdsIdentity = /** @type {typeof import("./frontend-inventory.mjs")} */ (require("./frontend-inventory.mjs")).prepareCdsSession(session, reg);
   if (diskFrontend) {
     auditedBookkeeping("session-prepare", () => diskFrontend.prepareDiskSession(session, reg)); // Input guards only.

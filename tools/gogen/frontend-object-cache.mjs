@@ -1,3 +1,4 @@
+import {cacheDiagnostic, diagnosticCache} from "./frontend-cache-diagnostics.mjs";
 import {artifactLowering, storedProvenance, inheritStoredProvenance, recordingProvenance} from "./frontend-provenance.mjs";
 import {recordLowering, replayLowering} from "./frontend-replay.mjs";
 // Portable class lowerings. The registry still parses/checks normally; replay
@@ -17,8 +18,11 @@ import {hashV3, graphRawFiles} from "./frontend-v3-key.mjs";
 const here = import.meta.dirname, home = resolve(here, "../..");
 const automatic = new WeakMap();
 const digest = (value) => createHash("sha256").update(value).digest("hex");
-const walk = (dir) => readdirSync(dir, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name))
-  .flatMap((e) => e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]);
+const walk = (dir, toolsOnly = false) => readdirSync(dir, {withFileTypes: true})
+  .sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
+  .flatMap((e) => toolsOnly && (e.name === ".out" || e.name === ".local"
+    || dir.includes("/gogen/go/") && (e.name === "generated" || e.name === "symbols.json" || e.name.startsWith("zz_")))
+    ? [] : e.isDirectory() ? walk(join(dir, e.name), toolsOnly) : [join(dir, e.name)]);
 const identities = new Map();
 let sharedIdentity;
 export function toolIdentity(sourceIndependent = false) {
@@ -28,7 +32,7 @@ export function toolIdentity(sourceIndependent = false) {
     const fileHash = (name, file) => hash.update(JSON.stringify([name, digest(readFileSync(file))]));
     // Actual tool sources, locks and installed builds define the compiler.
     // Repository commits (including docs-only ones) do not change its identity.
-    for (const file of walk(join(home, "tools")).filter((f) => /\.(mjs|ts|cjs|json)$/.test(f))) {
+    for (const file of walk(join(home, "tools"), true).filter((f) => /\.(mjs|ts|cjs|json)$/.test(f))) {
       fileHash(file.slice(home.length), file);
     }
     if (existsSync(join(home, "package-lock.json"))) fileHash("package-lock.json", join(home, "package-lock.json"));
@@ -109,14 +113,15 @@ export function compactLowering(value) {
   return {...value, replay: {...value.replay, ops}};
 }
 
-/** @param {import("./frontend-session-types.ts").SessionInput} session @param {import("./frontend-session-types.ts").Registry} registry @param {string | undefined} cacheDir @returns {import("./frontend-session-types.ts").SessionInput} */
-export function cacheSession(session, registry, cacheDir) {
+/** @param {import("./frontend-session-types.ts").SessionInput} session @param {import("./frontend-session-types.ts").Registry} registry @param {string | undefined} cacheDir @param {boolean} [dependencyCache] @returns {import("./frontend-session-types.ts").SessionInput} */
+export function cacheSession(session, registry, cacheDir, dependencyCache = false) {
   if (!cacheDir) { if (session) delete session.cacheDir; return session; }
   if (!session) {
     session = automatic.get(registry);
     if (!session) automatic.set(registry, session = {});
   }
   session.cacheDir = resolve(cacheDir);
+  session.dependencyCache = dependencyCache;
   return session;
 }
 
@@ -149,7 +154,7 @@ function pruneVersions(root, current) {
 }
 
 /** @returns {import("./frontend-session-types.ts").CacheDisk | undefined} */
-export function objectCache(registry, root) {
+export function objectCache(registry, root, dependencyCache = false) {
   if (!root) return;
   // Test-only. No other environment variable may enable weakened cache keys.
   const faultSpec = process.env.GOGEN_CACHE_ORACLE_FAULT;
@@ -187,6 +192,8 @@ export function objectCache(registry, root) {
   // positions stay in the IR for both emission line modes.
   const version = digest(JSON.stringify(["gogen-global-content-1", toolIdentity(), registry.getConfig().get(),
     fault === "no-version" || drop ? [] : semanticInputs, cdsInputDigest(registry)]));
+  const diagnostic = diagnosticCache(root, {tools: toolIdentity(), config: digest(JSON.stringify(registry.getConfig().get())), inputs: digest(JSON.stringify(semanticInputs)), cds: cdsInputDigest(registry)});
+  cacheDiagnostic({event: "version", version, tools: toolIdentity(), config: digest(JSON.stringify(registry.getConfig().get())), inputs: digest(JSON.stringify(semanticInputs)), cds: cdsInputDigest(registry)});
   const sourceKey = sourceKeys(objects, byName, version, drop);
   const shadow = recordingProvenance() ? shadowCache(registry, root,
     () => hashV3(["gogen-entry-3", toolIdentity(true), registry.getConfig().get()]), portable) : undefined;
@@ -201,7 +208,9 @@ export function objectCache(registry, root) {
     && (op.kind === "measure" || (op.kind === "read" && !op.method)));
   const pending = [], provenanceGraphs = new Map();
   const cache = {
-    shadow,
+    shadow, dependencyCache,
+    diagnose: (owner, name) => diagnostic?.miss(owner, name),
+    refused: (owner, name, reason) => diagnostic?.remember(owner, name, reason),
     begin() { pending.length = 0; shadow?.reset(); },
     read(owner, name, program) {
       // Keep a separate variant only when lowering read the complete closure.
@@ -212,7 +221,9 @@ export function objectCache(registry, root) {
         if (bytes.subarray(0, 64).toString() !== digest(payload)) continue;
         const entry = deserialize(inflateRawSync(payload));
         if (entry.valueBytes) entry.value = {...deserialize(entry.valueBytes), ...entry.value};
-        if (entry.metadata?.graph) {
+        // The global content certificate validates IR independently. Load
+        // provenance only when an observer will consume it.
+        if (entry.metadata?.graph && recordingProvenance()) {
           const id = entry.metadata.graph;
           if (!provenanceGraphs.has(id)) {
             const graphBytes = readFileSync(join(root, version, `${id}.provenance`));
@@ -252,15 +263,23 @@ export function objectCache(registry, root) {
       // are appended to an envelope, without cloning/serializing that graph again.
       try {
         value = compactLowering(value);
-        if (!portable(value)) return false;
+        if (!portable(value)) {
+          diagnostic?.remember(owner, value.name, "nonportable-value");
+          cacheDiagnostic({event: "persist-refused", name: value.name, reason: "nonportable-value"});
+          return false;
+        }
         const {provenance, ...payload} = value;
         pending.push({owner, value: {name: value.name}, valueBytes: serialize(payload),
           reads: [...reads], variant: wholeSelection(value) ? selection(program) : ""});
         return true;
-      } catch { return false; } // Non-portable lowerings compile normally.
+      } catch (error) {
+        diagnostic?.remember(owner, value.name, error.message);
+        cacheDiagnostic({event: "persist-refused", name: value.name, reason: error.message});
+        return false;
+      } // Non-portable lowerings compile normally.
     },
     finish(program) {
-      if (!pending.length) return;
+      if (!pending.length) { diagnostic?.finish(); return; }
       const graph = dependencyGraph(registry, pending.map((e) => e.owner),
         shadow ? pending.flatMap((e) => [...borrowedOwners(deserialize(e.valueBytes))]) : []);
       if (shadow) graphRawFiles(graph, registry);
@@ -280,13 +299,14 @@ export function objectCache(registry, root) {
           artifactDigest: graph.nodes[entry.owner]?.digest ?? null, graph: graphHash, root: `lowering:${entry.owner}`};
         cache.persist(entry);
       }
+      diagnostic?.finish();
     },
     persist({owner, value, valueBytes, reads, program, metadata, variant}) {
       // Repeated reads can exceed the budget before compaction. A transcript
       // with unserializable arguments must still fall back to ordinary lowering.
       if (!valueBytes) {
-        try { value = compactLowering(value); } catch { return; }
-        if (!portable(value)) return;
+        try { value = compactLowering(value); } catch (error) { cacheDiagnostic({event: "persist-refused", name: value.name, reason: error.message}); diagnostic?.remember(owner, value.name, error.message); return; }
+        if (!portable(value)) { cacheDiagnostic({event: "persist-refused", name: value.name, reason: "nonportable-value"}); diagnostic?.remember(owner, value.name, "nonportable-value"); return; }
       }
       const file = location(owner, value.name, variant ?? (wholeSelection(value) ? selection(program) : "")), temp = `${file}.${randomUUID()}.pending`;
       try {
@@ -294,6 +314,8 @@ export function objectCache(registry, root) {
         const payload = deflateRawSync(serialize({key: sourceKey(owner, reads), reads, ...(metadata ? {metadata} : {}), ...(valueBytes ? {valueBytes} : {}), value}), {level: 1});
         writeFileSync(temp, Buffer.concat([Buffer.from(digest(payload) + "\n"), payload]));
         renameSync(temp, file);
+        diagnostic?.remember(owner, value.name, "stored");
+        cacheDiagnostic({event: "persist", name: value.name, key: sourceKey(owner, reads), version, variant: variant ?? (wholeSelection(value) ? selection(program) : "")});
       } catch { /* Cache availability must not change compilation. */ }
       finally { try { rmSync(temp, {force: true}); } catch { /* Unavailable root. */ } }
     },
@@ -311,12 +333,12 @@ export function prepareDiskSession(session, registry) {
   const files = [...registry.getObjects()].flatMap((o) => o.getFiles());
   if (session.registry !== registry || session.config !== registry.getConfig()
       || files.length !== session.files?.length || files.some((f, i) => f !== session.files[i])) {
-    const cacheDir = session.cacheDir;
+    const cacheDir = session.cacheDir, dependencyCache = session.dependencyCache;
     for (const key of Object.keys(session)) delete session[key];
-    Object.assign(session, {registry, config: registry.getConfig(), files, classes: new Map()});
-    if (cacheDir) Object.assign(session, {cacheDir, diskRoot: cacheDir, diskRecording: recordingProvenance(), disk: objectCache(registry, cacheDir)});
+    Object.assign(session, {registry, dependencyCache, config: registry.getConfig(), files, classes: new Map()});
+    if (cacheDir) Object.assign(session, {cacheDir, diskRoot: cacheDir, diskRecording: recordingProvenance(), disk: objectCache(registry, cacheDir, dependencyCache)});
   }
-  if (session.diskRoot !== session.cacheDir || (session.cacheDir && session.diskRecording !== recordingProvenance())) {
+  if (session.diskRoot !== session.cacheDir || session.disk?.dependencyCache !== session.dependencyCache || (session.cacheDir && session.diskRecording !== recordingProvenance())) {
     session.classes.clear();
     if (!session.cacheDir) {
       delete session.diskRoot;
@@ -325,7 +347,7 @@ export function prepareDiskSession(session, registry) {
     }
     session.diskRoot = session.cacheDir;
     session.diskRecording = recordingProvenance();
-    session.disk = objectCache(registry, session.cacheDir);
+    session.disk = objectCache(registry, session.cacheDir, session.dependencyCache);
   }
   session.disk?.begin();
 }
@@ -345,18 +367,29 @@ export const compileDiskClass = artifactLowering(/** @param {import('./frontend-
   let prediction = (process.env.GOGEN_CACHE_SHADOW_VALIDATE === "1" || process.env.GOGEN_CACHE_SHADOW_EXHAUSTIVE === "1")
     ? session?.disk?.shadow?.probe(owner, key, program) : undefined;
   if (prediction) session.disk.shadow.validate(prediction, ctx, obj, lower);
+  let miss = {reason: "no-entry"};
   let cached = session?.classes.get(key);
   const replay = (entry) => entry && entry.file === file && entry.structure === file.getStructure()
-    && entry.supplied === suppliedKey(program, key) && entry.replay && replayLowering(program, entry.replay);
+    && entry.supplied === suppliedKey(program, key) && entry.replay && replayLowering(program, entry.replay, (row) => { miss = row; });
   let valid = replay(cached);
   if (!valid) {
     const stored = session?.disk?.read(owner, key, program);
+    if (!stored) miss = session?.disk?.diagnose?.(owner, key) ?? miss;
     cached = stored?.name === key ? {...stored, file, structure: file.getStructure()} : undefined;
     valid = replay(cached);
+  }
+  if (!valid && session?.disk?.dependencyCache) {
+    prediction ??= session.disk.shadow?.probe(owner, key, program);
+    if (prediction) session.disk.shadow.validate(prediction, ctx, obj, lower);
+    const stored = prediction?.value;
+    cached = stored?.name === key ? {...stored, file, structure: file.getStructure()} : undefined;
+    valid = replay(cached);
+    if (!valid && prediction?.row) miss = {reason: prediction.row.reason};
   }
   if (valid) {
     inheritStoredProvenance(program.reg, obj, cached.provenance);
     Object.assign(program, cached.current);
+    cacheDiagnostic({event: "class", owner, name: key, hit: true});
     counts.reused++;
     counts.reusedClasses.push(key);
     session?.classes.set(key, cached);
@@ -370,12 +403,17 @@ export const compileDiskClass = artifactLowering(/** @param {import('./frontend-
     prediction = session?.disk?.shadow?.probe(owner, key, program);
     if (prediction) session.disk.shadow.validate(prediction, ctx, obj, lower);
   }
+  cacheDiagnostic({event: "class", owner, name: key, hit: false, ...miss});
   counts.lowered++;
   if (prediction) prediction.row.actuallyLowered = true;
   counts.loweredClasses.push(key);
   session?.classes.delete(key);
   const run = () => {
     const recorded = session ? recordLowering(program, (tracked) => lower({...ctx, program: tracked}, obj)) : undefined;
+    if (recorded && !recorded.replay) {
+      cacheDiagnostic({event: "refused", name: key, reason: recorded.refusal});
+      session?.disk?.refused?.(owner, key, recorded.refusal);
+    }
     const ir = recorded ? recorded.ir : lower(ctx, obj);
     if (recorded?.replay) session.classes.set(key, {file, structure: file.getStructure(), ir,
       replay: recorded.replay, supplied: suppliedKey(program, key),

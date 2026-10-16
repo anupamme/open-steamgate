@@ -8,6 +8,8 @@ import {availableParallelism} from "node:os";
 import {dirname, join, resolve} from "node:path";
 import {performance} from "node:perf_hooks";
 import {fileURLToPath} from "node:url";
+import {runnerCacheOptions} from "./runner-cache.mjs";
+import {prepareRunnerCache, finishRunnerCache} from "./runner-cache-recording.mjs";
 import {compileProgram} from "./frontend.mjs";
 import {referencedClasses} from "./emit-go.mjs";
 import {constructorFactories} from "./emit-constructors.ts";
@@ -139,10 +141,12 @@ while (sourceQueue.length) {
 let registry;
 const session = {};
 const calledBy = new WeakMap();
+const runnerCache = prepareRunnerCache(folders, runnerCacheOptions(home));
+const objectCacheOptions = runnerCache.options;
 timingMs.frontendClosureCounts = [];
 for (let round = 0; round < 12; round++) {
   const started = performance.now();
-  program = compileProgram({folders, objects: [...wanted], tolerant: true, includeTests: new Set(owners), skip, registry, session});
+  program = compileProgram({...objectCacheOptions, folders, objects: [...wanted], tolerant: true, includeTests: new Set(owners), skip, registry, session});
   registry = program.reg;
   const refs = new Set([...referencedClasses(program), ...program.missing]);
   for (const name of wanted) {
@@ -166,6 +170,7 @@ for (let round = 0; round < 12; round++) {
   for (const x of more) wanted.add(x);
   if (round === 11) throw new Error(`dependency closure did not settle: ${more.join(", ")}`);
 }
+finishRunnerCache(runnerCache.certificate);
 
 function testsOf(program) {
   const classes = new Map(program.classes.map((c) => [c.name, c]));

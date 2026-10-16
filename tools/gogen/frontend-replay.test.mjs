@@ -47,7 +47,7 @@ test("a reused read encoding never hides a nested change", () => {
   }).replay, undefined);
   // repeated reads of an unchanged input replay, and refuse a changed one
   const cached = recordLowering(program(), (p) => [...p.wanted].length + [...p.wanted].length);
-  assert.equal(cached.replay.ops.filter((op) => op.kind === "read").length, 2);
+  assert.equal(cached.replay.ops.filter((op) => op.kind === "read").length, 1);
   assert.ok(replayLowering(program(), cached.replay));
   const changed = program();
   changed.wanted.add("OTHER");
@@ -138,4 +138,42 @@ test("frontend program state is initialized eagerly", () => {
     assert.doesNotMatch(readFileSync(new URL(file, import.meta.url), "utf8"),
       /\b(?:program|PROGRAM)\s*\.\s*\w+\s*\?\?=/, file);
   }
+});
+
+test("oversized fingerprints refuse caching and stop further recording without losing effects", () => {
+  const p = program();
+  let fingerprints = 0;
+  const oversized = {toJSON() { fingerprints++; return "x".repeat((1 << 20) + 1); }};
+  p.sigs.set("BIG", oversized);
+  const result = recordLowering(p, (tracked) => {
+    for (let i = 0; i < 10000; i++) assert.equal(tracked.sigs.get("BIG"), oversized);
+    tracked.wanted.add("AFTER");
+    return 42;
+  });
+  assert.equal(result.ir, 42);
+  assert.equal(result.replay, undefined);
+  assert.equal(fingerprints, 1);
+  assert.equal(p.wanted.has("AFTER"), true);
+});
+
+test("a large transcript falls back to lowering instead of retaining partial guards", () => {
+  const p = program();
+  const result = recordLowering(p, (tracked) => {
+    for (let i = 0; i < 100000; i++) tracked.wanted.has(String(i));
+    tracked.skipped.push("still lowered");
+    return {name: "BIG"};
+  });
+  assert.equal(result.replay, undefined);
+  assert.deepEqual(p.skipped, ["still lowered"]);
+});
+
+test("an oversized current input refuses replay atomically", () => {
+  const p = program(); p.sigs.set("VALUE", "small");
+  const cached = recordLowering(p, (tracked) => {
+    tracked.skipped.push("effect"); tracked.sigs.get("VALUE");
+  });
+  assert.ok(cached.replay);
+  const next = program(); next.sigs.set("VALUE", "x".repeat((1 << 20) + 1));
+  assert.equal(replayLowering(next, cached.replay), false);
+  assert.deepEqual(next.skipped, []);
 });

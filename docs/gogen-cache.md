@@ -1303,3 +1303,13 @@ compilation probes v3 only after exact global/replay misses. Exhaustive shadow
 validation remains available for the oracle. The global certificate now also
 covers dependency roles and Node/V8 identity; both tool-identity variants share
 actual source/build hashing.
+
+
+## Runner opt-in (step 4b)
+
+`OSD_GOGEN_CACHE=1` (or an explicit directory) enables the per-class cache in
+`osd run` / osabap and Go ABAP Unit rebuilds. It stays off by default. The runner
+can replay complete, revalidated dependency-closure candidates after a global
+miss; ordinary cacheDir callers retain the global lookup. Unchanged runner inputs
+avoid repeating provenance recording without weakening the content/replay guards.
+See [runner diagnosis, proof and phase measurements](gogen-cache-runners.md).

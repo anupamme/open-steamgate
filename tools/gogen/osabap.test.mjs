@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {execFileSync, spawn, spawnSync} from "node:child_process";
-import {cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
+import {cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {delimiter, dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
@@ -447,7 +447,7 @@ test("osd run builds a report once, keeps it and passes its arguments through", 
   const dir = mkdtempSync(join(tmpdir(), "osd-run-"));
   const osd = join(here, "..", "..", "bin", "osd.mjs");
   // the kept builds go to the test's own folder, not the checkout's .local
-  const osdRun = (args) => spawnSync(process.execPath, [osd, "run", ...args], {encoding: "utf8", env: {...process.env, OSD_RUN_CACHE: join(dir, "cache")}});
+  const osdRun = (args, env = {}) => spawnSync(process.execPath, [osd, "run", ...args], {encoding: "utf8", env: {...process.env, OSD_RUN_CACHE: join(dir, "cache"), OSD_GOGEN_CACHE: "", OSABAP_TIMING: "", ...env}});
   try {
     const app = join(dir, "notes");
     cpSync(join(here, "apps", "notes"), app, {recursive: true});
@@ -455,14 +455,20 @@ test("osd run builds a report once, keeps it and passes its arguments through", 
     const file = join(dir, "notes.db");
     // a folder of the user's own in the cache directory is not osd's to prune
     mkdirSync(join(dir, "cache", "mine"), {recursive: true});
-    const first = osdRun([report, "-db", file, "--add", "hello"]);
+    const first = osdRun([report, "-db", file, "--add", "hello"], {OSABAP_TIMING: "1"});
+    const timings = first.stderr.split("\n").filter((line) => line.startsWith("OSABAP_TIMING "))
+      .map((line) => JSON.parse(line.slice("OSABAP_TIMING ".length)));
+    assert.deepEqual(timings.map((row) => row.phase), ["frontend", "emit", "goBuild", "total", "run"]);
+    assert.ok(timings.every((row) => Number.isFinite(row.ms) && row.ms >= 0));
     assert.equal(first.status, 0, first.stderr);
     assert.match(first.stderr, /osd run: building znotes\.prog\.abap/);
     assert.equal(first.stdout, "1 hello\n1 notes\n");
 
-    const second = osdRun([report, "-db", file, "--add", "again"]);
+    const second = osdRun([report, "-db", file, "--add", "again"], {OSD_GOGEN_CACHE: join(dir, "frontend")});
+    assert.equal(existsSync(join(dir, "frontend")), false, "kept binary bypasses the frontend even with opt-in");
     assert.equal(second.status, 0, second.stderr);
     assert.doesNotMatch(second.stderr, /building/);
+    assert.equal(second.stderr.includes("OSABAP_TIMING "), false);
     assert.equal(second.stdout, "1 hello\n2 again\n2 notes\n");
 
     const help = osdRun([report, "--", "-help"]);
@@ -498,7 +504,7 @@ test("two concurrent osd run builds share a checkout without generated-file race
     });
     const runParallel = (report) => new Promise((resolveResult) => {
       const child = spawn(process.execPath, [osd, "run", report, "--name", "Alice"], {
-        env: {...process.env, OSD_RUN_CACHE: join(dir, "cache")}, stdio: ["ignore", "pipe", "pipe"]});
+        env: {...process.env, OSD_RUN_CACHE: join(dirname(report), "cache"), OSD_GOGEN_CACHE: join(dir, "frontend")}, stdio: ["ignore", "pipe", "pipe"]});
       let stdout = "", stderr = "";
       child.stdout.on("data", (chunk) => { stdout += chunk; });
       child.stderr.on("data", (chunk) => { stderr += chunk; });
@@ -509,6 +515,7 @@ test("two concurrent osd run builds share a checkout without generated-file race
       assert.equal(result.status, 0, result.stderr);
       assert.match(result.stdout, /Hello Alice/);
     }
+    assert.ok(readdirSync(join(dir, "frontend"), {recursive: true}).some((file) => file.endsWith(".bin")), "osd run forwarded the object-cache opt-in");
     const cached = await runParallel(reports[0]);
     assert.equal(cached.status, 0, cached.stderr);
     assert.doesNotMatch(cached.stderr, /osd run: building/);
