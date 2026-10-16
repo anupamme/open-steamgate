@@ -1,3 +1,4 @@
+import {parseObserved} from "./frontend-inventory.mjs";
 // Source-only analyses, keyed by the immutable parsed/rearranged node.
 import {readText, listEntries, join} from "./host-io.ts";
 import {parseSamc} from "../osd-samc.ts";
@@ -86,7 +87,7 @@ function sqlViewName(annotations) {
     const reg = new abaplint.Registry();
     const file = new abaplint.MemoryFile(filename.toLowerCase(), src);
     reg.addFile(file);
-    reg.parse();
+    parseObserved(reg);
     const obj = reg.getFirstObject();
     // Pinned core's getSQLViewName() searches raw text and includes comments.
     // Its parsed CDS annotations exclude comments and expose the string token.

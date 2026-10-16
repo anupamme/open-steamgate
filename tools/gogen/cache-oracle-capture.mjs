@@ -1,3 +1,4 @@
+import {parseObserved} from "./frontend-inventory.mjs";
 import {borrowedDefinitionArtifact} from "./cache-oracle-definitions.mjs";
 import {recordProvenance} from "./frontend-provenance.mjs";
 import {createRequire} from "node:module";
@@ -39,7 +40,7 @@ export function orderedRegistry(folders, order = [], {parse = true} = {}) {
   slots.forEach((slot, i) => { files[slot] = selected[i]; });
   for (const {name, path} of files) registry.addFile(new abaplint.MemoryFile(name,
     normalizeSource(readFileSync(path, "utf8"), name, abaplint)));
-  if (parse) registry.parse();
+  if (parse) parseObserved(registry);
   return registry;
 }
 

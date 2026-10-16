@@ -1,3 +1,4 @@
+import {parseObserved} from "./frontend-inventory.mjs";
 import {execFileSync} from "node:child_process";
 import {mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
@@ -147,7 +148,7 @@ test("ownershipSafety observes expanded statements, including edits introduced b
 test("bookkeeping exemption is purpose-scoped; a later unknown loop still fails closed", () => {
   const reg = registry({"z.clas.abap": classSource("z")});
   recordProvenance(() => {
-    reg.parse();
+    parseObserved(reg);
     // AUDITED test inventory: exercise only this explicit exclusion boundary.
     auditedBookkeeping("test-input-inventory", () => [...reg.getObjects()]);
     assert.equal(provenanceOf(reg).get("CLAS Z").unknownScans.length, 0);
@@ -159,7 +160,7 @@ test("bookkeeping exemption is purpose-scoped; a later unknown loop still fails 
 test("provider artifact provenance never inherits another entry's lowering transcript", () => {
   const reg = registry({"za.clas.abap": classSource("za"), "zb.clas.abap": classSource("zb")});
   recordProvenance(() => {
-    reg.parse(); const a = reg.getObject("CLAS", "ZA"), b = reg.getObject("CLAS", "ZB");
+    parseObserved(reg); const a = reg.getObject("CLAS", "ZA"), b = reg.getObject("CLAS", "ZB");
     withArtifact({reg}, a, () => reg.getObject("DOMA", "ZLOWERING_ONLY"));
     withArtifact({reg}, b, () => a.getDefinition());
   });
@@ -182,7 +183,7 @@ for (const disk of [false, true]) test(`retained provider i to int8 rebuilds the
   assert.equal(unchanged.reg, first.reg);
   if (session) { assert.ok(unchanged.frontendCounts.reused > 0); session.sentinel = true; }
   reg.updateFile(new core.MemoryFile("zif_provider.intf.abap", typeFiles("int8")["zif_provider.intf.abap"]));
-  reg.parse(); // Even a caller's reparse must not certify stale consumer syntax.
+  parseObserved(reg); // Even a caller's reparse must not certify stale consumer syntax.
   const changed = compileProgram(options);
   assert.notEqual(changed.reg, reg);
   assert.equal(resolvedType(changed), "Integer8Type");
@@ -246,7 +247,7 @@ test("supplied query recording survives replay proxies and warm disk inheritance
 test("an unaudited iteration in a core-named file remains an unknown scan", () => {
   const reg = registry({"zunknown.clas.abap": classSource("zunknown")});
   recordProvenance(() => {
-    reg.parse();
+    parseObserved(reg);
     const loop = runInThisContext("(reg) => [...reg.getObjects()]", {filename: "/tmp/adapter-negative/registry.js"});
     loop(reg);
   });
@@ -336,9 +337,10 @@ test("first observed reparse cannot certify artifacts built before the frontend 
     reg.parse();
     assert.equal(reg.findIssues().length, 0);
     const {compileProgram} = await import('./tools/gogen/frontend.mjs');
+    const {parseObserved} = await import('./tools/gogen/frontend-inventory.mjs');
     files['zif_provider.intf.abap'] = files['zif_provider.intf.abap'].replace('TYPE i.', 'TYPE int8.');
     reg.updateFile(new core.MemoryFile('zif_provider.intf.abap', files['zif_provider.intf.abap']));
-    reg.parse();
+    parseObserved(reg);
     const options = {folders:[], objects:['ZREADER'], tolerant:true};
     const p = compileProgram({...options, registry:reg});
     const cold = compileProgram({...options, registry:registry()});

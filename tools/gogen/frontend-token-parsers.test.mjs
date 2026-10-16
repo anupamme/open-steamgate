@@ -1,3 +1,4 @@
+import {parseObserved} from "./frontend-inventory.mjs";
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync} from "node:fs";
@@ -47,7 +48,7 @@ async function both(p, expected) {
 function parsedBody(source) {
   const reg = new core.Registry();
   reg.addFile(new core.MemoryFile("ztokens.prog.abap", source));
-  reg.parse();
+  parseObserved(reg);
   return reg.getFirstObject().getABAPFiles()[0].getStructure();
 }
 
@@ -208,7 +209,8 @@ test("round 2 analysis loads the transpiler core instance", async () => {
     writeFileSync(join(nested, "core/index.js"), `module.exports = require(${JSON.stringify(createRequire(require.resolve("@abaplint/transpiler/package.json")).resolve("@abaplint/core"))});`);
     let source = readFileSync(new URL("./frontend-analysis.mjs", import.meta.url), "utf8");
     // Relocate only this module; keep its unrelated local dependencies in place.
-    source = source.replace('"./host-io.ts"', JSON.stringify(new URL("./host-io.ts", import.meta.url).href))
+    source = source.replace('"./frontend-inventory.mjs"', JSON.stringify(new URL("./frontend-inventory.mjs", import.meta.url).href))
+      .replace('"./host-io.ts"', JSON.stringify(new URL("./host-io.ts", import.meta.url).href))
       .replace('"../osd-samc.ts"', JSON.stringify(new URL("../osd-samc.ts", import.meta.url).href));
     const file = join(dir, "analysis.mjs");
     writeFileSync(file, source);

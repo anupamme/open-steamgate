@@ -1,3 +1,4 @@
+import {parseObserved} from "./frontend-inventory.mjs";
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {createRequire} from "node:module";
@@ -27,7 +28,7 @@ const has = (m, kind, result) => m.hits.some((q) => q.kind === kind && q.result.
 const corpus = () => syntheticCorpus({classes: 4});
 function compile(files, objects) {
   return recordProvenance(() => {
-    const reg = registry(files); reg.parse();
+    const reg = registry(files); parseObserved(reg);
     return compileProgram({registry: reg, folders: [], objects, tolerant: true});
   });
 }
@@ -132,7 +133,7 @@ test("a second cached DDIC consumer inherits the original DOMA query without ret
   domain.parseType = function(...args) { domainCalls++; return parse.apply(this, args); };
   let callsAfterFirst;
   recordProvenance(() => {
-    reg.parse(); // eagerly caches TABL -> DTEL -> DOMA before either consumer
+    parseObserved(reg); // eagerly caches TABL -> DTEL -> DOMA before either consumer
     const first = reg.getObject("CLAS", "ZCL_DDIC");
     new core.SyntaxLogic(reg, first).run();
     callsAfterFirst = domainCalls;
@@ -151,7 +152,7 @@ test("FUGR/ENHS scans, BDEF and all registry lookup methods record unresolved qu
   c.files["zspot.enhs.xml"] = xml("<BADI_DATA><ENH_BADI_DATA><BADI_NAME>ZPRESENT_BADI</BADI_NAME><INTERFACE_NAME>ZIF_BADI</INTERFACE_NAME></ENH_BADI_DATA></BADI_DATA>");
   const reg = registry(c.files);
   recordProvenance(() => {
-    reg.parse();
+    parseObserved(reg);
     const obj = reg.getObject("CLAS", "ZCL_FUNCTION");
     artifactLowering(() => {
       const scope = CurrentScope.buildDefault(reg, obj);
@@ -181,7 +182,7 @@ test("unclassified scans fail closed, including partial iteration and an empty t
   const reg = registry(corpus().files);
   const before = core.Registry.prototype.getObjects;
   recordProvenance(() => {
-    reg.parse();
+    parseObserved(reg);
     const obj = reg.getObject("CLAS", "ZCL_DDIC");
     artifactLowering(() => {
       for (const ignored of reg.getObjects()) { void ignored; break; }
@@ -197,7 +198,7 @@ test("unclassified scans fail closed, including partial iteration and an empty t
 });
 
 test("untraced cached artifacts are explicitly incomplete; default-off does not produce manifests", () => {
-  const reg = registry(corpus().files); reg.parse();
+  const reg = registry(corpus().files); parseObserved(reg);
   const p = compileProgram({registry: reg, folders: [], objects: ["ZCL_DDIC"]});
   assert.equal(provenanceOf(p).size, 0);
   const traced = compileProgram({registry: reg, folders: [], objects: ["ZCL_DDIC"], provenance: true});
@@ -218,7 +219,7 @@ test("temporary preprocessing registries cannot overwrite the program object's m
 
 test("a preexisting syntax session is marked incomplete even when it bypasses findIssues", () => {
   const reg = registry(corpus().files), session = {};
-  reg.parse();
+  parseObserved(reg);
   compileProgram({registry: reg, folders: [], objects: ["ZCL_DDIC"], session});
   assert.ok(session.issues);
   const p = compileProgram({registry: reg, folders: [], objects: ["ZCL_DDIC"], session, provenance: true});
