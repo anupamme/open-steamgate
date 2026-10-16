@@ -38,7 +38,9 @@ export async function fetchSystem(...args) {
 
 
 function git(args, cwd) {
-  return execFileSync("git", args, {cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"]}).trim();
+  const env = {...process.env, GIT_CEILING_DIRECTORIES: dirname(cwd),
+    ...(args[0] === "init" ? {} : {GIT_DIR: join(cwd, ".git"), GIT_WORK_TREE: cwd})};
+  return execFileSync("git", args, {cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"]}).trim();
 }
 
 /** the repository at the ref, in a temporary directory: [dir, commit] */

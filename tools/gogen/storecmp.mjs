@@ -15,6 +15,7 @@
 import {execFileSync} from "node:child_process";
 import {cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {join, resolve} from "node:path";
+import {makeHistoryRepo} from "./storecmp-history.mjs";
 import {buildFixture} from "../osgo-store-fixture.mjs";
 import {compilerCases, compilerAnswers, compilerGapCases, prepareCompilerFixture} from "../osgo-store-goldens.mjs";
 import {home} from "./home.mjs";
@@ -233,18 +234,7 @@ console.log(`adapter reads: ${adapterSame} of ${reads.length} answers the same`)
 // A private repository gives HISTORY real rows even when the input fixture
 // has no history. Long subjects distinguish the Atom title from SUBJECT(80).
 const historyTree = join(out, "history");
-rmSync(historyTree, {recursive: true, force: true});
-mkdirSync(join(historyTree, "src"), {recursive: true});
-writeFileSync(join(historyTree, "abap_transpile.json"), JSON.stringify({input_folder: ["src"]}));
-const git = (...args) => execFileSync("git", args, {cwd: historyTree});
-git("init", "-q");
-git("config", "user.name", "Test Author");
-git("config", "user.email", "test@example.invalid");
-for (const subject of ["short title", "Full Atom title " + "x".repeat(100)]) {
-  writeFileSync(join(historyTree, "src/zst_history.prog.abap"), `REPORT zst_history.\n* ${subject}\n`);
-  git("add", ".");
-  git("commit", "-q", "-m", subject);
-}
+makeHistoryRepo(historyTree);
 const historyCalls = [{IV_COMMAND: "HISTORY", IV_TYPE: "PROG", IV_NAME: "ZST_HISTORY"}];
 const historyConfig = await storeConfig(historyTree, {storeModule: `${tools}/tools/osd-store.mjs`});
 const historyDest = new StoreDestination({store: () => new ObjectStore({root: historyTree})});

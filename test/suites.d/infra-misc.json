@@ -7,6 +7,7 @@
     "test/taxi-import.mjs",
     "test/bootstrap.mjs",
     "test/pins.mjs",
+    "test/git-tempdir-isolation.mjs",
     "test/transpiler-pin.mjs",
     "test/e2e-instance.mjs",
     "test/gui-reports.mjs",

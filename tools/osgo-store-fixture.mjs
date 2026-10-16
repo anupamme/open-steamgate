@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import {cpSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync} from "node:fs";
-import {join} from "node:path";
+import {dirname, join} from "node:path";
 import {spawnSync} from "node:child_process";
 
 export const fixtureRoot = new URL("../test/fixtures/osgo-store/", import.meta.url).pathname;
@@ -25,7 +25,8 @@ function cleanGitEnv() {
 
 function git(root, date, ...args) {
   const result = spawnSync("git", ["-c", "commit.gpgsign=false", "-c", "core.autocrlf=false", ...args], {cwd: root, encoding: "utf8", env: {
-    ...cleanGitEnv(), GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date,
+    ...cleanGitEnv(), GIT_CEILING_DIRECTORIES: dirname(root),
+    ...(args[0] === "init" ? {} : {GIT_DIR: join(root, ".git"), GIT_WORK_TREE: root}), GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date,
   }});
   if (result.status !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
   return result.stdout;

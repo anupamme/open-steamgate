@@ -224,7 +224,8 @@ export async function loadLibs(root, config, log = () => {}, onRead = undefined)
     } else if (lib.url !== undefined && lib.url !== "") {
       dir = mkdtempSync(join(tmpdir(), "osd-lib-"));
       log(`lib clone: ${lib.url}`);
-      execFileSync("git", ["clone", "--quiet", "--depth", "1", "--", lib.url, "."], {cwd: dir, stdio: "pipe"});
+      execFileSync("git", ["clone", "--quiet", "--depth", "1", "--", lib.url, "."], {cwd: dir, stdio: "pipe",
+        env: {...process.env, GIT_CEILING_DIRECTORIES: dirname(dir)}});
       cleanup = true;
     } else {
       throw new Error(`a lib needs a folder or a url: ${JSON.stringify(lib)}`);
