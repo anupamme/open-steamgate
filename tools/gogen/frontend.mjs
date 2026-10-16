@@ -939,7 +939,7 @@ function compiledFunctionCall(node, ctx, text, name) {
 
   // signatures: the class's own methods plus the interfaces' it implements
   /** @type {Map<string, ClassSignature>} */ const signatures = new Map();
-  /** @param {import("./frontend-types.ts").MethodDefinition} m @param {string} prefix @param {boolean} isStatic @returns {void} */ const addSig = (m, prefix, isStatic) => {
+  /** @param {Pick<import("./frontend-types.ts").MethodDefinition, "getName" | "getParameters" | "getVisibility" | "isAbstract">} m @param {string} prefix @param {boolean} isStatic @returns {void} */ const addSig = (m, prefix, isStatic) => {
     const name = prefix + upper(m.getName());
     const where = `${className}=>${name}`;
     if (NATIVE_ME.has(where)) { signatures.set(name, nativeMeSig(program, where, name)); return; }
@@ -994,10 +994,13 @@ function compiledFunctionCall(node, ctx, text, name) {
     const nm = upper(m.getName());
     const target = nm.includes("~") ? undefined : aliasTarget(reg, className, nm);
     if (target?.includes("~")) redefinedAlias.set(nm, target);
-    let o;
+    /** @type {import("./frontend-types.ts").MethodDefinition} */ let o;
     /** @type {import("./frontend-types.ts").MethodName} */ const as = target?.includes("~") ? {getName: () => target} : m;
     try { o = origin(as); } catch (e) { if (!(e instanceof Unsupported)) throw e; signatures.set(upper(as.getName()), {name: upper(as.getName()), unsupported: e.message}); continue; }
-    addSig(Object.assign(Object.create(Object.getPrototypeOf(o)), o, {getName: () => as.getName()}), "", m.isStatic());
+    // addSig reads only these four methods. The origin's getters read its
+    // immutable parameters/visibility/abstract fields; no clone is needed.
+    addSig({getName: () => as.getName(), getParameters: () => o.getParameters(),
+      getVisibility: () => o.getVisibility(), isAbstract: () => o.isAbstract()}, "", m.isStatic());
   }
   const implemented = [...new Set(def.getImplementing().flatMap((i) => [upper(i.name), ...componentInterfaces(reg, upper(i.name))]))];
   // an interface a superclass already implements (itself or through an
@@ -4741,11 +4744,14 @@ function selectSingle(sel, ctx, text) {
     if (!ctx.program.wanted.has(cls)) throw notInProgram(ctx, cls, `RAISE EXCEPTION TYPE ${cls}: the class is not compiled in this program`);
     const params = node.findDirectExpression(Expressions.ParameterListS);
     const given = new Map();
+    /** @type {string[]} */ const givenNames = [];
     for (const p of params?.findAllExpressions(Expressions.ParameterS) ?? []) {
-      given.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), p.findDirectExpression(Expressions.Source));
+      const name = upper(p.findDirectExpression(Expressions.ParameterName).concatTokens());
+      if (!given.has(name)) givenNames.push(name);
+      given.set(name, p.findDirectExpression(Expressions.Source));
     }
     const sig = constructorSignature(ctx, cls);
-    for (const n of given.keys()) if (!sig.some((p) => p.name === n)) throw new Unsupported(`RAISE EXCEPTION TYPE ${cls}: no constructor parameter ${n}`);
+    for (const n of givenNames) if (!sig.some((p) => p.name === n)) throw new Unsupported(`RAISE EXCEPTION TYPE ${cls}: no constructor parameter ${n}`);
     const args = sig.map(/** @returns {import("./ir.ts").Argument} */ (p) => {
       if (p.suppliedOf) return {dir: "importing", byValue: true, type: p.type, value: {e: "chars", value: given.has(p.suppliedOf) ? "X" : "", type: p.type}};
       const src = given.get(p.name);

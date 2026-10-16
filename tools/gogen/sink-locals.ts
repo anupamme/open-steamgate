@@ -1,4 +1,4 @@
-import type {Method, Local, Stmt, Expr, SunkLocals} from './emit-go-types.ts';
+import type {Method, Local, Stmt, SunkLocals} from './emit-go-types.ts';
 import {children as propertyChildren, entries} from './ir-children.ts';
 import type {IRNode, IRValue} from './ir-children.ts';
 
@@ -13,13 +13,11 @@ type Inspection<T> = T extends readonly (infer V)[] ? readonly Inspection<V>[]
 type Node = Inspection<IRNode>;
 type Value = Inspection<IRValue>;
 type Statement = Inspection<Stmt>;
-type Expression = Inspection<Expr>;
 type Body = readonly Statement[];
 interface SinkMethod<B extends Body = Body> extends Required<Pick<Method, 'locals'>>, Pick<Method, 'sinkUnsafe'> { readonly body: B }
 type Tops = ReadonlyMap<Body, Statement>;
 interface Use { readonly path: Body[]; readonly first: Map<Body, Statement | undefined> }
 function isIRArray(value: Value): value is readonly Value[] { return Array.isArray(value); }
-function isExpr(value: Node): value is Expression { return 'e' in value && typeof value.e === 'string'; }
 function isStmt(value: Node): value is Statement { return 's' in value && typeof value.s === 'string'; }
 
 // ABAP DATA has method lifetime. Only shorten it when every use is confined
@@ -36,7 +34,7 @@ function children(node: Node): readonly Value[] {
 
 function namesIn(node: Value, names = new Set<string>()): Set<string> {
   if (!node || typeof node !== 'object') return names;
-  if (isExpr(node) && node.e === 'var') names.add(node.name);
+  if ('e' in node && node.e === 'var') names.add(node.name);
   for (const value of isIRArray(node) ? node : children(node)) namesIn(value, names);
   return names;
 }
@@ -52,7 +50,7 @@ function fullReset(stmt: Statement, name: string): boolean {
 
 function hasCall(node: Value): boolean {
   if (!node || typeof node !== 'object') return false;
-  if (isExpr(node) && ['call', 'new', 'wrap'].includes(node.e)) return true;
+  if ('e' in node && typeof node.e === 'string' && ['call', 'new', 'wrap'].includes(node.e)) return true;
   return (isIRArray(node) ? node : children(node)).some(hasCall);
 }
 
@@ -71,15 +69,15 @@ export function sinkLocals(method: SinkMethod, enabled = process.env.GOGEN_SINK_
     if (!node || typeof node !== 'object') return;
     if (isIRArray(node)) { for (const value of node) scan(value, path, top); return; }
     const stmt = isStmt(node) ? node : undefined;
-    const expr = isExpr(node) ? node : undefined;
+    const exprKind = 'e' in node ? node.e : undefined;
     if ((stmt && opaque.has(stmt.s)) || ('dynamicKeys' in node && node.dynamicKeys)) unsafe = true;
-    if ((stmt && escapes.has(stmt.s)) || ('fs' in node && node.fs) || ('refInto' in node && node.refInto) || expr?.e === 'wrap' || expr?.e === 'call' || expr?.e === 'new'
+    if ((stmt && escapes.has(stmt.s)) || ('fs' in node && node.fs) || ('refInto' in node && node.refInto) || exprKind === 'wrap' || exprKind === 'call' || exprKind === 'new'
         || stmt?.s.startsWith('call_')) {
       for (const name of namesIn(node)) rejected.add(name);
     }
     // CATCH INTO is a name rather than a var expression in this IR.
     if ('into' in node && typeof node.into === 'string') rejected.add(node.into);
-    if (isExpr(node) && node.e === 'var' && locals.has(node.name)) {
+    if ('e' in node && node.e === 'var' && locals.has(node.name)) {
       if (node.ref || node.box) rejected.add(node.name);
       const prior = uses.get(node.name);
       if (!prior) uses.set(node.name, {path: [...path], first: new Map(path.map((body): [Body, Statement | undefined] => [body, top.get(body)]))});

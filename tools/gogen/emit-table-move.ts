@@ -47,10 +47,14 @@ export function analyzeTableMoves(program: ProgramInput, stable: Stable): MovePa
     walkMove(method.body, (node): void => {
       // Formal direction is used here (IMPORTING without VALUE is by reference).
       // Output wrappers retain the actual in x; RETURNING targets escape too.
-      if ((isExpr(node) && (node.e === "call" || node.e === "new")) || (isStmt(node) && (node.s === "call_dyn_static" || node.s === "call_fm"))) {
+      if (isExpr(node) && (node.e === "call" || node.e === "new")) {
         for (const arg of node.args ?? []) if (arg.dir !== "importing" || !arg.byValue)
           record(escaped, keys(arg.value ?? arg.place ?? arg.wrap, cls, method), origin(node));
-        if ("receiving" in node && node.receiving) record(escaped, keys(isStmt(node) && node.s === "call_dyn_static" ? node.receiving.target : node.receiving, cls, method), origin(node));
+        if (node.e === "call" && node.receiving) record(escaped, keys(node.receiving, cls, method), origin(node));
+      } else if (isStmt(node) && (node.s === "call_dyn_static" || node.s === "call_fm")) {
+        for (const arg of node.args ?? []) if (arg.dir !== "importing" || !arg.byValue)
+          record(escaped, keys(arg.value ?? arg.place ?? arg.wrap, cls, method), origin(node));
+        if (node.s === "call_dyn_static" && node.receiving) record(escaped, keys(node.receiving.target, cls, method), origin(node));
       }
       // COMPONENT access is bounded by the structure's own storage ancestry.
       if (isStmt(node) && node.s === "assign_comp") record(escaped, keys(node.from, cls, method), origin(node));

@@ -1960,7 +1960,7 @@ ${t}	}`));
     case "select_dyn": {
       // dynamic Open SQL (go/abap selectdyn.go): the parts given at run time
       // as strings, the target as generic data
-      /** @param {import("./emit-go-types.ts").DynamicSqlStrings | null} v @returns {string} */ const strs = (v) => (v === null ? "nil" : v.e === "strlist" ? `[]string{${v.values.map((x) => JSON.stringify(x)).join(", ")}}`
+      /** @param {import("./emit-go-types.ts").DynamicSqlStrings | null} v @returns {string} */ const strs = (v) => (v === null ? "nil" : "e" in v && v.e === "strlist" ? `[]string{${v.values.map((x) => JSON.stringify(x)).join(", ")}}`
         : v.type.k === "table" ? expr(v, ctx) : `[]string{${expr(v, ctx)}}`);
       return [`${t}abap.SelectDyn(s, abap.DynSelect{Table: ${expr(st.table, ctx)}, Fields: ${strs(st.fields)}, Star: ${st.fields === null}, ` +
         `Where: ${st.where === null ? `""` : expr(st.where, ctx)}, HasWhere: ${st.where !== null}, GroupBy: ${strs(st.groupBy)}, OrderBy: ${strs(st.orderBy)}, ` +
