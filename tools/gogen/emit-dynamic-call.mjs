@@ -1,0 +1,67 @@
+import {append} from "./append.ts";
+import {convert, Unsupported} from "./frontend.mjs";
+
+// Registration and RECEIVING conversion share the identities resolved in lowering.
+export function dynamicAdapters(program) {
+  return (program.dynamicDispatch ?? []).map((entry) => {
+    const cls = program.classes.find((c) => c.name === entry.owner);
+    const m = [...cls.methods, ...(cls.stubs ?? [])].find((m) => m.name === entry.method);
+    return {...entry, cls, m};
+  });
+}
+
+// A missing MOVE conversion becomes an ABAP dynamic-call type error at dispatch.
+export function dynamicResultMoves(program, method, target) {
+  const moves = [];
+  for (const {key, m} of dynamicAdapters(program)) {
+    if (!key.endsWith(`=>${method}`) || !m.returning) continue;
+    try {
+      const value = convert({e: "dyn_result", type: m.returning.type}, target);
+      moves.push({key, type: m.returning.type, value});
+    } catch (e) { if (!(e instanceof Unsupported)) throw e; }
+  }
+  return moves;
+}
+
+export function dynamicCallJs(st, ctx, t, program, {expr, stmt}) {
+  const moves = st.receiving ? dynamicResultMoves(program, st.method, st.receiving.target.type) : [];
+  const call = `abap.CallStatic(s, ${expr(st.cls, ctx)}, ${JSON.stringify(st.method)}, {${st.args.map((a) => `${JSON.stringify(a.name)}: ${expr(a.value, ctx)}`).join(", ")}}, ${JSON.stringify(st.receiving?.name ?? "")}, ${JSON.stringify(moves.map((m) => m.key))})`;
+  if (!st.receiving) return [`${t}${call};`];
+  return [`${t}{`, `${t}  const [$dynKey, $dynValue] = ${call};`, `${t}  switch ($dynKey) {`,
+    ...moves.flatMap((m) => [`${t}    case ${JSON.stringify(m.key)}: {`,
+      ...stmt({s: st.receiving.target.type.k === "data" ? "set_data" : "assign", target: st.receiving.target,
+        value: m.value}, ctx, 3), `${t}      break; }`]), `${t}  }`, `${t}}`];
+}
+
+/**
+ * CALL METHOD (class)=>m, as emit-go's staticRegistry: every compiled class is
+ * known by name, and each static method a dynamic call names gets an adapter
+ * that reads its arguments out of generic data by name.
+ */
+export function staticRegistryJs(program, {definable, zero, unwrapTo, composite, expr, typeName}) {
+  const wanted = program.dynStatics ?? new Set();
+  if (wanted.size === 0) return [];
+  const out = [`abap.knownClasses(${JSON.stringify(program.classes.map((c) => c.name))}, ${JSON.stringify([...(program.rtti?.known ?? [])].filter((n) => !n.includes("=>")))});`];
+  for (const {key, cls, m, defaults} of dynamicAdapters(program)) {
+    if (!m.static || !m.params || !definable(program, m)) continue;
+    const lines = [];
+    const args = m.params.map((p, i) => {
+      const v = `v${i}`;
+      if (p.dir !== "importing") {
+        if (p.dir === "changing" && !p.optional) lines.push(`  abap.paramMissing(${JSON.stringify(`${cls.name}=>${m.name} ${p.name}`)});`);
+        lines.push(`  const ${v} = {v: ${zero(p.type)}};`); return v;
+      }
+      if (p.suppliedOf) { lines.push(`  const ${v} = ${JSON.stringify(p.suppliedOf)} in a ? "X" : "";`); return v; }
+      const d = `a[${JSON.stringify(p.name)}]`;
+      const read = ["i", "string", "c", "d", "t"].includes(p.type.k) ? unwrapTo(p.type, d)
+        : p.type.k === "data" ? d : composite(p.type) && p.byValue ? `abap.copy(${d}.get())` : `${d}.get()`;
+      const absent = p.default !== undefined ? expr(defaults.find(d => d.name === p.name).value, {cls, method: m, loop: 0}) : p.optional ? zero(p.type)
+        : `abap.paramMissing(${JSON.stringify(`${cls.name}=>${m.name} ${p.name}`)})`;
+      lines.push(`  const ${v} = ${JSON.stringify(p.name)} in a ? ${read} : ${absent};`);
+      return v;
+    });
+    append(out, [`abap.registerStatic(${JSON.stringify(key)}, ${JSON.stringify(m.params.filter((p) => p.dir === "importing" && !p.suppliedOf).map((p) => p.name))}, ${JSON.stringify(m.returning?.name ?? "")}, (s, a) => {`], lines, [`  ${m.returning ? "return " : ""}${typeName(cls.name)}.${typeName(m.name)}(${["s", ...args].join(", ")});`, "});"]);
+  }
+  out.push("");
+  return out;
+}

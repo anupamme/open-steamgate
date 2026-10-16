@@ -7,7 +7,7 @@ import {createRequire} from "node:module";
 const require = createRequire(import.meta.url);
 const transpilerRequire = createRequire(require.resolve("@abaplint/transpiler/package.json"));
 /** @type {typeof import("@abaplint/core")} */ const abaplint = transpilerRequire("@abaplint/core");
-const {Expressions, ExpressionsCDS, Nodes} = abaplint;
+const {Expressions, ExpressionsCDS, Nodes, Structures} = abaplint;
 
 /** @type {WeakMap<import("@abaplint/core").Nodes.StructureNode, import("@abaplint/core").Nodes.StructureNode | undefined>} */ const trees = new WeakMap();
 /** @type {WeakMap<import("@abaplint/core").Nodes.StructureNode, Set<string>>} */ const inlineTables = new WeakMap();
@@ -108,4 +108,36 @@ function sqlViewName(annotations) {
 /** @param {typeof import("./frontend-classes-native.mjs").NATIVE_ME} nativeMe @param {string} className @param {string} name @returns {string | undefined} */ export function nativeMethodBody(nativeMe, className, name) {
   if (className === "CL_ABAP_CLASSDESCR" && name === "GET_SUPER_CLASS_TYPE") return "Native_GET_SUPER_CLASS_TYPE";
   return nativeMe.get(`${className}=>${name}`)?.fn;
+}
+
+// Only direct Compare tokens can spell IS [NOT] SUPPLIED. Literals and
+// nested expressions stay inside Source nodes and cannot impersonate it.
+/** @param {import("@abaplint/core").Nodes.ExpressionNode} node */
+export function suppliedComparison(node) {
+  const tokens = node.getChildren().filter(c => c instanceof Nodes.TokenNode).map(c => c.getFirstToken().getStr().toUpperCase());
+  let state = 0, negated = false;
+  for (const token of tokens) {
+    if (state === 0 && token === "NOT") continue; // leading comparison negation
+    if (state === 0 && token === "IS") state = 1;
+    else if (state === 1 && token === "NOT") { negated = true; state = 2; }
+    else if ((state === 1 || state === 2) && token === "SUPPLIED") state = 3;
+    else return undefined;
+  }
+  const sources = node.findDirectExpressions(Expressions.Source);
+  return state === 3 && sources.length === 1 ? {name: sources[0].concatTokens().toUpperCase(), negated} : undefined;
+}
+
+/** @type {WeakMap<import("@abaplint/core").ABAPFile, import("./frontend-types.ts").SuppliedMethod[]>} */
+const suppliedOfFile = new WeakMap();
+/** @param {import("@abaplint/core").ABAPFile} file */
+export function suppliedMethods(file) {
+  let methods = suppliedOfFile.get(file);
+  if (methods) return methods;
+  methods = [];
+  for (const method of file.getStructure()?.findAllStructures(Structures.Method) ?? []) {
+    const found = method.findAllExpressions(Expressions.Compare).map(suppliedComparison).filter(Boolean).map(c => c.name);
+    methods.push({name: method.findFirstExpression(Expressions.MethodName).concatTokens().toUpperCase(), found});
+  }
+  suppliedOfFile.set(file, methods);
+  return methods;
 }

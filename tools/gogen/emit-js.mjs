@@ -1,3 +1,4 @@
+import {dynamicCallJs, staticRegistryJs} from "./emit-dynamic-call.mjs";
 import {append} from "./append.ts";
 import {superClassJsDeclarations, superClassJs, objectRttiJs, exceptionClass} from "./emit-exception.ts";
 import {localConstant, localConstantDeclarations} from "./emit-local-constants.ts";
@@ -163,7 +164,11 @@ function bind(p, ctx) {
   return caps.length ? `(() => { ${caps.join(" ")} return ${b}; })()` : b;
 }
 
+let DYNAMIC_CLASSES = [];
+let DYNAMIC_DISPATCH = [];
+
 export function emitJs(program, runtimeUrl = "./abap.mjs") {
+  DYNAMIC_CLASSES = program.classes; DYNAMIC_DISPATCH = program.dynamicDispatch;
   const factories = constructorFactories(program);
   STRUCTS = program.structs;
   DESCS = new Map();
@@ -240,41 +245,9 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
   }
   const supers = Object.entries(program.exceptionSupers ?? {}).sort(([a], [b]) => a.localeCompare(b));
   if (supers.length) out.push(`abap.registerSupers(${JSON.stringify(Object.fromEntries(supers))});`, "");
-  append(out, staticRegistry(program));
+  append(out, staticRegistryJs(program, {definable, zero, unwrapTo, composite, expr, typeName}));
   append(out, descDecls());
   return out.join("\n") + "\n";
-}
-
-/**
- * CALL METHOD (class)=>m, as emit-go's staticRegistry: every compiled class is
- * known by name, and each static method a dynamic call names gets an adapter
- * that reads its arguments out of generic data by name.
- */
-function staticRegistry(program) {
-  const wanted = program.dynStatics ?? new Set();
-  if (wanted.size === 0) return [];
-  const out = [`abap.knownClasses(${JSON.stringify(program.classes.map((c) => c.name))}, ${JSON.stringify([...(program.rtti?.known ?? [])].filter((n) => !n.includes("=>")))});`];
-  for (const cls of program.classes) {
-    for (const m of [...cls.methods, ...(cls.stubs ?? [])]) {
-      if (!m.static || !wanted.has(m.name) || !m.params || !definable(program, m)) continue;
-      const lines = [];
-      const args = m.params.map((p, i) => {
-        const v = `v${i}`;
-        if (p.dir !== "importing") { lines.push(`  const ${v} = {v: ${zero(p.type)}};`); return v; }
-        if (p.suppliedOf) { lines.push(`  const ${v} = ${JSON.stringify(p.suppliedOf)} in a ? "X" : "";`); return v; }
-        const d = `a[${JSON.stringify(p.name)}]`;
-        const read = ["i", "string", "c", "d", "t"].includes(p.type.k) ? unwrapTo(p.type, d)
-          : p.type.k === "data" ? d : composite(p.type) && p.byValue ? `abap.copy(${d}.get())` : `${d}.get()`;
-        const absent = p.optional && p.default === undefined ? zero(p.type)
-          : `abap.paramMissing(${JSON.stringify(`${cls.name}=>${m.name} ${p.name}`)})`;
-        lines.push(`  const ${v} = ${JSON.stringify(p.name)} in a ? ${read} : ${absent};`);
-        return v;
-      });
-      append(out, [`abap.registerStatic(${JSON.stringify(`${cls.name}=>${m.name}`)}, ${JSON.stringify(m.params.filter((p) => p.dir === "importing").map((p) => p.name))}, (s, a) => {`], lines, [`  ${typeName(cls.name)}.${typeName(m.name)}(${["s", ...args].join(", ")});`, "});"]);
-    }
-  }
-  out.push("");
-  return out;
 }
 
 /* class-based exceptions: see catchCond in emit-go.mjs */
@@ -582,8 +555,7 @@ function stmtLines(st, ctx, d) {
         `${t}    s.sy.tabix = i${n} + 1; s.sy.subrc = 0;`, `${t}    ${ident(st.fs)} = abap.Row(tab${n}, i${n});`,
         ...st.body.flatMap((x) => stmt(x, ctx, d + 2)), `${t}  }`, `${t}  s.sy.tabix = save${n};`, `${t}}`];
     }
-    case "call_dyn_static":
-      return [`${t}abap.CallStatic(s, ${expr(st.cls, ctx)}, ${JSON.stringify(st.method)}, {${st.args.map((a) => `${JSON.stringify(a.name)}: ${expr(a.value, ctx)}`).join(", ")}});`];
+    case "call_dyn_static": return dynamicCallJs(st, ctx, t, {classes: DYNAMIC_CLASSES, dynamicDispatch: DYNAMIC_DISPATCH}, {expr, stmt});
     // the JS side has no database: a SELECT is refused, not guessed
     case "select_dyn":
       return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`dynamic SELECT: the JS backend has no database (the Go host has SQLite)`)});`];
@@ -1000,6 +972,7 @@ const FN = new Map([["SIN", "Math.sin"], ["COS", "Math.cos"], ["TAN", "Math.tan"
 function expr(e, ctx) {
   switch (e.e) {
     case "static": return place(e, ctx);
+    case "dyn_result": return "$dynValue";
     case "var": case "attr": case "field": case "fs": case "row": case "row_key": case "refattr": case "dref_field": return place(e, ctx);
     case "zero": return zero(e.type);
     case "case_fn": return `abap.${e.upper ? "ToUpper" : "ToLower"}(${expr(e.x, ctx)})`;

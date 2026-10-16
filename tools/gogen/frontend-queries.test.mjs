@@ -455,3 +455,19 @@ func main() { defer func() { fmt.Print(recover()) }(); Native_GET_SUPER_CLASS_TY
     }
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
+
+test("dynamic static RECEIVING lowers its named target; IMPORTING remains refused", () => {
+  const source = (section) => `CLASS zrecv DEFINITION PUBLIC. PUBLIC SECTION.
+CLASS-METHODS run. CLASS-METHODS work RETURNING VALUE(result) TYPE string.
+ENDCLASS. CLASS zrecv IMPLEMENTATION. METHOD work. ENDMETHOD.
+METHOD run. DATA result TYPE string.
+CALL METHOD ('ZRECV')=>('WORK') ${section} result = result.
+ENDMETHOD. ENDCLASS.`;
+  const receiving = build({"zrecv.clas.abap": source("RECEIVING")}, ["ZRECV"]);
+  assert.ok(!receiving.partial.some((s) => s.includes("CALL METHOD by name with")), receiving.partial.join("\n"));
+  const call = receiving.classes.find((c) => c.name === "ZRECV").methods.find((m) => m.name === "RUN").body.find((s) => s.s === "call_dyn_static");
+  assert.equal(call.receiving.name, "RESULT");
+  assert.equal(call.receiving.target.type.k, "string");
+  const importing = build({"zrecv.clas.abap": source("IMPORTING")}, ["ZRECV"]);
+  assert.ok(importing.partial.some((s) => s.includes("CALL METHOD by name with IMPORTING")), importing.partial.join("\n"));
+});

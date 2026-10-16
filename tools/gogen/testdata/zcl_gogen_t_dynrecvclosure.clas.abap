@@ -1,0 +1,9 @@
+CLASS zcl_gogen_t_dynrecvclosure DEFINITION PUBLIC FINAL CREATE PUBLIC.
+ PUBLIC SECTION. CLASS-METHODS run RETURNING VALUE(rv) TYPE string.
+ENDCLASS.
+CLASS zcl_gogen_t_dynrecvclosure IMPLEMENTATION.
+ METHOD run.
+ TRY. CALL METHOD ('ZCL_NOPE')=>('INH') RECEIVING r = rv.
+ CATCH cx_root. rv = 'caught'. ENDTRY.
+ ENDMETHOD.
+ENDCLASS.
