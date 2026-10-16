@@ -1,0 +1,172 @@
+name: OCI system release
+
+on:
+  push:
+    tags: ['vscode-stable-v*', 'vscode-v*']
+
+permissions: {}
+
+concurrency:
+  group: oci-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  wait-for-tests:
+    outputs:
+      sha: ${{ steps.tested.outputs.sha }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ format('refs/tags/{0}', github.ref_name) }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Validate existing release tag and clean checkout
+        run: |
+          node --input-type=module <<'JS'
+          import {assertRelease} from './scripts/system-publish.mjs';
+          assertRelease(process.cwd(), process.env.RELEASE_TAG);
+          JS
+      - id: tested
+        name: Require successful tests for the exact tag commit
+        env:
+          GITHUB_TOKEN: '${{ github.token }}'
+        run: |
+          tag_sha="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          node tools/osd-ci-wait-tests.mjs "$RELEASE_TAG" "$tag_sha"
+          echo "sha=$tag_sha" >> "$GITHUB_OUTPUT"
+  publish:
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
+    environment: release
+    needs: wait-for-tests
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      report: ${{ steps.publish.outputs.report }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      OSD_LEAK_REDACT: '1'
+      TESTED_SHA: ${{ needs.wait-for-tests.outputs.sha }}
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.wait-for-tests.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert workspace has no dependencies
+        run: |
+          dependency_entry="$(find -L "$GITHUB_WORKSPACE" -name node_modules -print -quit)"
+          test -z "$dependency_entry" || { echo '::error::node_modules is forbidden in the publish workspace'; exit 1; }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Validate existing release tag and clean checkout
+        run: |
+          node --input-type=module <<'JS'
+          import {assertTestedRelease} from './scripts/system-publish.mjs';
+          assertTestedRelease(process.cwd(), process.env.RELEASE_TAG, process.env.TESTED_SHA);
+          JS
+      - name: Resolve locked libraries and every pack, and stage the release
+        env:
+          OWNER: '${{ github.repository_owner }}'
+        run: |
+          node tools/osd-libs.mjs --sync --release
+          node tools/osd-fetch.mjs --release
+          node scripts/system-publish.mjs --prepare "$RELEASE_TAG" "${OWNER,,}" "$RUNNER_TEMP/oci-plan.json"
+      - name: install the identifier list
+        env:
+          LEAK_IDENTIFIERS: '${{ secrets.OSD_RELEASE_LEAK_IDENTIFIERS }}'
+        run: |
+          test -n "$LEAK_IDENTIFIERS" || { echo '::error::OSD_RELEASE_LEAK_IDENTIFIERS is required for publishing'; exit 1; }
+          umask 077
+          mkdir -p .local
+          printf '%s' "$LEAK_IDENTIFIERS" > .local/leak-identifiers.json
+      - id: publish
+        name: Publish layers and system through the leak gate
+        env:
+          GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+          GITHUB_ACTOR: '${{ github.actor }}'
+          OWNER: '${{ github.repository_owner }}'
+        run: |
+          dependency_entry="$(find -L "$GITHUB_WORKSPACE" -name node_modules -print -quit)"
+          test -z "$dependency_entry" || { echo '::error::node_modules is forbidden in the publish workspace'; exit 1; }
+          node scripts/system-publish.mjs "$RELEASE_TAG" "${OWNER,,}" "$RUNNER_TEMP/oci-release.json" --leak-allow .leak-allow.release.json --plan "$RUNNER_TEMP/oci-plan.json"
+          node --input-type=module <<'JS'
+          import {readFileSync, appendFileSync} from 'node:fs';
+          const report = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/oci-release.json`));
+          appendFileSync(process.env.GITHUB_OUTPUT, `report=${JSON.stringify(report)}\n`);
+          JS
+      - name: remove the identifier list after its last consumer
+        run: rm -f .local/leak-identifiers.json
+      - name: remove the identifier list
+        if: always()
+        run: rm -f .local/leak-identifiers.json
+  public-check:
+    needs: [wait-for-tests, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    env:
+      TESTED_SHA: ${{ needs.wait-for-tests.outputs.sha }}
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.wait-for-tests.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate existing release tag and clean checkout
+        run: |
+          node --input-type=module <<'JS'
+          import {assertTestedRelease} from './scripts/system-publish.mjs';
+          assertTestedRelease(process.cwd(), process.env.RELEASE_TAG, process.env.TESTED_SHA);
+          JS
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Build and link the tested pinned transpiler and runtime
+        run: |
+          node tools/osd-lock.mjs github-env >> "$GITHUB_ENV"
+          echo "TRANSPILER=$RUNNER_TEMP/transpiler" >> "$GITHUB_ENV"
+      - run: npm_config_ignore_scripts=true bash tools/osd-ci-transpiler-build.sh build
+      - run: |
+          node tools/osd-link.mjs transpiler packages/transpiler
+          node tools/osd-link.mjs transpiler-cli packages/cli
+          node tools/osd-link.mjs runtime packages/runtime
+          node tools/osd-link.mjs core packages/transpiler/node_modules/@abaplint/core
+      - name: Check anonymous access, install by digest, build and initialize
+        env:
+          RELEASE_REPORT: ${{ needs.publish.outputs.report }}
+        run: |
+          printf '%s' "$RELEASE_REPORT" > "$RUNNER_TEMP/oci-release.json"
+          node --input-type=module <<'JS'
+          import {readFileSync, writeFileSync} from 'node:fs';
+          import {publicationText} from './scripts/system-publish.mjs';
+          const path = `${process.env.RUNNER_TEMP}/oci-release.json`;
+          writeFileSync(`${path}.txt`, publicationText(JSON.parse(readFileSync(path))));
+          JS
+          OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh node scripts/system-public-check.mjs "$RUNNER_TEMP/oci-release.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: oci-system-${{ github.ref_name }}
+          path: ${{ runner.temp }}/oci-release.json.txt
+          if-no-files-found: error

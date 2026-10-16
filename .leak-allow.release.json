@@ -1,0 +1,157 @@
+{
+  "note": "Release-only reviewed exceptions scoped to layer, archive path, SHA-256 of entire staged file, category and exact match count. No value fingerprints.",
+  "allow": [
+    {
+      "layer": "open-abap-core",
+      "file": "src/http/cl_http_utility.clas.testclasses.abap",
+      "fileSha256": "sha256:784d45f99468afd3301c1c90fce0398bbaf3805aba06318aab21b47b0b0d19d1",
+      "category": "uuid",
+      "count": 1,
+      "reason": "Class C: Public upstream test literal or ABAP source identifier/constant; unchanged locked blob. Bytes verified at https://github.com/oisee/open-abap-core/blob/84125c41c22e4c0d45e8037e8b60c691bb64de8d/src/http/cl_http_utility.clas.testclasses.abap; locked commit reachable from public branch osd/core-rebase-2026-10-10."
+    },
+    {
+      "layer": "express-icf-shim",
+      "file": "package-lock.json",
+      "fileSha256": "sha256:4c3ef9dc2389098be12baa886ea85a54a64ac7e7c3f32614c66829626820d3f5",
+      "category": "частный адрес",
+      "count": 2,
+      "reason": "Class A: packed-byte coincidence inside an npm SHA-512 integrity hash; inspected the decoded hash bytes."
+    },
+    {
+      "layer": "open-abap-apc",
+      "file": "probe/package-lock.json",
+      "fileSha256": "sha256:78465060cca93280ff3ff7c0a25a34b4a124f6c0f4a1b44c9d16862cf077cac4",
+      "category": "частный адрес",
+      "count": 3,
+      "reason": "Class A: packed-byte coincidence inside an npm SHA-512 integrity hash; inspected the decoded hash bytes."
+    },
+    {
+      "layer": "open-abap-apc",
+      "file": "src/apc/cx_apc_error.clas.abap",
+      "fileSha256": "sha256:e86126a21d26050aae2e37c305e5ce74d941d051c335e74620ee8ef40979d2dc",
+      "category": "частный адрес",
+      "count": 2,
+      "reason": "Class C: Public upstream test literal or ABAP source identifier/constant; unchanged locked blob. Bytes verified at https://github.com/oisee/open-abap-apc/blob/bcf43c75b1c3b83ddee24298b2d0cba4637e15cd/src/apc/cx_apc_error.clas.abap; locked commit reachable from public branch main."
+    },
+    {
+      "layer": "abapgit",
+      "file": "src/objects/core/zcl_abapgit_file_deserialize.clas.abap",
+      "fileSha256": "sha256:2ac1460ab2a9636a9e2591f176ac6836fe7499227e11435fb450bd87b710cb2a",
+      "category": "identifier",
+      "count": 1,
+      "reason": "Class C: Public upstream test literal or ABAP source identifier/constant; unchanged locked blob. Bytes verified at https://github.com/abapGit/abapGit/blob/3b6485b5d0b09ef3861006b966e68542446721ce/src/objects/core/zcl_abapgit_file_deserialize.clas.abap; locked commit reachable from public branch hvam/o2as0710."
+    },
+    {
+      "layer": "abapgit",
+      "file": "src/objects/zcl_abapgit_object_http.clas.abap",
+      "fileSha256": "sha256:a05cbef3c4f2cf85252986a9b41eb942908cb4cc4590e087a1a0cd30c4c170f2",
+      "category": "identifier",
+      "count": 1,
+      "reason": "Class C: Public upstream test literal or ABAP source identifier/constant; unchanged locked blob. Bytes verified at https://github.com/abapGit/abapGit/blob/3b6485b5d0b09ef3861006b966e68542446721ce/src/objects/zcl_abapgit_object_http.clas.abap; locked commit reachable from public branch hvam/o2as0710."
+    },
+    {
+      "layer": "abapgit",
+      "file": "src/objects/zcl_abapgit_object_sush.clas.abap",
+      "fileSha256": "sha256:8690159e893d1a1e96b18baeed471d80dfcd6d0ec8614e2518f9336f8c45b630",
+      "category": "identifier",
+      "count": 1,
+      "reason": "Class C: Public upstream test literal or ABAP source identifier/constant; unchanged locked blob. Bytes verified at https://github.com/abapGit/abapGit/blob/3b6485b5d0b09ef3861006b966e68542446721ce/src/objects/zcl_abapgit_object_sush.clas.abap; locked commit reachable from public branch hvam/o2as0710."
+    },
+    {
+      "layer": "open-abap-gui",
+      "file": "package-lock.json",
+      "fileSha256": "sha256:7f265e255acd8f7fe685aefdba9a89a2015d815fe86c5dda339d07d7df98e702",
+      "category": "частный адрес",
+      "count": 4,
+      "reason": "Class A: packed-byte coincidence inside an npm SHA-512 integrity hash; inspected the decoded hash bytes."
+    },
+    {
+      "layer": "open-abap-gui",
+      "file": "converter/test/examples/local_class_static_bridge/output/zcl_example_lstatic.clas.abap",
+      "fileSha256": "sha256:10f626ba169c3ecb246a927b182b8c9d229c02b176a1c044cb920dee5dbc0592",
+      "category": "частный адрес",
+      "count": 1,
+      "reason": "Class A: packed-byte coincidence inside the generated compilation source SHA-256; independently recomputed as SHA256(filename + NUL + normalized source) for input/zexample_lstatic.prog.abap."
+    },
+    {
+      "layer": "open-abap-gui",
+      "file": "converter/test/examples/local_class_static_bridge/output/zcl_example_lstatic_h1.clas.abap",
+      "fileSha256": "sha256:9c0943f6b93afee25e95cea8b9225e333803a586245166412110d716253ea118",
+      "category": "частный адрес",
+      "count": 1,
+      "reason": "Class A: packed-byte coincidence inside the generated compilation source SHA-256; independently recomputed as SHA256(filename + NUL + normalized source) for input/zexample_lstatic.prog.abap."
+    },
+    {
+      "layer": "open-abap-odata",
+      "file": "overview.drawio.svg",
+      "fileSha256": "sha256:5351ef131ec7ed8d0f2d1098afb591724830a3f2ad850205dc3e308fd38fcc6f",
+      "category": "частный адрес",
+      "count": 3,
+      "reason": "Class A: packed-byte coincidence inside the embedded base64 TrueType font in the public diagram."
+    },
+    {
+      "layer": "open-abap-odata",
+      "file": "package-lock.json",
+      "fileSha256": "sha256:f6428f046077212c6483c669aef489a4cf02c1311be34cf902b40672501b556a",
+      "category": "частный адрес",
+      "count": 3,
+      "reason": "Class A: packed-byte coincidence inside an npm SHA-512 integrity hash; inspected the decoded hash bytes."
+    },
+    {
+      "layer": "open-abap-odata",
+      "file": "test/test1/zsegw.iwpr.xml",
+      "fileSha256": "sha256:cc24cd73845fbb71cb36aa565efae3c432be64e11c19f42a9f05798642a0d9fd",
+      "category": "частный адрес",
+      "count": 1,
+      "reason": "Class C: Public upstream test literal or ABAP source identifier/constant; unchanged locked blob. Bytes verified at https://github.com/oisee/open-abap-odata/blob/bd9f1fb175e7b26678e48eb2e311a278a13ef91b/test/test1/zsegw.iwpr.xml; locked commit reachable from public branch fix/shlp-empty-where."
+    },
+    {
+      "layer": "src",
+      "file": "data/zstg_photo.tabu.json",
+      "fileSha256": "sha256:f0e3d43fb6adbc95c31b95f011205f1554e290c8643c85a883aadf245dc12bf9",
+      "category": "частный адрес",
+      "count": 1,
+      "reason": "Class A: packed-byte coincidence at decoded PNG offset 516 in the synthetic seed image; PNG signature and image payload inspected."
+    },
+    {
+      "layer": "test",
+      "file": "src/fixtures/http-cases/clock-read.golden.json",
+      "fileSha256": "sha256:4f21002b480f3448c173b5fbc32695a40bf8c8b24e7b5f3e3eeef784b44085a7",
+      "category": "uuid",
+      "count": 1,
+      "reason": "Class B: hand-authored synthetic UUID in a normalizer or frozen-clock regression fixture, with deliberately repeated digit groups; no real system or session."
+    },
+    {
+      "layer": "test",
+      "file": "src/fixtures/http-cases/clock-read.http",
+      "fileSha256": "sha256:d7792d98058484d7e5b396a671d39a8566c5646b08a928245ad6c95e50db6b7d",
+      "category": "uuid",
+      "count": 1,
+      "reason": "Class B: hand-authored synthetic UUID in a normalizer or frozen-clock regression fixture, with deliberately repeated digit groups; no real system or session."
+    },
+    {
+      "layer": "test",
+      "file": "src/journal.mjs",
+      "fileSha256": "sha256:6da71356f503fccff2817501c4ad244230481134fcc2bb67da5dbd102c033b3c",
+      "category": "uuid",
+      "count": 1,
+      "reason": "Class B: hand-authored synthetic UUID in a normalizer or frozen-clock regression fixture, with deliberately repeated digit groups; no real system or session."
+    },
+    {
+      "layer": "test",
+      "file": "src/replay-compare.mjs",
+      "fileSha256": "sha256:a53659c0a34034890ad341b0c69e569652f33d9243812fd4caba4792356ee5a6",
+      "category": "uuid",
+      "count": 2,
+      "reason": "Class B: hand-authored synthetic UUID in a normalizer or frozen-clock regression fixture, with deliberately repeated digit groups; no real system or session."
+    },
+    {
+      "layer": "test",
+      "file": "src/third-party-notices.mjs",
+      "fileSha256": "sha256:48325aff3a5dfe24c69ec410d7a5507da748d934e77c32e1f3985f1549b1c6ea",
+      "category": "частный адрес",
+      "count": 1,
+      "reason": "Class A: packed-byte coincidence inside the expected SHA-256 of the public MIT license text; the test recomputes that digest."
+    }
+  ]
+}

@@ -1,5 +1,6 @@
+import {syncBuiltinESMExports} from 'node:module';
 import {expect} from "chai";
-import {execFileSync, spawn, spawnSync} from "node:child_process";
+import childProcess, {execFileSync, spawn, spawnSync} from "node:child_process";
 import {mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
@@ -10,6 +11,8 @@ import {manifest, pull, push, pushBlob, pushManifest, sha256, treeDigest} from "
 import {archiveFiles} from "../tools/osd-source-zip.mjs";
 import {fetchAll} from "../tools/osd-fetch.mjs";
 import {registry, listening} from "./helpers/oci-registry.mjs";
+
+import {toolCommand, setHostedLeakScanner} from "../tools/osd-host.mjs";
 
 const options = {name: "smoke", kind: "input"};
 const refusal = async (run, code) => {
@@ -29,6 +32,10 @@ describe("osd-layer: reproducible publishing", function () {
     oldList = process.env.OSD_LEAK_IDENTIFIERS;
     oldSelf = process.env.OSD_SELF;
     oldCwd = process.cwd();
+    setHostedLeakScanner((cwd, paths) => {
+      const [command, ...args] = toolCommand(join(oldCwd, "tools/osd-leak-scan.mjs"), ["--redact", "--publication-allow", "--paths", ...paths]);
+      return spawnSync(command, args, {cwd, encoding: "utf8", maxBuffer: 4 * 1024 * 1024});
+    });
     // No chdir: the gate runs the scanner from its own scan directory, so the
     // test list below wins over a checkout's private one (and the timing
     // reporter, which maps tests to files by the cwd, keeps working).
@@ -37,6 +44,7 @@ describe("osd-layer: reproducible publishing", function () {
     process.env.OSD_SELF = JSON.stringify([process.execPath, join(oldCwd, "test/helpers/osd-layer-host.mjs")]);
   });
   afterEach(() => {
+    setHostedLeakScanner(undefined);
     if (oldSelf === undefined) delete process.env.OSD_SELF;
     else process.env.OSD_SELF = oldSelf;
     if (oldList === undefined) delete process.env.OSD_LEAK_IDENTIFIERS;
@@ -204,6 +212,7 @@ describe("osd-layer: reproducible publishing", function () {
     // In a standalone copy the scanner has neither repository nor sibling config.
     const scanner = join(root, "tools/osd-leak-scan.mjs");
     write(scanner, readFileSync(join(oldCwd, "tools/osd-leak-scan.mjs")));
+    write(join(root, "tools/osd-env.mjs"), readFileSync(join(oldCwd, "tools/osd-env.mjs")));
     write(join(root, "tools/osd-main.mjs"), readFileSync(join(oldCwd, "tools/osd-main.mjs")));
     process.env.OSD_SELF = JSON.stringify([process.execPath, join(oldCwd, "test/helpers/osd-layer-host.mjs"), root]);
     expect(() => leakGate([build(folder, options).files], {})).to.throw(/SCAN_FAILED/);
@@ -263,17 +272,40 @@ describe("osd-layer: reproducible publishing", function () {
     let error;
     try { leakGate([[{path: "safe.txt", bytes: Buffer.from("x")}, {path: "src/zcl_hit.clas.abap", bytes: Buffer.from("forbidden_publish_identifier")}]], {}); } catch (e) { error = e; }
     expect(error?.message).to.include("src/zcl_hit.clas.abap");
+    expect(/sha256:[0-9a-f]{8}/.test(error?.message)).to.equal(false);
     expect(error?.message).not.to.match(/content\/\d{6}\.txt/);
   });
 
-  it("lets a layer's allow entry through for that archive path and value only", () => {
-    const hit = Buffer.from("forbidden_publish_identifier");
-    const allow = [{file: "src/zcl_vector.clas.abap", value: "forbidden_publish_identifier", reason: "public upstream test vector"}];
-    expect(() => leakGate([[{path: "src/zcl_vector.clas.abap", bytes: hit}]], {}, [], allow)).not.to.throw();
-    expect(() => leakGate([[{path: "src/zcl_vector.clas.abap", bytes: hit}, {path: "src/zcl_other.clas.abap", bytes: hit}]], {}, [], allow))
-      .to.throw(/zcl_other/);
-    expect(() => leakGate([[{path: "src/zcl_vector.clas.abap", bytes: hit}]], {}, [], [{...allow[0], value: "something_else_entirely"}]))
-      .to.throw(/publish refused/);
+  for (const kind of ["lib", "input", "pack", "customer"]) it(`binds category exceptions to reviewed bytes and counts in ${kind}`, () => {
+    const bytes = Buffer.from("forbidden_publish_identifier\n* fixture");
+    const path = "src/vector.abap", name = `fixture-${kind}`;
+    const entry = {layer: name, file: path, fileSha256: sha256(bytes), category: "identifier", count: 1, reason: "Class B: fixture"};
+    const files = [{path, bytes}];
+    expect(() => leakGate([files], {}, [], [entry], [name])).not.to.throw();
+    // Change an unrelated byte, preserving the match itself.
+    const changed = Buffer.from(bytes);
+    changed[changed.length - 1] ^= 1;
+    let error;
+    try { leakGate([[{path, bytes: changed}]], {}, [], [entry], [name]); } catch (e) { error = e; }
+    expect(error?.code).to.equal("BAD_ALLOW");
+    expect(error?.message).to.include(`${name}:${path}`);
+    error = undefined;
+    try { leakGate([files], {}, [], [{...entry, count: 2}], [name]); } catch (e) { error = e; }
+    expect(error?.code).to.equal("BAD_ALLOW");
+    expect(error.message).to.include(path);
+    expect(error.message).not.to.match(/content\/\d{6}\.txt/);
+    expect(() => leakGate([files], {}, [], [{...entry, category: "uuid"}], [name])).to.throw(/match count changed/);
+    for (const value of [[192, 168, 247, 231].join("."), "forbidden_publish_identifier"]) {
+      expect(() => leakGate([[...files, {path: "src/other.abap", bytes: Buffer.from(value)}]], {}, [], [entry], [name])).to.throw(/publish refused/);
+      expect(() => leakGate([[{path, bytes: Buffer.concat([bytes, Buffer.from(value)])}]], {}, [], [entry], [name])).to.throw(/SHA-256 changed/);
+    }
+    expect(() => leakGate([files, files], {}, [], [entry], [name, "other"])).to.throw(/publish refused/);
+    expect(() => leakGate([files], {}, [bytes], [entry], [name])).to.throw(/publish refused/);
+  });
+  it("stores only file digests, categories and counts in release exceptions", () => {
+    const entries = readLeakAllow(join(oldCwd, ".leak-allow.release.json"));
+    expect(entries.length > 0).to.equal(true);
+    expect(entries.every(e => !('value' in e) && /^sha256:[0-9a-f]{64}$/.test(e.fileSha256) && e.count > 0)).to.equal(true);
   });
 
   it("refuses an allow entry for a path the layer does not have, or for metadata", () => {
@@ -286,10 +318,10 @@ describe("osd-layer: reproducible publishing", function () {
   it("never lets an archive file's exception reach the metadata documents, whatever it is called", () => {
     const hit = Buffer.from("forbidden_publish_identifier");
     for (const name of ["OCI metadata", "paths.txt", "meta.json"]) {
-      const allow = [{file: name, value: "forbidden_publish_identifier", reason: "r"}];
-      expect(() => leakGate([[{path: name, bytes: hit}]], {}, [], allow)).not.to.throw();
+      const allow = [{layer: "one", file: name, fileSha256: sha256(hit), category: "identifier", count: 1, reason: "r"}];
+      expect(() => leakGate([[{path: name, bytes: hit}]], {}, [], allow, ["one"])).not.to.throw();
       // the same value in a raw config document (a duplicate key parsing would drop) stays refused
-      expect(() => leakGate([[{path: name, bytes: Buffer.from("safe")}]], {}, [Buffer.from('{"name":"forbidden_publish_identifier","name":"smoke"}')], allow))
+      expect(() => leakGate([[{path: name, bytes: hit}]], {}, [Buffer.from('{"name":"forbidden_publish_identifier","name":"smoke"}')], allow, ["one"]))
         .to.throw(/publish refused/);
     }
   });
@@ -297,7 +329,7 @@ describe("osd-layer: reproducible publishing", function () {
   it("scopes an entry with a layer to that layer of a system", () => {
     const hit = Buffer.from("forbidden_publish_identifier");
     const trees = [[{path: "src/v.clas.abap", bytes: hit}], [{path: "src/v.clas.abap", bytes: hit}]];
-    const entry = {file: "src/v.clas.abap", value: "forbidden_publish_identifier", reason: "r"};
+    const entry = {file: "src/v.clas.abap", fileSha256: sha256(hit), category: "identifier", count: 1, reason: "r"};
     expect(() => leakGate(trees, {}, [], [{...entry, layer: "one"}], ["one", "two"])).to.throw(/publish refused/);
     expect(() => leakGate(trees, {}, [], [{...entry, layer: "one"}, {...entry, layer: "two"}], ["one", "two"])).not.to.throw();
     expect(() => leakGate(trees, {}, [], [{...entry, layer: "three"}], ["one", "two"])).to.throw(/BAD_ALLOW|no such file/);
@@ -309,13 +341,13 @@ describe("osd-layer: reproducible publishing", function () {
 
   it("reads an allow file only with a reason on every entry", async () => {
     const file = join(root, "allow.json");
-    writeFileSync(file, JSON.stringify({allow: [{file: "src/a.clas.abap", value: "v"}]}));
+    writeFileSync(file, JSON.stringify({allow: [{file: "src/a.clas.abap", layer: "one", fileSha256: sha256(Buffer.from("safe")), category: "uuid", count: 1}]}));
     expect(() => readLeakAllow(file)).to.throw(/reason/);
     writeFileSync(file, JSON.stringify([{file: "a", value: "v", reason: "r"}]));
     expect(() => readLeakAllow(file)).to.throw(/allow/);
-    writeFileSync(file, JSON.stringify({allow: [{file: "src/a.clas.abap", value: "v", reason: "upstream vector"}]}));
+    writeFileSync(file, JSON.stringify({allow: [{file: "src/a.clas.abap", fileSha256: sha256(Buffer.from("safe")), layer: "one", category: "uuid", count: 1, reason: "upstream vector"}]}));
     expect(readLeakAllow(file)).to.have.length(1);
-    writeFileSync(file, JSON.stringify({allow: [{file: "a", value: "v", reason: "r", layer: ""}]}));
+    writeFileSync(file, JSON.stringify({allow: [{file: "a", fileSha256: sha256(Buffer.from("safe")), category: "uuid", count: 1, reason: "r", layer: ""}]}));
     expect(() => readLeakAllow(file)).to.throw(/layer/);
     for (const bad of [{allow: [{file: "a", value: "v", reason: "r", Layer: "x"}]}, {allow: [], extra: 1}, {allow: ["x"]}, {allow: [[]]}]) {
       writeFileSync(file, JSON.stringify(bad));
@@ -337,14 +369,58 @@ describe("osd-layer: reproducible publishing", function () {
     expect(() => leakGate([[{path: "large.txt", bytes: Buffer.alloc(8 * 1024 * 1024 + 1, 32)}]], {})).to.throw(/size limit/);
   });
 
+  it("uses a coarse identifier exception across private list categories", () => {
+    const list = process.env.OSD_LEAK_IDENTIFIERS;
+    const original = readFileSync(list);
+    try {
+      writeFileSync(list, JSON.stringify({first: ['unmatched_fixture'], second: ['forbidden_publish_identifier']}));
+      const bytes = Buffer.from('forbidden_publish_identifier');
+      const entry = {layer: 'one', file: 'src/probe.abap', fileSha256: sha256(bytes), category: 'identifier', count: 1, reason: 'fixture'};
+      expect(() => leakGate([[{path: entry.file, bytes}]], {}, [], [entry], ['one'])).not.to.throw();
+    } finally { writeFileSync(list, original); }
+  });
+
   it("scans archive paths and reports redacted hits", () => {
-    expect(() => leakGate([[{path: "forbidden_publish_identifier.txt", bytes: Buffer.from("safe")}]], {})).to.throw(/sha256:/);
+    expect(() => leakGate([[{path: "forbidden_publish_identifier.txt", bytes: Buffer.from("safe")}]], {})).to.throw(/identifier/);
   });
 
   it("resolves the scanner from its module when unhosted in another cwd", () => {
     delete process.env.OSD_SELF;
+    setHostedLeakScanner(undefined);
     expect(() => leakGate([build(folder, options).files], {})).not.to.throw();
-    expect(() => leakGate([[{path: "safe", bytes: Buffer.from("forbidden_publish_identifier")}]], {})).to.throw(/sha256:/);
+    expect(() => leakGate([[{path: "safe", bytes: Buffer.from("forbidden_publish_identifier")}]], {})).to.throw(/identifier/);
+  });
+
+  it("uses the fixed first-party scanner in plain Node despite OSD_SELF", () => {
+    setHostedLeakScanner(undefined);
+    process.env.OSD_SELF = JSON.stringify([process.execPath, "-e", "process.exit(0)"]);
+    expect(() => leakGate([[{path: "safe", bytes: Buffer.from("forbidden_publish_identifier")}]], {})).to.throw(/identifier/);
+  });
+  it('ignores parent OSD_SELF when selecting the scanner command and passes only PATH HOME and LANG', () => {
+    setHostedLeakScanner(undefined);
+    const original = childProcess.spawnSync;
+    const oldOptions = process.env.NODE_OPTIONS, oldExtra = process.env.UNREVIEWED_SCANNER_ENV;
+    process.env.OSD_SELF = JSON.stringify(['/fixture/unreviewed-host', '--parent']);
+    process.env.NODE_OPTIONS = '--import=/unreviewed-loader.mjs';
+    process.env.UNREVIEWED_SCANNER_ENV = 'fixture';
+    let calls = 0;
+    childProcess.spawnSync = (command, args, options) => {
+      calls++;
+      expect(command).to.equal(process.execPath);
+      expect(args.slice(0, 3)).to.deep.equal([join(oldCwd, 'tools/osd-leak-scan.mjs'), '--identifiers', process.env.OSD_LEAK_IDENTIFIERS]);
+      expect(options.env).to.deep.equal({PATH: '/usr/local/bin:/usr/bin:/bin', HOME: '/tmp', LANG: 'C.UTF-8'});
+      return {status: 0};
+    };
+    syncBuiltinESMExports();
+    try {
+      leakGate([[{path: 'safe', bytes: Buffer.from('safe')}]], {});
+      expect(calls).to.equal(1);
+    } finally {
+      childProcess.spawnSync = original;
+      if (oldOptions === undefined) delete process.env.NODE_OPTIONS; else process.env.NODE_OPTIONS = oldOptions;
+      if (oldExtra === undefined) delete process.env.UNREVIEWED_SCANNER_ENV; else process.env.UNREVIEWED_SCANNER_ENV = oldExtra;
+      syncBuiltinESMExports();
+    }
   });
 
   it("distinguishes scanner spawn failures and exit 2 from leaks", () => {

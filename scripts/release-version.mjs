@@ -1,26 +1,18 @@
 #!/usr/bin/env node
 // Keep a VS Code release tag tied to the version build-vsix.mjs stamps from HEAD.
 import {execFileSync} from "node:child_process";
-import {readFileSync} from "node:fs";
 import {basename} from "node:path";
 import {fileURLToPath} from "node:url";
 import {dirname, resolve} from "node:path";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const git = (...args) => execFileSync("git", args, {cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"]}).trim();
+const gitAt = (root, ...args) => execFileSync("git", args, {cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"]}).trim();
 
-export function expectedVersion(packageVersion, count) {
-  const match = /^(\d+)\.(\d+)\.\d+$/.exec(packageVersion);
-  if (!match || !/^\d+$/.test(count)) throw new Error("invalid VS Code package version or commit count");
-  return `${match[1]}.${match[2]}.${count}`;
-}
+export {expectedVersion, suggestedTag} from "./release-version-source.mjs";
+import {suggestedTag} from "./release-version-source.mjs";
 
-export function suggestedTag() {
-  const source = JSON.parse(readFileSync(resolve(root, "editors/vscode/package.json"), "utf8"));
-  return `vscode-v${expectedVersion(source.version, git("rev-list", "--count", "HEAD"))}`;
-}
-
-export function checkReleaseVersion(tag, vsix, {requireTag = true} = {}) {
+export function checkReleaseVersion(tag, vsix, {requireTag = true, root: at = root} = {}) {
+  const git = (...args) => gitAt(at, ...args);
   if (!/^vscode-(?:stable-)?v\d+\.\d+\.\d+$/.test(tag ?? "")) {
     throw new Error("release tag must be vscode-v<major>.<minor>.<patch> or vscode-stable-v<major>.<minor>.<patch>");
   }
@@ -32,7 +24,7 @@ export function checkReleaseVersion(tag, vsix, {requireTag = true} = {}) {
   if (!tagExists && requireTag) throw new Error(`${tag} does not exist; a tag-push release requires an existing tag`);
   const tagged = tagExists ? git("rev-parse", `refs/tags/${tag}^{commit}`) : undefined;
   if (tagged && tagged !== head) throw new Error(`${tag} points to ${tagged}, but checkout HEAD is ${head}`);
-  const version = suggestedTag().slice("vscode-v".length);
+  const version = suggestedTag(at).slice("vscode-v".length);
   const prefix = tag.startsWith("vscode-stable-v") ? "vscode-stable-v" : "vscode-v";
   if (tag !== `${prefix}${version}`) {
     throw new Error(`tag ${tag} disagrees with stamped VSIX version ${version}; tag this commit as ${prefix}${version}`);
@@ -67,6 +59,7 @@ export function validateReleaseTarget({tag, head, tagCommit, release}) {
 }
 
 export function checkReleaseTarget(tag) {
+  const git = (...args) => gitAt(root, ...args);
   const head = git("rev-parse", "HEAD");
   const release = JSON.parse(execFileSync("gh", ["release", "view", tag, "--json", "isDraft,targetCommitish"], {cwd: root, encoding: "utf8"}));
   let tagCommit;

@@ -1,0 +1,256 @@
+[
+  {
+    "file": "scripts/system-publish.mjs",
+    "module": "node:child_process",
+    "function": "execFileSync",
+    "executable": "git",
+    "source": "execFileSync('git', args, {env: publishChildEnv('git'), cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']})",
+    "gitCalls": [
+      {
+        "name": "git",
+        "source": "git(['status', '--porcelain', '--untracked-files=all'])"
+      },
+      {
+        "name": "git",
+        "source": "git(['rev-parse', '--verify', '--end-of-options', `refs/tags/${tag}^{commit}`])"
+      },
+      {
+        "name": "git",
+        "source": "git(['rev-parse', 'HEAD'])"
+      },
+      {
+        "name": "git",
+        "source": "git(['rev-parse', 'HEAD'])"
+      },
+      {
+        "name": "git",
+        "source": "git(['rev-parse', 'HEAD'])"
+      }
+    ]
+  },
+  {
+    "file": "scripts/system-publish.mjs",
+    "module": "node:child_process",
+    "function": "execFileSync",
+    "executable": "git",
+    "source": "execFileSync('git', ['fetch', '--force', '--no-tags', '--', 'origin', `refs/tags/${tag}:refs/tags/${tag}`],\n    {env: publishChildEnv('git'), cwd: root, stdio: ['ignore', 'pipe', 'pipe']})"
+  },
+  {
+    "file": "scripts/release-version-source.mjs",
+    "module": "node:child_process",
+    "function": "execFileSync",
+    "executable": "git",
+    "source": "execFileSync(\"git\", args, {env: release ? publishChildEnv('git') : devChildEnv(), cwd: root, encoding: \"utf8\", stdio: [\"ignore\", \"pipe\", \"pipe\"]})",
+    "gitCalls": [
+      {
+        "name": "gitAt",
+        "source": "gitAt(at, release, \"rev-list\", \"--count\", \"HEAD\")"
+      }
+    ],
+    "envMode": "release"
+  },
+  {
+    "file": "tools/osd-fetch.mjs",
+    "module": "node:child_process",
+    "function": "execFileSync",
+    "executable": "git",
+    "source": "execFileSync(\"git\", [...(release ? releaseGitConfig : []), ...args], {env: isolatedGitEnv(release ? publishChildEnv('git') : devChildEnv(), cwd, args), cwd, encoding: \"utf8\", stdio: [\"ignore\", \"pipe\", \"pipe\"]})",
+    "gitCalls": [
+      {
+        "name": "git",
+        "source": "git(args, tmp, release)"
+      },
+      {
+        "name": "run",
+        "source": "run([\"init\", \"-q\"])"
+      },
+      {
+        "name": "run",
+        "source": "run([\"remote\", \"add\", \"--\", \"origin\", repo])"
+      },
+      {
+        "name": "run",
+        "source": "run([\"fetch\", \"-q\", \"--depth\", \"1\", \"--\", \"origin\", ref])"
+      },
+      {
+        "name": "run",
+        "source": "run([\"fetch\", \"-q\", \"--\", \"origin\"])"
+      },
+      {
+        "name": "run",
+        "source": "run([\"rev-parse\", \"--verify\", \"-q\", \"--end-of-options\", `${ref}^{commit}`])"
+      },
+      {
+        "name": "run",
+        "source": "run([\"rev-parse\", \"--verify\", \"-q\", \"--end-of-options\", `origin/${ref}^{commit}`])"
+      },
+      {
+        "name": "run",
+        "source": "run([\"rev-parse\", \"--verify\", \"--end-of-options\", \"FETCH_HEAD^{commit}\"])"
+      },
+      {
+        "name": "run",
+        "source": "run([\"rev-parse\", \"--verify\", \"--end-of-options\", `origin/${ref}^{commit}`])"
+      },
+      {
+        "name": "run",
+        "source": "run([\"switch\", \"-q\", \"--detach\", \"--\", commit])"
+      }
+    ],
+    "envMode": "release",
+    "envHelper": "isolatedGitEnv"
+  },
+  {
+    "file": "tools/osd-libs.mjs",
+    "module": "node:child_process",
+    "function": "execFileSync",
+    "executable": "git",
+    "source": "execFileSync(\"git\", [...(releaseMode ? releaseGitConfig : []), ...args], {env: isolatedGitEnv(releaseMode ? publishChildEnv('git') : devChildEnv(), cwd, args), cwd, encoding: \"utf8\", stdio: [\"ignore\", \"pipe\", \"pipe\"]})",
+    "gitCalls": [
+      {
+        "name": "git",
+        "source": "git(path, \"rev-parse\", \"HEAD\")"
+      },
+      {
+        "name": "git",
+        "source": "git(path, \"rev-parse\", \"--show-toplevel\")"
+      },
+      {
+        "name": "git",
+        "source": "git(clone, \"worktree\", \"repair\", \"--\", resolve(lib.pin))"
+      },
+      {
+        "name": "git",
+        "source": "git(path, \"init\", \"--quiet\")"
+      },
+      {
+        "name": "git",
+        "source": "git(path, \"remote\", \"add\", \"--\", \"origin\", lib.url)"
+      },
+      {
+        "name": "git",
+        "source": "git(path, \"fetch\", \"--quiet\", \"--depth\", \"1\", \"--\", \"origin\", lib.ref)"
+      },
+      {
+        "name": "git",
+        "source": "git(path, \"switch\", \"--quiet\", \"--detach\", \"--\", \"FETCH_HEAD\")"
+      },
+      {
+        "name": "git",
+        "source": "git(lib.at, \"status\", \"--porcelain\")"
+      },
+      {
+        "name": "git",
+        "source": "git(lib.dev, \"worktree\", \"repair\")"
+      }
+    ],
+    "envMode": "releaseMode",
+    "envHelper": "isolatedGitEnv"
+  },
+  {
+    "file": "tools/osd-lib-path.mjs",
+    "module": "node:child_process",
+    "function": "execFileSync",
+    "executable": "git",
+    "source": "execFileSync(\"git\", [\"rev-parse\", \"--show-toplevel\"], {env: release ? publishChildEnv('git') : devChildEnv(), cwd: path, encoding: \"utf8\", stdio: \"pipe\"})",
+    "envMode": "release"
+  },
+  {
+    "file": "tools/osd-lib-path.mjs",
+    "module": "node:child_process",
+    "function": "execFileSync",
+    "executable": "git",
+    "source": "execFileSync(\"git\", [\"rev-parse\", \"HEAD\"], {env: release ? publishChildEnv('git') : devChildEnv(), cwd: path, encoding: \"utf8\", stdio: \"pipe\"})",
+    "envMode": "release"
+  },
+  {
+    "file": "tools/osd-lib-path.mjs",
+    "module": "node:child_process",
+    "function": "execFileSync",
+    "executable": "git",
+    "source": "execFileSync(\"git\", [\"status\", \"--porcelain\", \"--untracked-files=all\"], {env: release ? publishChildEnv('git') : devChildEnv(), cwd: path, encoding: \"utf8\", stdio: \"pipe\"})",
+    "envMode": "release"
+  },
+  {
+    "file": "tools/osd-layer.mjs",
+    "module": "node:child_process",
+    "function": "spawnSync",
+    "executable": "scannerCommand",
+    "script": "tools/osd-leak-scan.mjs",
+    "source": "spawnSync(scannerCommand, scannerArgs, {cwd: temp, env: scannerEnv, encoding: \"utf8\", maxBuffer: 4 * 1024 * 1024})",
+    "envDeclaration": "const scannerEnv = publishChildEnv();",
+    "commandDeclaration": "const [scannerCommand, ...scannerArgs] = toolCommandIn(scannerEnv, join(toolRoot, \"tools/osd-leak-scan.mjs\"), [...identifierArgs, \"--redact\", \"--publication-allow\", \"--paths\", ...paths]);"
+  },
+  {
+    "file": "tools/osd-layer.mjs",
+    "module": "node:child_process",
+    "function": "execFileSync",
+    "executable": "git",
+    "source": "execFileSync(\"git\", [\"rev-parse\", \"HEAD\"], {env: release ? publishChildEnv('git') : devChildEnv(), cwd: toolRoot, encoding: \"utf8\", stdio: [\"ignore\", \"pipe\", \"ignore\"]})",
+    "envMode": "release"
+  },
+  {
+    "file": "tools/osd-leak-scan.mjs",
+    "module": "node:child_process",
+    "function": "execFileSync",
+    "executable": "git",
+    "source": "execFileSync(\n      \"git\",\n      [\"-C\", root, \"rev-parse\", \"--path-format=absolute\", \"--git-common-dir\"],\n      { env: devChildEnv(), encoding: \"utf8\", stdio: [\"ignore\", \"pipe\", \"ignore\"] },\n    )",
+    "envHelper": "devChildEnv"
+  },
+  {
+    "file": "tools/osd-leak-scan.mjs",
+    "module": "node:child_process",
+    "function": "execFileSync",
+    "executable": "git",
+    "source": "execFileSync(\"git\", [\"rev-list\", ...rangeArgs], {\n      env: devChildEnv(), cwd: root, encoding: \"utf8\", stdio: [\"ignore\", \"pipe\", \"pipe\"],\n    })",
+    "envHelper": "devChildEnv"
+  },
+  {
+    "file": "tools/osd-leak-scan.mjs",
+    "module": "node:child_process",
+    "function": "execFileSync",
+    "executable": "git",
+    "source": "execFileSync(\"git\", [\"log\", \"-1\", \"--format=%B\", commit], {\n      env: devChildEnv(), cwd: root, encoding: \"utf8\",\n    })",
+    "envHelper": "devChildEnv"
+  },
+  {
+    "file": "tools/osd-leak-scan.mjs",
+    "module": "node:child_process",
+    "function": "execFileSync",
+    "executable": "git",
+    "source": "execFileSync(\n      \"git\", [\"diff-tree\", \"-r\", \"--no-commit-id\", \"--name-only\", \"--diff-filter=ACMR\", commit],\n      { env: devChildEnv(), cwd: root, encoding: \"utf8\" },\n    )",
+    "envHelper": "devChildEnv"
+  },
+  {
+    "file": "tools/osd-leak-scan.mjs",
+    "module": "node:child_process",
+    "function": "execFileSync",
+    "executable": "git",
+    "source": "execFileSync(\"git\", [\"show\", `${commit}:${name}`], {\n          env: devChildEnv(), cwd: root, maxBuffer: 64 * 1024 * 1024,\n        })",
+    "envHelper": "devChildEnv"
+  },
+  {
+    "file": "tools/osd-leak-scan.mjs",
+    "module": "node:child_process",
+    "function": "execFileSync",
+    "executable": "git",
+    "source": "execFileSync(\"git\", [\"diff\", \"--cached\", \"--name-only\", \"--diff-filter=ACMR\"], {\n    env: devChildEnv(), cwd: root, encoding: \"utf8\",\n  })",
+    "envHelper": "devChildEnv"
+  },
+  {
+    "file": "tools/osd-leak-scan.mjs",
+    "module": "node:child_process",
+    "function": "execFileSync",
+    "executable": "git",
+    "source": "execFileSync(\"git\", [\"ls-files\"], { env: devChildEnv(), cwd: root, encoding: \"utf8\" })",
+    "envHelper": "devChildEnv"
+  },
+  {
+    "file": "tools/osd-system-toolchain.mjs",
+    "module": "node:child_process",
+    "function": "execFileSync",
+    "executable": "git",
+    "source": "execFileSync(\"git\", [\"rev-parse\", \"HEAD\"], {env: devChildEnv(), cwd: toolRoot, encoding: \"utf8\", stdio: [\"ignore\", \"pipe\", \"ignore\"]})",
+    "envHelper": "devChildEnv"
+  }
+]

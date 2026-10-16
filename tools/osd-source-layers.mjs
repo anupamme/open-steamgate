@@ -1,3 +1,4 @@
+import {readEnvironment} from './osd-env.mjs';
 import {activeSystem} from "./osd-system.mjs";
 // Explicit user layers: folders retain their write policy; ZIPs are immutable
 // content-named sources with a persistent writable overlay immediately above.
@@ -58,9 +59,10 @@ function materialize(root, archive) {
   if (readFileSync(marker, 'utf8').trim() !== id) throw new Error(`source ZIP cache identity mismatch: ${target}`);
   return {dir: target, id};
 }
-export function userLayersOf(root, env = process.env) {
+export function userLayersOf(root, env) {
   if (activeSystem(root, env)) return [];
-  const layers = [], mounts = {};
+  const layers = [], mounts = new Map();
+  env ??= readEnvironment(["OSD_LAYERS", "OSD_LAYER_PACKAGE", "OSD_LAYER_DISCOVERY_ONLY"]);
   for (const input of (env.OSD_LAYERS ?? '').split(delimiter).filter(Boolean)) {
     const archive = resolve(root, input);
     if (!existsSync(archive)) {
@@ -114,7 +116,8 @@ export function userLayersOf(root, env = process.env) {
     };
     seedInputs(source);
     // Keep every configured revision, including simultaneous ZIPs of one package.
-    (mounts[pkg] ??= []).push(id);
+    if (!mounts.has(pkg)) mounts.set(pkg, []);
+    mounts.get(pkg).push(id);
     const metadata = join(root, 'local/overlays', id + '.meta.txt');
     if (!existsSync(metadata)) writeFileSync(metadata, JSON.stringify({key: pkg, archiveId: id}));
     layers.push({path, writable: false, library: false, ...meta, archiveId: id, overlay});
@@ -123,7 +126,7 @@ export function userLayersOf(root, env = process.env) {
   // Reconcile the complete configuration, dropping historical mounts.
   const mountsFile = join(root, 'local/overlays/.osd-mounts.txt');
   if (env.OSD_LAYER_DISCOVERY_ONLY !== "1" && existsSync(dirname(mountsFile))) {
-    const content = JSON.stringify(mounts);
+    const content = JSON.stringify(Object.fromEntries(mounts));
     if (!existsSync(mountsFile) || readFileSync(mountsFile, 'utf8') !== content) {
       const temp = mountsFile + `.${process.pid}.tmp`;
       writeFileSync(temp, content); renameSync(temp, mountsFile);

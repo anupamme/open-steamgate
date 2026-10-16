@@ -1,3 +1,4 @@
+import {publishChildEnv, devChildEnv, isolatedGitEnv} from './osd-env.mjs';
 // A pack's sources: the folders it fetches rather than carries.
 //
 // A pack manifest may say
@@ -28,6 +29,7 @@ import {MARKER, SOURCE, markerOf, sourceOf, sourceMatches, packsOf} from "./osd-
 import {runsAs} from "./osd-main.mjs";
 import {pull, treeDigest} from "./osd-oci.mjs";
 import {archiveFiles} from "./osd-source-zip.mjs";
+import {releaseGitSource, releaseGitConfig} from "./osd-release-git.mjs";
 export {MARKER, markerOf};
 // loaded on demand: a system install pulls in the layer zip encoder, which
 // costs ~0.3 s to import, and every build imports this module for unfetched()
@@ -37,29 +39,29 @@ export async function fetchSystem(...args) {
 }
 
 
-function git(args, cwd) {
-  const env = {...process.env, GIT_CEILING_DIRECTORIES: dirname(cwd),
-    ...(args[0] === "init" ? {} : {GIT_DIR: join(cwd, ".git"), GIT_WORK_TREE: cwd})};
-  return execFileSync("git", args, {cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"]}).trim();
+function git(args, cwd, release = false) {
+  return execFileSync("git", [...(release ? releaseGitConfig : []), ...args], {env: isolatedGitEnv(release ? publishChildEnv('git') : devChildEnv(), cwd, args), cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"]}).trim();
 }
 
 /** the repository at the ref, in a temporary directory: [dir, commit] */
-function checkout(repo, ref) {
+function checkout(repo, ref, release) {
+  if (release) releaseGitSource(repo, ref);
+  const run = args => git(args, tmp, release);
   const tmp = mkdtempSync(join(tmpdir(), "osd-fetch-"));
   try {
-    git(["init", "-q"], tmp);
-    git(["remote", "add", "origin", repo], tmp);
+    run(["init", "-q"]);
+    run(["remote", "add", "--", "origin", repo]);
     try {
-      git(["fetch", "-q", "--depth", "1", "origin", ref], tmp);
+      run(["fetch", "-q", "--depth", "1", "--", "origin", ref]);
     } catch (shallow) {
       // a server that will not hand out a commit by name: take the history
       // and find it there
-      git(["fetch", "-q", "origin"], tmp);
+      run(["fetch", "-q", "--", "origin"]);
       try {
-        git(["rev-parse", "--verify", "-q", `${ref}^{commit}`], tmp);
+        run(["rev-parse", "--verify", "-q", "--end-of-options", `${ref}^{commit}`]);
       } catch {
         try {
-          git(["rev-parse", "--verify", "-q", `origin/${ref}^{commit}`], tmp);
+          run(["rev-parse", "--verify", "-q", "--end-of-options", `origin/${ref}^{commit}`]);
         } catch {
           throw new FetchFailed(repo, ref, shallow.stderr?.toString() ?? shallow.message);
         }
@@ -67,11 +69,12 @@ function checkout(repo, ref) {
     }
     let commit;
     try {
-      commit = git(["rev-parse", "FETCH_HEAD"], tmp);
+      commit = run(["rev-parse", "--verify", "--end-of-options", "FETCH_HEAD^{commit}"]);
     } catch {
-      commit = git(["rev-parse", `origin/${ref}`], tmp);
+      commit = run(["rev-parse", "--verify", "--end-of-options", `origin/${ref}^{commit}`]);
     }
-    git(["checkout", "-q", commit], tmp);
+    if (release && commit.toLowerCase() !== ref.toLowerCase()) throw new Error("release fetch returned a different commit");
+    run(["switch", "-q", "--detach", "--", commit]);
     return {dir: tmp, commit};
   } catch (error) {
     rmSync(tmp, {recursive: true, force: true});
@@ -140,7 +143,7 @@ async function publish(pack, source, stage, entry, log) {
   const markerTemp = `${stage}.json`;
   try {
     const marker = markerOf(pack.dir);
-    marker[source.folder] = entry;
+    Object.assign(marker, {[source.folder]: entry});
     writeFileSync(markerTemp, JSON.stringify(marker, null, 2) + "\n");
     renameSync(markerTemp, join(pack.dir, MARKER));
   } catch (error) {
@@ -168,6 +171,10 @@ function cleanupLeftovers(dir) {
 /** Fetch one source; matching folder identity needs no write access. */
 export async function fetchSource(pack, source, options = {}) {
   const log = options.log ?? (() => {});
+  if (options.release) {
+    if (source.oci === undefined) releaseGitSource(source.repo, source.ref);
+    else if (!source.oci.includes("@sha256:")) throw new Error("release OCI source requires an @sha256: digest");
+  }
   cleanupLeftovers(pack.dir);
   const before = sourceOf(source.dir);
   if (options.force !== true && existsSync(source.dir) && statSync(source.dir).isDirectory() && sourceMatches(source, before)) {
@@ -176,7 +183,7 @@ export async function fetchSource(pack, source, options = {}) {
   }
   if (source.oci !== undefined) return fetchOci(pack, source, log);
   log(`${pack.name}/${source.folder}: fetching ${source.repo} at ${source.ref}`);
-  const {dir, commit} = checkout(source.repo, source.ref);
+  const {dir, commit} = checkout(source.repo, source.ref, options.release);
   let stage;
   try {
     const from = join(dir, source.path);
@@ -251,7 +258,7 @@ async function fetchOci(pack, source, log) {
 /** every source of every pack the root sees */
 export async function fetchAll(root, options = {}) {
   const out = [];
-  for (const pack of packsOf(root, options.env ?? process.env)) {
+  for (const pack of packsOf(root, options.env)) {
     for (const source of pack.sources) {
       out.push(await fetchSource(pack, source, options));
     }
@@ -260,7 +267,7 @@ export async function fetchAll(root, options = {}) {
 }
 
 /** what is declared and not there, without touching the network */
-export function unfetched(root, env = process.env) {
+export function unfetched(root, env) {
   return packsOf(root, env).flatMap((pack) => pack.missing.map((s) => ({pack: pack.name, folder: s.folder, repo: s.repo, ref: s.ref, oci: s.oci})));
 }
 
@@ -299,7 +306,7 @@ export async function main(args) {
       continue;
     }
     for (const source of pack.sources) {
-      await fetchSource(pack, source, {force: args.includes("--force"), log: (line) => console.log(`osd-fetch: ${line}`)});
+      await fetchSource(pack, source, {force: args.includes("--force"), release: args.includes("--release"), log: (line) => console.log(`osd-fetch: ${line}`)});
       n += 1;
     }
   }

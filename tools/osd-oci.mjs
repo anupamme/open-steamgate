@@ -1,3 +1,4 @@
+import {readEnvironment} from './osd-env.mjs';
 // An OCI registry, read by digest (backlog E.10): the registry v2 API, the
 // part a pull needs, over fetch. No oras binary, because the Bun binary and
 // the Pages workflow pull too.
@@ -74,14 +75,14 @@ function challenge(header) {
   const m = /^Bearer\s+(.*)$/i.exec(header ?? "");
   if (!m) return undefined;
   const out = {};
-  for (const [, k, v] of m[1].matchAll(/(\w+)="([^"]*)"/g)) out[k] = v;
+  for (const [, k, v] of m[1].matchAll(/(\w+)="([^"]*)"/g)) Object.assign(out, {[k]: v});
   return out.realm ? out : undefined;
 }
 
 /** a client for one repository: GET with the registry's token dance */
 export function client(ref, options = {}) {
   const parsed = typeof ref === "string" ? parseRef(ref) : ref;
-  const env = options.env ?? process.env;
+  const env = options.env ?? readEnvironment(["OSD_OCI_REGISTRY","OSD_OCI_USER","OSD_OCI_TOKEN","GITHUB_TOKEN","GITHUB_ACTOR"]);
   const fetchImpl = options.fetch ?? fetch;
   let bearer;
   async function request(path, {method = "GET", headers = {}, body, allow = []} = {}) {

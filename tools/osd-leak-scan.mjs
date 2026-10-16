@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import {createHash} from "node:crypto";
+import {devChildEnv} from './osd-env.mjs';
 // Look for live identifiers in what is about to become public.
 //
 // The rule in CLAUDE.md is old and it has been walked past twice. Once a wire
@@ -163,7 +163,7 @@ function identifierList(root) {
     const commonGit = execFileSync(
       "git",
       ["-C", root, "rev-parse", "--path-format=absolute", "--git-common-dir"],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+      { env: devChildEnv(), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
     ).trim();
     commonCheckout = resolve(commonGit, "..");
   } catch {
@@ -198,15 +198,20 @@ function allowed(root) {
   const keys = new Set();
   for (const entry of raw.allow ?? []) {
     if (!entry.reason) {
-      throw new Error(`.leak-allow.json: ${entry.file} ${entry.value} без reason`);
+      console.error("BAD_ALLOW: .leak-allow.json entry needs reason");
+      process.exit(3);
+    }
+    if (typeof entry.value === "string" && entry.value.startsWith("sha256:")) {
+      console.error("BAD_ALLOW: .leak-allow.json value fingerprints are forbidden");
+      process.exit(3);
     }
     keys.add(`${entry.file}|${entry.value}`);
   }
   return (file, value) => keys.has(`${file}|${value}`);
 }
 
-function identifiers(root) {
-  const path = identifierList(root);
+function identifiers(root, explicitList) {
+  const path = explicitList ?? identifierList(root);
   if (!path) return null;
   let raw;
   try {
@@ -261,7 +266,7 @@ function blobsInRange(root, rangeArgs) {
     // re-flagged every already-public identifier on every push and taught the
     // gate to be ignored, the one failure its own design warns against.
     commits = execFileSync("git", ["rev-list", ...rangeArgs], {
-      cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+      env: devChildEnv(), cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
     }).split("\n").filter(Boolean);
   } catch (error) {
     // A hook that dies with a stack trace teaches people to pass --no-verify.
@@ -272,13 +277,13 @@ function blobsInRange(root, rangeArgs) {
   const seen = new Set();
   for (const commit of commits) {
     const message = execFileSync("git", ["log", "-1", "--format=%B", commit], {
-      cwd: root, encoding: "utf8",
+      env: devChildEnv(), cwd: root, encoding: "utf8",
     });
     out.push({ file: `${commit.slice(0, 8)} (сообщение коммита)`, text: message });
 
     const names = execFileSync(
       "git", ["diff-tree", "-r", "--no-commit-id", "--name-only", "--diff-filter=ACMR", commit],
-      { cwd: root, encoding: "utf8" },
+      { env: devChildEnv(), cwd: root, encoding: "utf8" },
     ).split("\n").filter(Boolean);
     for (const name of names) {
       const key = `${commit}:${name}`;
@@ -286,7 +291,7 @@ function blobsInRange(root, rangeArgs) {
       seen.add(key);
       try {
         const buf = execFileSync("git", ["show", `${commit}:${name}`], {
-          cwd: root, maxBuffer: 64 * 1024 * 1024,
+          env: devChildEnv(), cwd: root, maxBuffer: 64 * 1024 * 1024,
         });
         out.push({ file: `${name} @ ${commit.slice(0, 8)}`, realFile: name, text: buf.toString("latin1") });
       } catch {
@@ -297,7 +302,7 @@ function blobsInRange(root, rangeArgs) {
   return out;
 }
 
-function scan(root, sources, names) {
+function scan(root, sources, names, publication = false) {
   const hits = [];
   // A 64-hex value seen once after a canonical digest marker is that digest
   // wherever else it stands: abapiti's runtime descriptor names a shape by its
@@ -306,7 +311,7 @@ function scan(root, sources, names) {
   // end of the scan and are dropped if the value turned out to be a digest.
   const knownDigests = new Set();
   const pending = [];
-  const isAllowed = allowed(root);
+  const isAllowed = publication ? () => false : allowed(root);
   for (const source of sources) {
     const file = typeof source === "string" ? source : source.file;
     const forAllow = typeof source === "string" ? file : (source.realFile ?? file);
@@ -328,12 +333,12 @@ function scan(root, sources, names) {
     if (text.length > MAX_SCAN_BYTES) continue;
 
     const seen = new Set();
-    const note = (how, what, value) => {
+    const note = (how, what, value, category = what) => {
       if (isAllowed(forAllow, value)) return;
       const key = `${file}|${what}|${value}`;
       if (seen.has(key)) return;
       seen.add(key);
-      hits.push({ file, how, what, text: value });
+      hits.push({ file, how, what, text: value, category });
     };
 
     for (const view of views(forAllow, text)) {
@@ -352,7 +357,7 @@ function scan(root, sources, names) {
       if (names) {
         const hay = view.text.toLowerCase();
         for (const { kind, value } of names) {
-          if (hay.includes(value.toLowerCase())) note(view.how, kind, value);
+          if (hay.includes(value.toLowerCase())) note(view.how, kind, value, "identifier");
         }
       }
     }
@@ -363,15 +368,22 @@ function scan(root, sources, names) {
   return hits;
 }
 
+// Returns no matched text: publication exceptions never identify a value.
+export function publicationFindings(root, sources, explicitList) {
+  const names = identifiers(root, explicitList);
+  if (!names) throw new Error("publication requires the identifier list");
+  return scan(root, sources, names, true).map(({file, category}) => ({file, category}));
+}
+
 function stagedFiles(root) {
   const out = execFileSync("git", ["diff", "--cached", "--name-only", "--diff-filter=ACMR"], {
-    cwd: root, encoding: "utf8",
+    env: devChildEnv(), cwd: root, encoding: "utf8",
   });
   return out.split("\n").filter(Boolean);
 }
 
 function trackedFiles(root) {
-  const out = execFileSync("git", ["ls-files"], { cwd: root, encoding: "utf8" });
+  const out = execFileSync("git", ["ls-files"], { env: devChildEnv(), cwd: root, encoding: "utf8" });
   return out.split("\n").filter(Boolean);
 }
 
@@ -406,6 +418,18 @@ function namedFiles(root, paths) {
 
 if (runsAs("osd-leak-scan.mjs")) {
   const args = process.argv.slice(2);
+  // An explicit list path survives the publisher's minimal child environment.
+  const listAt = args.indexOf("--identifiers");
+  let explicitList;
+  if (listAt >= 0) {
+    const value = args.at(listAt + 1);
+    if (!value || value.startsWith("--") || args.lastIndexOf("--identifiers") !== listAt) {
+      console.error("osd-leak-scan: --identifiers needs one list path");
+      process.exit(2);
+    }
+    explicitList = resolve(value);
+    args.splice(listAt, 2);
+  }
   // the root positional is only what stands before --paths / --range, whose own
   // arguments are positionals too and are not the root
   const beforeLists = args.slice(0, Math.min(
@@ -422,14 +446,8 @@ if (runsAs("osd-leak-scan.mjs")) {
   const pathsAt = args.indexOf("--paths");
   const pathArgs = pathsAt >= 0 ? args.slice(pathsAt + 1).filter((a) => !a.startsWith("--")) : null;
 
-  const names = identifiers(root);
-  // In CI the list comes from an Actions secret and the log is public, so a hit
-  // must not print the very name it caught, nor the category it is filed under
-  // (a category name can say more than the name). --redact prints the file, the
-  // kind of view, a category number and a short hash of the value; the same scan
-  // on a machine with the list says what it is. --print-masks emits one
-  // ::add-mask:: line per name and category, so the runner masks them anywhere
-  // in the log as a second guard.
+  const names = identifiers(root, explicitList);
+  // Public logs carry category and path only, never a value fingerprint.
   const redact = args.includes("--redact") || process.env.OSD_LEAK_REDACT === "1";
   if (args.includes("--print-masks")) {
     const seenMask = new Set();
@@ -442,18 +460,22 @@ if (runsAs("osd-leak-scan.mjs")) {
     }
     process.exit(names ? 0 : 2);
   }
-  const kinds = [...new Set((names ?? []).map((n) => n.kind))];
-  const shown = (h) => {
-    if (!redact) return `${h.what} (${h.how}): ${h.text}`;
-    const n = kinds.indexOf(h.what);
-    const label = n >= 0 ? `имя из списка, категория #${n + 1}` : h.what;
-    const digest = createHash("sha256").update(h.text.toLowerCase()).digest("hex").slice(0, 8);
-    return `${label} (${h.how}): sha256:${digest}`;
-  };
+  const shown = (h) => redact ? h.category ?? h.what : `${h.what} (${h.how}): ${h.text}`;
   const files = pathArgs
     ? namedFiles(root, pathArgs)
     : rangeArgs ? blobsInRange(root, rangeArgs) : all ? trackedFiles(root) : stagedFiles(root);
-  const hits = scan(root, files, names);
+  let hits = scan(root, files, names, args.includes("--publication-allow"));
+  if (args.includes("--publication-allow")) {
+    const entries = JSON.parse(readFileSync(join(root, ".leak-publication-allow.json"), "utf8")).allow;
+    for (const [i, entry] of entries.entries()) {
+      const matches = hits.filter(h => h.file === entry.file && h.category === entry.category);
+      if (matches.length !== entry.count) {
+        console.error(`BAD_ALLOW: entry ${i} (${entry.file}): match count changed`);
+        process.exit(3);
+      }
+      hits = hits.filter(h => !matches.includes(h));
+    }
+  }
 
   if (!names) {
     console.error(

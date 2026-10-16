@@ -1,3 +1,4 @@
+import {layerEnvironment} from './osd-layer-env.mjs';
 import {activeSystem, layerDir, layerSource, systemFile} from "./osd-system.mjs";
 import {userLayersOf} from "./osd-source-layers.mjs";
 import {cockpitAppsOf} from "./osd-cockpit-apps.mjs";
@@ -91,8 +92,9 @@ const isDir = (p) => {
 };
 
 /** the directories to look in: <root>/packs, then what OSD_PACKS names */
-export function placesOf(root, env = process.env) {
+export function placesOf(root, env) {
   if (activeSystem(root, env)) return [join(root, ".local/system/packs")];
+  env ??= layerEnvironment(root);
   const places = [join(root, PACKS_DIR)];
   for (const entry of (env.OSD_PACKS ?? "").split(delimiter).map((s) => s.trim()).filter((s) => s !== "")) {
     places.push(isAbsolute(entry) ? entry : join(root, entry));
@@ -216,7 +218,7 @@ export function packAt(root, dir) {
 }
 
 /** every pack, in the order they are layered */
-export function packsOf(root, env = process.env) {
+export function packsOf(root, env) {
   const found = new Map();
   for (const place of placesOf(root, env)) {
     if (isDir(place) === false) {
@@ -239,6 +241,7 @@ export function packsOf(root, env = process.env) {
   }
   // The web bundle runs transpilation and preview generation in child
   // processes; this selection must reach every consumer of pack inputs.
+  env ??= layerEnvironment(root);
   const selected = env.OSD_WEB_PACKS;
   const names = selected?.split(",").map((name) => name.trim());
   const packs = selected === undefined || selected === "all"
@@ -267,7 +270,7 @@ export function folderOf(root, dir) {
  * pack-local AMDP class hide its own runnable rewrite and handed raw
  * SQLScript to the ABAP transpiler. Insert packs immediately before `gen/`;
  * configs without a generated layer keep the original append behaviour. */
-export function inputFoldersOf(root, config, env = process.env, {extraPacks = true} = {}) {
+export function inputFoldersOf(root, config, env, {extraPacks = true} = {}) {
   const active = activeSystem(root, env);
   if (active) {
     const packs = packsOf(root, env);
@@ -276,6 +279,7 @@ export function inputFoldersOf(root, config, env = process.env, {extraPacks = tr
       : l.kind === "pack" ? packs.find(p => p.name === l.name).abap.map(f => folderOf(root, f)) : []);
     return [...folders, "gen"];
   }
+  env ??= layerEnvironment(root);
   const listed = config?.input_folder === undefined ? [] : [config.input_folder].flat();
   const packs = extraPacks ? packsOf(root, env).flatMap((p) => p.abap.map((f) => folderOf(root, f))) : [];
   const added = packs.filter((f) => listed.includes(f) === false);
@@ -295,12 +299,12 @@ export function inputFoldersOf(root, config, env = process.env, {extraPacks = tr
   return [...system, ...tmp, ...userFoldersOf(root, env)];
 }
 
-export function userFoldersOf(root, env = process.env) {
+export function userFoldersOf(root, env) {
   return userLayersOf(root, env).map(layer => layer.path);
 }
 
 /** the roots a pack adds to the object store, with the package each lives in */
-export function packRootsOf(root, env = process.env) {
+export function packRootsOf(root, env) {
   return packsOf(root, env).flatMap((p) => p.abap.map((f) => ({
     path: folderOf(root, f), writable: true, library: false, imported: true, package: p.package, pack: p.name,
   })));
@@ -310,7 +314,7 @@ export function packRootsOf(root, env = process.env) {
  * reads test/ for ABAP unit classes, but generators must skip its incomplete
  * fixtures (notably a CDS view without its table). Other configured folders,
  * including imports, retain their exact build precedence. */
-export function generatorFoldersOf(root, env = process.env) {
+export function generatorFoldersOf(root, env) {
   const file = join(root, "abap_transpile.json");
   const config = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {input_folder: ["src"]};
   const system = activeSystem(root, env);
@@ -319,18 +323,18 @@ export function generatorFoldersOf(root, env = process.env) {
 }
 
 /** Content-only projection for generators that produce gen/. */
-export function contentFoldersOf(root, env = process.env) {
+export function contentFoldersOf(root, env) {
   return generatorFoldersOf(root, env).filter((folder) => folder !== "gen");
 }
 
 /** every folder of seed rows: the tree's own, then each pack's */
-export function dataDirsOf(root, env = process.env) {
+export function dataDirsOf(root, env) {
   const own = systemFile(root, "data", env);
   return [...(isDir(own) ? [own] : []), ...packsOf(root, env).map((p) => p.data).filter((d) => d !== undefined)];
 }
 
 /** every folder holding table definitions a seed row may need */
-export function ddicDirsOf(root, env = process.env) {
+export function ddicDirsOf(root, env) {
   const own = activeSystem(root, env) ? [] : ["src/ddic", "src/segw/ddic", "src/zosd_test/ddic"].map((d) => join(root, d));
   const folders = new Set([...own, ...packsOf(root, env).map((p) => p.ddic).filter((d) => d !== undefined)]);
   // Definitions can live beside a generated set or an imported layer, not
@@ -346,7 +350,7 @@ export function ddicDirsOf(root, env = process.env) {
 }
 
 /** every tile the packs ask the launchpad for, in pack order */
-export function tilesOf(root, env = process.env) {
+export function tilesOf(root, env) {
   return [...packsOf(root, env).flatMap((p) => p.tiles.map((t) => ({...t, pack: p.name, description: p.description}))),
     // a generated cockpit app may ask for its tile's kind, subtitle, icon and live number
     ...cockpitAppsOf(root, contentFoldersOf(root, env)).map((c) => ({id: c.app, title: c.title, pack: c.app, type: "static", icon: "sap-icon://process",
@@ -354,7 +358,7 @@ export function tilesOf(root, env = process.env) {
 }
 
 /** the static folders a pack brings, each served under /app/<name> */
-export function webappsOf(root, env = process.env) {
+export function webappsOf(root, env) {
   return [...packsOf(root, env).filter((p) => p.webapp !== undefined).map((p) => ({name: p.name, dir: p.webapp})), ...cockpitAppsOf(root, contentFoldersOf(root, env))];
 }
 

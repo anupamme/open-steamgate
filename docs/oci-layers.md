@@ -69,18 +69,13 @@ not apply to a published layer: a folder whose content is only allowed in this
 repository (`packs/lsd`, `packs/zvdb`'s vectors) cannot be published as is.
 A layer brings its own exceptions instead: `osd-layer push … --leak-allow
 <file>` and `osd-layer system push … --leak-allow <file>` take a file in the
-format of `.leak-allow.json` whose `file` is the path inside the layer archive.
-Every entry needs a reason, applies to that archive path and value only, and an
-entry naming a path the layer does not have is refused rather than ignored. An
-entry may add `layer` (the layer's name) to apply to that layer of a system
-only, and in a system every entry must name its layer. Unknown keys are
-refused. The flag repeats, and the metadata documents are never covered,
-whatever an archive file is called. An entry excuses any kind of hit, the
-identifier list's names included, but the allow file is itself published in
-the layer's repository: it is for public values (an upstream test's GUID), and
-a name from the identifier list must never be written into one. The file belongs in the layer's own repository,
-where it is reviewed; abapiti's rules layers use it for a GUID and a hex ID
-that are literals of abaplint's own public tests.
+publication exception format. Every entry requires `layer`, archive `file`,
+`fileSha256` (SHA-256 of the entire staged file), `category`, exact positive
+`count`, and a reviewed `reason`. Identifier categories use numbered category
+IDs; entries never contain matched text or a hash of matched text. Changed
+bytes, missing paths, ambiguous layers and changed category counts are
+`BAD_ALLOW`. Metadata documents are never excepted. The flag repeats.
+Public scanner output contains categorys and paths only.
 
 `treeDigest` uses `tools/osd-oci.mjs`'s shared helper: SHA-256 of concatenated
 `<content sha256 hex>  <archive relative path>\n` lines, sorted by UTF-8 path
@@ -266,3 +261,222 @@ include the repository-allowed pack vectors that the public publication leak
 gate refuses. Its registry binds only loopback and is closed on completion;
 it never publishes to a network registry. Real publication continues through
 `osd-layer push` / `system push` and their unchanged fail-closed leak gate.
+
+## Release publication
+
+Alice's decision (2026-10-15): publish only release tags, **never merges to
+main**. `.github/workflows/oci-release.yml` runs for `vscode-stable-v*`
+(stable) and `vscode-v*` (prerelease), with no manual dispatch trigger. The test gate exports its resolved commit SHA; both later jobs
+check out exactly that SHA and refresh the remote tag at startup. Publication
+refreshes it again immediately before the first upload. A moved or deleted tag,
+a dirty checkout, or a HEAD differing from the tested SHA is refused. Runs for
+the same tag queue without cancellation.
+
+Published bytes always come from the tested SHA: the publisher checks out by
+SHA, so moving the tag during upload cannot change those bytes. The tag check
+and registry uploads are not atomic. If the tag moves after the final
+pre-upload check, the `public-check` job refreshes the tag and asserts that it
+still names the tested SHA; a mismatch fails the run even though packages may
+already have been uploaded. The operator must then delete the release's
+packages, or re-run the workflow for the intended tag after its commit passes
+the required tests.
+
+`scripts/system-publish.mjs` shares the roundtrip's staging recipe: locked
+libraries, src (including seeds and pages), test, and every resolved pack,
+with fetch identities and staged manifest `sources` removed. It publishes
+through the same layer and system leak validators as `osd-layer push` and
+`system push`, then uploads the gated bytes to
+`ghcr.io/<owner>/open-steamgate/<kind>-<name>:<release-tag>` and
+`ghcr.io/<owner>/open-steamgate/osd-system:<release-tag>`. Kinds are `lib`,
+`input`, and `pack`. All packages link to this public OSG repository; library config sources still
+record their upstream repository and locked commit.
+The layer and system CLIs accept `--annotations <JSON-file>` for string annotations;
+these pass through the same metadata leak gate.
+
+The complete `lsd` pack and complete `zvdb` pack are omitted: the former has
+repository-only content, the latter repository-only vectors, which the
+public gate refuses. The repository allow list is never imported.
+Every omitted pack and its reason is printed and recorded in the system's
+`org.osd.release.omitted-packs` JSON annotation and job summary/text artifact.
+All other packs are included without a cap; any other refusal fails the job.
+
+Pin the printed `repo@sha256:...` references rather than the discovery tags:
+`node tools/osd-fetch.mjs --system <system-repo@sha256:...>`. The workflow
+requests a pull token from `ghcr.io/token` **without credentials** for every
+published repository and GETs each manifest, including the system manifest,
+by digest. Any package that is not publicly readable fails publication
+verification. It then installs the system by digest in a scratch root and
+runs the existing complete treeDigest verifier and the real `osd-build` /
+transpiler, then executes the generated `init.mjs` / `initializeABAP()` and queries its initialized
+database. The scratch root includes the checkout’s `test/` runtime support,
+including `setup.mjs`. Any build or initialization failure fails the job. All layers and the complete system
+pass their gates before the first upload. Publication also waits for the
+successful `tests.yml` push run for the exact tag commit and uses the same
+stamped-version validator as the VS Code release. The job summary and plain
+text Actions artifact contain the system pin, ordered layer pins and omissions;
+no GitHub release assets are created.
+
+The release workflow explicitly passes `--leak-allow .leak-allow.release.json`
+to the publisher. It validates the file using `osd-layer`'s existing allow-file
+checks, requires an included layer name on every entry,
+then passes only that layer's entries to its layer gate and the complete file
+to the system gate. The manual smoke workflow does not use this file.
+Exceptions cannot cover metadata, another path, another layer, or changed bytes.
+
+Each exception records one of these reviewed classes:
+
+- **A:** a false positive in encoded/binary data, such as integrity hashes,
+  generated source hashes, embedded font bytes or seed PNG pixels.
+- **B:** a hand-authored synthetic fixture value, verified to identify no real
+  system or session.
+- **C:** unchanged text in a public upstream repository at the locked commit.
+  The reason links to that exact file/commit and names a public branch that
+  contains the commit. Both public reachability and byte equality are checked.
+- **D:** anything that might identify one of our live systems. Stop publication;
+  never allow it. Report only the layer, archive path and category to Alice.
+
+New user-owned GHCR packages may start private. The anonymous public check
+fails closed. On the first release, each new package may need to be switched
+to public by hand in its GitHub package settings, then the workflow rerun.
+Expected packages under `open-steamgate/`:
+`lib-open-abap-core`, `lib-express-icf-shim`, `lib-open-abap-apc`, `lib-abapgit`,
+`lib-open-abap-gui`, `lib-open-abap-odata`, `lib-ajson`, `input-src`, `input-test`,
+`pack-o4d`, `pack-zork`, `pack-gui-examples`, `pack-travels-a4h`, `osd-system`.
+
+To add an entry, run the offline staging/build preflight, establish A/B/C
+provenance locally, and record the entire staged file's SHA-256, category
+and exact match count. Never record a matched value or its fingerprint.
+Regenerate counts under neutral filenames, as the publication gate does.
+Re-run every included layer and the system gate, then prove an unrelated byte
+change and injected addresses/identifiers refuse publication in every layer kind.
+The complete `lsd` and `zvdb` packs retain their existing omissions.
+
+Release permissions are isolated in three jobs. `wait-for-tests` has only
+`actions: read` and no identifier secret. `publish` needs that gate and has
+`contents: read`, `packages: write`, and the identifier secret. Publication
+uses only Node built-ins: no npm install, compiler build, or transpiler link.
+The security boundaries are a tagged, tested commit reviewed as first-party code,
+exact job pinning, no third-party code on disk in the publish workspace, and
+minimal child environments. Immediately after
+checkout, and again immediately before the publish command, the job asserts
+that no `node_modules` entry exists anywhere under `GITHUB_WORKSPACE`, including
+hidden folders and linked directories; traversal errors fail closed. It never
+installs dependencies or restores a dependency cache. `setup-node`'s own Node
+toolcache is the runtime itself and is acceptable outside this workspace.
+Locked library and pack sources are treated as data, never executed.
+
+The workflow test pins the exact job set (`wait-for-tests`, `publish`,
+`public-check`), top-level permissions (`{}`), concurrency and tag-only triggers.
+It walks every string in each pre-install step's `run`, `env` and `with` to
+refuse secret references and pins every step from installation onward.
+It also compares the entire publish job against an explicit expected
+value: ordered steps, pinned action SHAs, every run line, conditions and
+environment. Any addition or change requires review of that allowlist. Commands
+such as `node --eval`, `node --import`, `npx`, tab-separated npm invocations,
+and extra Node entries fail by construction. The complete `wait-for-tests` job
+is also compared against an independent expected value, including the tested step; masking a failure with `|| true`
+requires review and fails the test.
+
+The parser-based import guard catches accidents; it does not defend against a
+deliberately obfuscating first-party author. Code review of the tested tag
+handles that threat. The lint is not a security boundary. It covers
+publish entry points, inline modules and the leak scanner, rejects nonliteral
+and third-party imports, and flags dynamic execution by AST. Its builtin
+allowlist is exactly `node:fs`, `node:path`, `node:url`, `node:crypto`,
+`node:os` and `node:zlib`; `node:child_process` is permitted only through
+the exact-source exceptions below. Every other builtin is refused.
+First-party subprocess exceptions live in
+`test/fixtures/oci-publish-subprocesses.json`: file, module, function, fixed
+executable (`git` or `process.execPath`), fixed scanner script under `tools/`,
+and the exact call source. Each entry permits one occurrence; another call in
+the same file, an alias, or a changed executable/script fails. Public boot tools
+and VSIX/GitHub release subprocesses are outside the publish import graph. The
+binary host registers its scanner dispatcher at startup; plain Node publishing
+uses the fixed repository scanner path and does not use `OSD_SELF` dispatch.
+No static JavaScript denylist can prove arbitrary code safe. The tagged tested
+commit, exact job pinning, workspace assertions and minimal child environments
+are the security boundaries.
+No third-party action runs after the identifier file is written, even after
+removal. `public-check` needs both earlier jobs, receives its
+pinned system and layer report through job outputs, and has only
+`contents: read`, no secrets and no package permission. A fresh runner makes
+anonymous install/build/initialization independent of publishing credentials
+and private files. Only the unprivileged jobs install npm dependencies with
+`--ignore-scripts`; the public check builds the pinned transpiler with lifecycle
+hooks disabled. Identifier-list exceptions and redacted logs use the single
+coarse category `identifier`; internal list categories never enter public output.
+Repository allow entries cannot store value fingerprints either.
+
+The publish job runs only for a release tag push and declares
+`environment: release`; there is no manual dispatch trigger. The repository
+owner must create the `release` environment and restrict deployment tags to
+`vscode-v*` and `vscode-stable-v*`. The publication-only secret
+`OSD_RELEASE_LEAK_IDENTIFIERS` must be an environment secret of `release`, never a repository secret.
+Only the publish job reads that name. Keep the repository-level
+`OSD_LEAK_IDENTIFIERS`: `leak-scan.yml`, `release.yml` and `oci-layers.yml` still
+read it. The separate name prevents fallback to that repository secret: a
+missing environment yields an empty secret and fails closed. The install step
+checks for a non-empty value after checkout, fetching and staging have finished,
+then writes the identifier file in that same step. Stoker will ask
+Alice to configure this; the code change does not create or change GitHub settings.
+
+The identifier file must not coexist with fetching or unpacking layer sources,
+or executing content from outside the tested commit. The job checks out that commit,
+asserts no `node_modules`, sets up Node, validates the tag, resolves locked
+libraries and packs in release mode, and stages a release plan with validated archives before writing
+the identifier file. Release Git sources require a full 40-hex commit SHA and
+an `https://` repository URL; Git option terminators and a protocol allowlist
+reject option injection and local/external transports. The identifier list is
+installed only after this preparation, then the job repeats the dependency
+assertion and publishes. An `always()` step removes the list on failure too.
+After the file appears, fetched sources are read only as data for scanning,
+hashing and upload; they are never imported or executed.
+The publisher uses the prepared plan and exact gated layer bytes to upload
+the system directly, with no registry layer pull or unpacking. Immediately
+before the first upload, after scanning and registry preflight, first-party Git
+fetches the tag ref from `origin` with fixed argv and requires the remote tag
+commit to equal both HEAD and TESTED_SHA. A moved or deleted remote tag refuses
+publication. This one tag refresh may run while the identifier file exists.
+Every subprocess in the publish import graph, including all Git calls and the
+plain Node leak scanner, receives an explicit environment from the one shared
+`publishChildEnv` helper in `tools/osd-env.mjs`, built from constants:
+`PATH=/usr/local/bin:/usr/bin:/bin`, `HOME=/tmp`, `LANG=C.UTF-8`. Git additionally
+gets `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null` and
+`GIT_TERMINAL_PROMPT=0`. No child inherits `process.env` or a spread of it;
+`GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_*`, `GIT_CONFIG_VALUE_*`, `NODE_OPTIONS` and
+registry credentials cannot reach a child. GHCR credentials stay in the
+publisher process that needs them for its built-in HTTP client. A first-party
+child probe verifies this with a poisoned parent environment, and an AST guard
+requires the helper at every spawn/execFile site in the publish graph.
+An `OSD_LEAK_IDENTIFIERS` override is forwarded as an explicit
+`--identifiers` file path, otherwise it reads the list from its first-party checkout. The public job refreshes the remote tag again before its
+independent boot check, catching movement during upload too.
+
+The import lint follows real paths (including symlinks) and requires every
+relative module in the publish graph to be tracked by Git under `tools/`,
+`scripts/` or `bin/`. Fetched directories, `.local/`, `upstream/` and workspace
+dependencies cannot supply publisher code. Exact subprocess exceptions also
+bind every call through the reviewed Git wrappers to its argv source.
+Loader properties such as `binding`, `dlopen` and `getBuiltinModule` are
+rejected on every receiver. Nonliteral element accesses other than individual
+environment-property reads, value uses of `globalThis`, and assignments to `process.env` or its members
+are refused; `process` cannot be aliased as a value. `constructor`, `execve`
+and `loadEnvFile` members are also refused. `process.env` may only be the object
+of a plain property read: aliases, spreads, `Object.assign`, `Reflect.set` and
+`Object.defineProperty` uses fail the lint. Configuration helpers read named
+settings individually; those settings never form a child environment.
+
+Before any registry write, publication resolves every layer discovery tag
+and the system discovery tag. An existing different manifest digest refuses
+the entire publication; an identical digest permits an idempotent retry.
+Lookup/authentication failures also refuse publication rather than treating
+the package as absent. Consumers should continue pinning digests.
+
+The first release must confirm GHCR's response for a not-yet-existing package
+using the intended publishing credentials (404 versus 401/403), before attempting
+the release. Only 404 is treated as absent;
+401/403 and every other lookup error fail closed before any upload.
+If GHCR masks absence as an authorization failure, resolve the registry setup
+and rerun; do not bypass the preflight or reinterpret that failure as absence.
+This live first-release confirmation is still required; loopback tests cannot
+establish GHCR's behavior for a new package.

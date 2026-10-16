@@ -1,3 +1,4 @@
+import {readEnvironment} from './osd-env.mjs';
 // $TMP, the local package of every ABAP system, as a package of this one.
 //
 // What a real system has, measured on the A4H sandbox (2026-10-02,
@@ -116,16 +117,16 @@ export function tmpAuthors(root) {
 
 export function recordAuthor(root, type, name, author) {
   const all = readForUpdate(root);
-  all[`${type} ${String(name).toUpperCase()}`] = {author: String(author).toUpperCase(), createdAt: new Date().toISOString()};
+  Object.assign(all, {[`${type} ${String(name).toUpperCase()}`]: {author: String(author).toUpperCase(), createdAt: new Date().toISOString()}});
   writeAuthors(root, all);
 }
 
 export function forgetAuthor(root, type, name) {
   const all = readForUpdate(root);
   const key = `${type} ${String(name).toUpperCase()}`;
-  if (all[key] !== undefined) {
-    delete all[key];
-    writeAuthors(root, all);
+  const entries = Object.entries(all);
+  if (entries.some(([name, value]) => name === key && value !== undefined)) {
+    writeAuthors(root, Object.fromEntries(entries.filter(([name]) => name !== key)));
   }
 }
 
@@ -173,12 +174,12 @@ export function tmpFiles(root) {
 
 /** OSD_TMP=off leaves $TMP out of the layers and the store: what a preview
  *  or any other published build runs with (scripts/build-preview.mjs) */
-export const tmpDisabled = (env = process.env) => String(env.OSD_TMP ?? "").toLowerCase() === "off";
+export const tmpDisabled = (env = readEnvironment(["OSD_TMP"])) => String(env.OSD_TMP ?? "").toLowerCase() === "off";
 
 /** The one switch every publishing path throws (preview/Pages, VSIX and the
  *  binary's seed, Docker, osd-build --publish): $TMP is left out of what it
- *  builds. Returns the env it changed. */
-export function forPublishing(env = process.env) {
+ *  builds. The caller supplies the env to mutate; returns that same object. */
+export function forPublishing(env) {
   env.OSD_TMP = "off";
   return env;
 }

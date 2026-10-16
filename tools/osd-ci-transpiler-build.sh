@@ -20,10 +20,10 @@ case "${1:-}" in
     # The root supplies @types/node; ignore its recursive install script.
     npm --prefix "$clone" install --ignore-scripts --no-audit --no-fund
     for package in runtime transpiler cli; do
-      npm --prefix "$clone/packages/$package" install --no-audit --no-fund
+      npm --prefix "$clone/packages/$package" install --ignore-scripts --no-audit --no-fund
     done
     for package in runtime transpiler cli; do
-      npm --prefix "$clone/packages/$package" run compile
+      npm --prefix "$clone/packages/$package" --ignore-scripts run compile
     done
     chmod +x "$clone/packages/cli/abap_transpile"
     ;;

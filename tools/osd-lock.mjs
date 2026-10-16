@@ -2,15 +2,17 @@ import {readFileSync} from "node:fs";
 import {basename, join} from "node:path";
 import {runsAs} from "./osd-main.mjs";
 
-const SHA = /^[0-9a-f]{40}$/;
-const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+import {fullCommit} from "./osd-release-git.mjs";
+const githubRepo = value => typeof value === "string" && value.split("/").length === 2
+  && value.split("/").every(part => part.length > 0
+    && [...part].every(c => "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-".includes(c)));
 
 export function readLock(root = ".") {
   const file = join(root, "libs.lock.json");
   const lock = JSON.parse(readFileSync(file, "utf8"));
   const validate = (source, label) => {
-    if (!source || typeof source.repo !== "string" || !REPO.test(source.repo)
-        || typeof source.ref !== "string" || !SHA.test(source.ref)) {
+    if (!source || typeof source.repo !== "string" || !githubRepo(source.repo)
+        || typeof source.ref !== "string" || !fullCommit(source.ref)) {
       throw new Error(`libs.lock.json: ${label} must have a GitHub owner/repository and a 40-character commit SHA`);
     }
   };
@@ -39,7 +41,8 @@ export function librariesFromLock(root = ".") {
     const folder = basename(lib.folder.replaceAll("\\", "/"));
     const pin = byFolder.get(folder);
     if (pin === undefined) throw new Error(`libs.lock.json has no pin for ${lib.folder}`);
-    const normalized = lib.folder.replaceAll("\\", "/").replace(/^\//, "");
+    const slashes = lib.folder.replaceAll("\\", "/");
+    const normalized = slashes.startsWith("/") ? slashes.slice(1) : slashes;
     if (normalized !== `.local/lars/${folder}`) {
       throw new Error(`abap_transpile.json library ${lib.folder} is outside .local/lars/`);
     }
