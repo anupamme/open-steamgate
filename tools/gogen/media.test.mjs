@@ -1,3 +1,4 @@
+import {parseObserved} from "./frontend-inventory.mjs";
 // node --test tools/gogen/media.test.mjs
 //
 // replaceWwwparams against the transpiler's own rows: PopulateTables for one
@@ -47,7 +48,7 @@ function transpilerRows(dir) {
   const reg = new abaplint.Registry();
   reg.addFile(new abaplint.MemoryFile("wwwparams.tabl.xml", readFileSync(`${home}/.local/lars/open-abap-core/src/w3mi/wwwparams.tabl.xml`, "utf8")));
   reg.addFile(new abaplint.MemoryFile("zgogen_t_media.w3mi.xml", readFileSync(join(dir, "zgogen_t_media.w3mi.xml"), "utf8")));
-  reg.parse();
+  parseObserved(reg);
   const obj = reg.getObject("W3MI", "ZGOGEN_T_MEDIA");
   assert.ok(obj, "the W3MI object is in the registry");
   return new PopulateTables(reg).insertWWWPARAMS(obj);

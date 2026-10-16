@@ -1,3 +1,4 @@
+import {parseObserved} from "./frontend-inventory.mjs";
 // Deliberately narrow cache seams remove redundant guards, so each fault must
 // actually predict stale reuse and the independent cold validation must kill it.
 import {test} from "node:test";
@@ -18,7 +19,7 @@ function seam(cacheDir, files, lower) {
     cfg.rules = {check_syntax: true, parser_error: true};
     const reg = new core.Registry(new core.Config(JSON.stringify(cfg)));
     for (const [name, raw] of Object.entries(files)) reg.addFile(new core.MemoryFile(name, raw));
-    reg.parse(); reg.findIssues(); prepareArtifactDigests(reg);
+    parseObserved(reg); reg.findIssues(); prepareArtifactDigests(reg);
     const p = {reg, frontendCounts: {reused: 0, lowered: 0, reusedClasses: [], loweredClasses: []},
       supplied: new Map(), wanted: new Set(["ZREADER"]), effects: new Map()};
     const disk = auditedBookkeeping("test-cache-inventory", () => objectCache(reg, cacheDir));

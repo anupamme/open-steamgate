@@ -1,3 +1,4 @@
+import {parseObserved} from "./frontend-inventory.mjs";
 // Direct runtime parity: the Go host remains the contract, including refusals.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
@@ -201,8 +202,8 @@ DATA a TYPE REF TO data. DATA b TYPE REF TO data.
 ${body}
 rv = eq( a = a b = b ).
 ENDMETHOD. ENDCLASS.`;
-    const reg = new core.Registry(new core.Config(JSON.stringify(config)))
-      .addFile(new core.MemoryFile('zcl_probe.clas.abap', source)).parse();
+    const reg = parseObserved(new core.Registry(new core.Config(JSON.stringify(config)))
+      .addFile(new core.MemoryFile('zcl_probe.clas.abap', source)));
     const program = compileProgram({folders:[], objects:['ZCL_PROBE'], registry:reg});
     assert.deepEqual(program.partial, []);
     const code = emitJs(program, new URL('./js/abap.mjs', import.meta.url).href);

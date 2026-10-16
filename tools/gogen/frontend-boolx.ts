@@ -1,3 +1,4 @@
+import {parseObserved} from "./frontend-inventory.mjs";
 import type * as abaplint from "@abaplint/core";
 
 export interface BoolxParser {
@@ -11,7 +12,7 @@ interface TokenEdit { readonly at: number; readonly text: string }
 // comments and nested calls, and inserted text never adds a source line.
 export function lowerBoolx(source: string, filename: string, core: BoolxParser): string {
   if (!/\.abap$/i.test(filename) || !/\bboolx\s*\(/i.test(source)) return source;
-  const reg = new core.Registry().addFile(new core.MemoryFile(filename, source)).parse();
+  const reg = parseObserved(new core.Registry().addFile(new core.MemoryFile(filename, source)));
   // This registry contains only the .abap MemoryFile admitted above.
   const object = reg.getFirstObject() as abaplint.ABAPObject | undefined;
   const tokens = object?.getABAPFiles().find((f): boolean => f.getFilename() === filename)?.getTokens()

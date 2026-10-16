@@ -1,3 +1,4 @@
+import {parseObserved} from "./frontend-inventory.mjs";
 import {deserialize} from "node:v8";
 import {inflateRawSync} from "node:zlib";
 import {runInThisContext} from "node:vm";
@@ -71,7 +72,7 @@ test("disk entries reference the shared graph, which stores own rows and artifac
 
 test("cached syntax built between recording sessions marks its owner untraced-artifact", () => {
   const reg = registry(aFiles()), session = {};
-  recordProvenance(() => reg.parse());
+  recordProvenance(() => parseObserved(reg));
   const options = {registry: reg, folders: [], objects: ["ZCL_A"], session, tolerant: true};
   compileProgram({...options, provenance: false});
   const p = compileProgram({...options, provenance: true});
@@ -81,7 +82,7 @@ test("cached syntax built between recording sessions marks its owner untraced-ar
 
 test("parsed DDIC built between recording sessions marks its owner untraced-artifact", () => {
   const c = syntheticCorpus({classes: 4}), reg = registry(c.files);
-  recordProvenance(() => reg.parse());
+  recordProvenance(() => parseObserved(reg));
   // Clear then build a cached type while hooks are absent, with no source edit.
   const table = reg.getObject("TABL", "ZORACLE_TAB");
   table.parsedType = undefined; table.parseType(reg);
@@ -92,7 +93,7 @@ test("parsed DDIC built between recording sessions marks its owner untraced-arti
 for (const edit of ["replace", "add", "remove"]) test(`retained registry ${edit} uses immutable file snapshots and prunes stale queries`, () => {
   const reg = registry({...aFiles(), "zcl_a.clas.locals_def.abap": "", "zcl_old.clas.abap": classSource("zcl_old")});
   recordProvenance(() => {
-    reg.parse();
+    parseObserved(reg);
     scope(reg, reg.getObject("CLAS", "ZCL_A"), () => reg.getObject("CLAS", "ZSTALE"));
   });
   if (edit === "replace") reg.updateFile(new core.MemoryFile("zcl_a.clas.abap", classSource("zcl_a", "rv = 8.")));
@@ -107,7 +108,7 @@ for (const edit of ["replace", "add", "remove"]) test(`retained registry ${edit}
 
 test("retained config edits prune old rows and fail closed", () => {
   const reg = registry(aFiles());
-  recordProvenance(() => { reg.parse(); scope(reg, reg.getObject("CLAS", "ZCL_A"), () => reg.getObject("CLAS", "ZSTALE")); });
+  recordProvenance(() => { parseObserved(reg); scope(reg, reg.getObject("CLAS", "ZCL_A"), () => reg.getObject("CLAS", "ZSTALE")); });
   reg.setConfig(new core.Config(JSON.stringify(reg.getConfig().get())));
   const p = compileProgram({registry: reg, folders: [], objects: [], provenance: true});
   assert.notEqual(p.reg, reg);
@@ -115,17 +116,18 @@ test("retained config edits prune old rows and fail closed", () => {
 });
 
 test("no stack frames is an unknown scan, including without artifact context", () => {
-  const code = `import {recordProvenance,provenanceOf} from './tools/gogen/frontend-provenance.mjs';
+  const code = `import {parseObserved} from './tools/gogen/frontend-inventory.mjs';
+    import {recordProvenance,provenanceOf} from './tools/gogen/frontend-provenance.mjs';
     import {createRequire} from 'node:module';const r=createRequire(import.meta.url), c=createRequire(r.resolve('@abaplint/transpiler/package.json'))('@abaplint/core');
     const reg=new c.Registry();reg.addFile(new c.MemoryFile('z.prog.abap','REPORT z.'));
-    recordProvenance(()=>{reg.parse();[...reg.getObjects()];});
+    recordProvenance(()=>{parseObserved(reg);[...reg.getObjects()];});
     if(!provenanceOf(reg).get('PROG Z').unknownScans.some(q=>q.scan==='getObjects'&&q.artifact==='<registry>'))throw Error('missing unknown scan');`;
   execFileSync(process.execPath, ["--stack-trace-limit=0", "--input-type=module", "-e", code], {stdio: "pipe"});
 });
 
 test("unknown sites are module-relative and carry no absolute cwd or node_modules root", () => {
   const reg = registry(aFiles());
-  recordProvenance(() => { reg.parse(); runInThisContext("(reg) => [...reg.getObjects()]", {filename: "/tmp/private-checkout/scan.mjs"})(reg); });
+  recordProvenance(() => { parseObserved(reg); runInThisContext("(reg) => [...reg.getObjects()]", {filename: "/tmp/private-checkout/scan.mjs"})(reg); });
   const sites = provenanceOf(reg).get("CLAS ZCL_A").unknownScans.flatMap((q) => q.site ?? []);
   assert.ok(sites.length);
   for (const site of sites) assert.ok(!site.includes(process.cwd()) && !/(?:file:\/\/)?\/(?:home|mnt|tmp)\//.test(site), site);
@@ -137,7 +139,7 @@ test("macro-expanded CALL FUNCTION records lowering ownership and signature DDIC
   c.files["zcl_function.clas.abap"] = classSource("zcl_function", "invoke.");
   c.files["zcl_function.clas.macros.abap"] = "DEFINE invoke. CALL FUNCTION 'ZORACLE_FUNCTION' EXPORTING iv_value = 7 IMPORTING ev_value = rv. END-OF-DEFINITION.";
   const build = () => recordProvenance(() => {
-    const reg = registry(c.files); reg.parse();
+    const reg = registry(c.files); parseObserved(reg);
     return compileProgram({registry: reg, folders: [], objects: ["ZCL_FUNCTION", "ZORACLE_GROUP"], tolerant: true});
   });
   const p = build(), m = provenanceOf(p).get("CLAS ZCL_FUNCTION");
@@ -157,7 +159,7 @@ test("macro-expanded missing CALL FUNCTION records a consumer miss before the mo
   delete c.files[moduleFile];
   c.files["zoracle_group.fugr.zother.abap"] = originalModule.replaceAll("zoracle_function", "zother");
   const build = () => recordProvenance(() => {
-    const reg = registry(c.files); reg.parse();
+    const reg = registry(c.files); parseObserved(reg);
     return compileProgram({registry: reg, folders: [], objects: ["ZCL_A", "ZORACLE_GROUP"], tolerant: true});
   });
   const query = (q) => q.artifact === "CLAS ZCL_A" && q.phase === "lowering"
@@ -178,7 +180,7 @@ test("macro-expanded missing CALL FUNCTION records a consumer miss before the mo
 test("selection queries add edges and belong to their consumer", () => {
   const c = syntheticCorpus({classes: 4}), reg = registry(c.files);
   recordProvenance(() => {
-    reg.parse();
+    parseObserved(reg);
     const group = reg.getObject("FUGR", "ZORACLE_GROUP");
     scope(reg, group, () => reg.getObject("DOMA", "ZSIGNATURE_MISS"));
     expandProgramSelection(reg, ["zcl_function"], core);
@@ -193,7 +195,7 @@ test("selection queries add edges and belong to their consumer", () => {
 test("cached artifact reads link providers through the owners map without lookup arguments", () => {
   const reg = registry({"zcl_a.clas.abap": classSource("zcl_a"), "zprovider.prog.abap": "REPORT zprovider."});
   recordProvenance(() => {
-    reg.parse();
+    parseObserved(reg);
     const a = reg.getObject("CLAS", "ZCL_A"), provider = reg.getObject("PROG", "ZPROVIDER");
     scope(reg, provider, () => reg.getObject("DOMA", "ZARTIFACT_MISS"));
     scope(reg, a, () => provider.getABAPFiles()); // no Registry argument, cached files
@@ -204,7 +206,7 @@ test("cached artifact reads link providers through the owners map without lookup
 for (const method of ["getModule", "getInclude"]) test(`${method} artifact hook names the function group query`, () => {
   const reg = registry(syntheticCorpus({classes: 4}).files);
   recordProvenance(() => {
-    reg.parse();
+    parseObserved(reg);
     const a = reg.getObject("CLAS", "ZCL_FUNCTION"), group = reg.getObject("FUGR", "ZORACLE_GROUP");
     scope(reg, a, () => group[method](method === "getModule" ? "ZORACLE_FUNCTION" : "LZORACLE_GROUPTOP"));
     const own = storedProvenance(reg, a);
@@ -219,7 +221,7 @@ test("implicit pool constant and procedural include queries retain semantic name
   c.files["zinc.prog.xml"] = xml("<PROGDIR><SUBC>I</SUBC></PROGDIR>");
   const reg = registry(c.files);
   recordProvenance(() => {
-    reg.parse(); reg.findIssues();
+    parseObserved(reg); reg.findIssues();
     const a = reg.getObject("CLAS", "ZCL_CONTROL_0000");
     const {CurrentScope} = cr("@abaplint/core/build/src/abap/5_syntax/_current_scope");
     scope(reg, a, () => CurrentScope.buildDefault(reg, a).findTypePoolConstant("ZORC_LIMIT"));
@@ -237,7 +239,7 @@ test("cross include candidate context belongs only to the consumer", () => {
     "zconsumer.prog.xml": xml("<PROGDIR><SUBC>I</SUBC></PROGDIR>"),
     "zcl_unrelated.clas.abap": classSource("zcl_unrelated"),
   });
-  recordProvenance(() => reg.parse());
+  recordProvenance(() => parseObserved(reg));
   const consumer = provenanceOf(reg).get("PROG ZCONSUMER"), unrelated = provenanceOf(reg).get("CLAS ZCL_UNRELATED");
   assert.ok(consumer.hits.some((q) => q.kind === "include-parent" && q.artifact === "PROG ZCONSUMER" && q.result.includes("PROG ZMAIN")));
   for (const m of [consumer, unrelated]) assert.ok(!m.hits.some((q) => q.artifact === "<registry>" && q.kind === "include-parent"));
@@ -251,14 +253,14 @@ test("subclass DDIC and interface implicit pool dependencies inherit provider ar
   c.files["zif_typed.intf.abap"] = "INTERFACE zif_typed PUBLIC. METHODS run RETURNING VALUE(rv) TYPE zorc_value. ENDINTERFACE.";
   c.files["zcl_typed.clas.abap"] = "CLASS zcl_typed DEFINITION PUBLIC. PUBLIC SECTION. INTERFACES zif_typed. ENDCLASS. CLASS zcl_typed IMPLEMENTATION. METHOD zif_typed~run. rv = 1. ENDMETHOD. ENDCLASS.";
   const reg = registry(c.files);
-  recordProvenance(() => { reg.parse(); compileProgram({registry: reg, folders: [], objects: ["ZCL_CHILD", "ZCL_TYPED"], tolerant: true}); });
+  recordProvenance(() => { parseObserved(reg); compileProgram({registry: reg, folders: [], objects: ["ZCL_CHILD", "ZCL_TYPED"], tolerant: true}); });
   assert.ok(provenanceOf(reg).get("CLAS ZCL_CHILD").hits.some((q) => q.result.includes("DOMA ZORACLE_NUM") && q.artifact !== "CLAS ZCL_CHILD"));
   assert.ok(provenanceOf(reg).get("CLAS ZCL_TYPED").hits.some((q) => q.kind === "implicit-type-pool" && q.artifact === "INTF ZIF_TYPED"));
 });
 
 test("session lowering built while recording was off has an explicit marker", () => {
   const reg = registry({"zcl_a.clas.abap": classSource("zcl_a")}), session = {};
-  recordProvenance(() => { reg.parse(); reg.findIssues(); });
+  recordProvenance(() => { parseObserved(reg); reg.findIssues(); });
   const options = {registry: reg, folders: [], objects: ["ZCL_A"], session};
   compileProgram({...options, provenance: false});
   const p = compileProgram({...options, provenance: true});
@@ -292,7 +294,7 @@ for (const [type, name, method] of [["CLAS", "ZCL_CONTROL_0001", "getDefinition"
   c.files["zspot.enhs.xml"] = xml("<BADI_DATA><ENH_BADI_DATA><BADI_NAME>ZBADI</BADI_NAME><INTERFACE_NAME>ZIF_BADI</INTERFACE_NAME></ENH_BADI_DATA></BADI_DATA>");
   const reg = registry(c.files);
   recordProvenance(() => {
-    reg.parse(); reg.findIssues();
+    parseObserved(reg); reg.findIssues();
     const a = reg.getObject("CLAS", "ZCL_CONTROL_0000"), provider = reg.getObject(type, name);
     provider[method](); // warm the getter before reading it under the consumer
     scope(reg, provider, () => reg.getObject("DOMA", "ZLEAF_MISS"));
@@ -373,7 +375,7 @@ test("selection uses parsed calls and static identifiers, preserving per-file qu
     c.files[`${name}.clas.abap`] = classSource(name, "rv = 7.", "i", "CLASS-DATA value TYPE i.");
   const reg = registry(c.files);
   recordProvenance(() => {
-    reg.parse();
+    parseObserved(reg);
     const wanted = ["zcl_select"];
     expandProgramSelection(reg, wanted, core);
     assert.deepEqual(wanted, ["zcl_select", "zoracle_group", "zcl_static"]);
@@ -429,7 +431,7 @@ for (const used of [false, true]) test(`macro definition selection preserves sou
   c.files["zlater_group.fugr.xml"] = c.files["zoracle_group.fugr.xml"].replaceAll("ZORACLE_FUNCTION", "ZLATER").replaceAll("ZORACLE_GROUP", "ZLATER_GROUP");
   const reg = registry(c.files);
   recordProvenance(() => {
-    reg.parse();
+    parseObserved(reg);
     const wanted = ["zcl_select"];
     expandProgramSelection(reg, wanted, core);
     assert.deepEqual(wanted, ["zcl_select", "zoracle_group", "zlater_group", "zcl_first", "zcl_later"]);
