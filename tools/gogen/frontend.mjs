@@ -2543,8 +2543,8 @@ function compiledFunctionCall(node, ctx, text, name) {
     if (matches("FIND ALL OCCURRENCES OF IN", ["", "IGNORING CASE"], "MATCH COUNT") && node.findDirectExpressions(Expressions.Source).length === 2) {
       const [pat, subj] = node.findDirectExpressions(Expressions.Source);
       const kind = upper(node.findDirectExpression(Expressions.FindType)?.concatTokens() ?? "");
-      if (kind && kind !== "REGEX" && kind !== "PCRE") throw new Unsupported(`FIND ${kind}`);
-      const regex = kind !== "";
+      if (kind && kind !== "SUBSTRING" && kind !== "REGEX" && kind !== "PCRE") throw new Unsupported(`FIND ${kind}`);
+      const regex = kind === "REGEX" || kind === "PCRE";
       const pcre = kind === "PCRE";
       let pattern = source(pat, ctx);
       /** @type {import("./frontend-types.ts").ValueExpr} */ let icase = {e: "flag", value: hasKeywords("IGNORING", "CASE"), type: {k: "bool"}};
@@ -2569,10 +2569,10 @@ function compiledFunctionCall(node, ctx, text, name) {
     if (words.includes("ALL") || words.includes("RESULTS") || words.includes("RESPECTING") || hasKeywords("MATCH", "COUNT") || hasKeywords("IN", "BYTE", "MODE")) throw new Unsupported(`FIND form: ${text}`);
     const ft = node.findDirectExpression(Expressions.FindType);
     const kind = ft ? upper(ft.concatTokens()) : "";
-    if (kind && kind !== "REGEX" && kind !== "PCRE") throw new Unsupported(`FIND ${kind}`);
+    if (kind && kind !== "SUBSTRING" && kind !== "REGEX" && kind !== "PCRE") throw new Unsupported(`FIND ${kind}`);
     const inTable = words.some((w, i) => w === "IN" && words[i + 1] === "TABLE");
     const section = words.includes("SECTION");
-    if (section && (kind !== "" || inTable)) throw new Unsupported(`FIND form: ${text}`);
+    if (section && (!["", "SUBSTRING"].includes(kind) || inTable)) throw new Unsupported(`FIND form: ${text}`);
     // the Sources in order: pattern, [section offset], [section length], subject
     const srcs = [];
     let smode = "pat";
@@ -2589,7 +2589,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     if (!pat || !subj) throw new Unsupported(`FIND operands: ${text}`);
     const patX = source(pat, ctx);
     if (!charlike(patX.type)) throw new Unsupported(`FIND of a ${patX.type.k}`);
-    /** @type {import("./frontend-types.ts").FindState} */ const out = {s: "find", regex: kind !== "", pcre: kind === "PCRE", pattern: convert(patX, S),
+    /** @type {import("./frontend-types.ts").FindState} */ const out = {s: "find", regex: kind === "REGEX" || kind === "PCRE", pcre: kind === "PCRE", pattern: convert(patX, S),
       icase: hasKeywords("IGNORING", "CASE"), subs: [], off: null, len: null};
     if (inTable) {
       const tb = source(subj, ctx);

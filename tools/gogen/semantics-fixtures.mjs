@@ -1,3 +1,5 @@
+import {DYNAMIC_EXPECT, checkDynamicCallOracle} from "./dynamic-call-oracle.mjs";
+import {FIND_SUBSTRING_EXPECT, checkFindSubstringOracle} from "./find-substring-oracle.mjs";
 import {existsSync, readFileSync, readdirSync} from "node:fs";
 import {join} from "node:path";
 
@@ -14,3 +16,9 @@ export function checkDemoCopies(here, home) {
 }
 
 export {compileClosedProgram as compileSemantics} from "./frontend-closure.mjs";
+
+export const SEMANTICS_ORACLE_EXPECT = {...DYNAMIC_EXPECT, ...FIND_SUBSTRING_EXPECT};
+export async function checkSemanticsOracles(selected, home, core, fixtures) {
+  await checkDynamicCallOracle(selected, home, core, fixtures);
+  await checkFindSubstringOracle(selected, home, core, fixtures);
+}
