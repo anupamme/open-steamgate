@@ -90,7 +90,7 @@ export const DIALECTS = {
     // allowlist. Functions enter this set only after PostgreSQL has a
     // value-level conformance row. The first AMDP slice needs operators, not
     // built-ins, so an empty set is the honest initial capability.
-    functions: new Set(),
+    functions: /** @type {Set<string>} */ (new Set()),
     quote: (id) => `"${id.replace(/"/g, '""')}"`,
     placeholder: (n, type) => {
       const code = String(type ?? "").toUpperCase();
