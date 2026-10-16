@@ -1,0 +1,15 @@
+CLASS zcl_gogen_t_dynrecvcollision DEFINITION PUBLIC FINAL CREATE PUBLIC.
+ PUBLIC SECTION.
+ CLASS-METHODS run RETURNING VALUE(rv) TYPE string.
+ CLASS-METHODS val IMPORTING p TYPE i OPTIONAL sup_p TYPE i OPTIONAL RETURNING VALUE(r) TYPE i.
+ENDCLASS.
+CLASS zcl_gogen_t_dynrecvcollision IMPLEMENTATION.
+ METHOD val. DATA _sup_p TYPE i VALUE 99. r = _sup_p. IF p IS SUPPLIED. r = p. ELSE. r = sup_p. ENDIF. ENDMETHOD.
+ METHOD run.
+ DATA x TYPE i.
+ CALL METHOD ('ZCL_GOGEN_T_DYNRECVCOLLISION')=>('VAL') EXPORTING sup_p = 42 RECEIVING r = x.
+ rv = |{ x }|.
+ CALL METHOD ('ZCL_GOGEN_T_DYNRECVCOLLISION')=>('VAL') EXPORTING p = 7 sup_p = 42 RECEIVING r = x.
+ rv = |{ rv }/{ x }/{ val( sup_p = 9 ) }/{ val( p = 8 sup_p = 9 ) }|.
+ ENDMETHOD.
+ENDCLASS.

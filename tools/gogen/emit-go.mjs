@@ -36,10 +36,12 @@ const GO_RESERVED = new Set(("break default func interface select case defer go 
 /** @type {boolean} */ let exportedFields = false, /** @type {import("./emit-go-types.ts").Ownership | undefined} */ OWNERSHIP, /** @type {import("./emit-go-types.ts").SymbolCollector | null | undefined} */ SYMBOLS;
 /** @param {import("./emit-go-types.ts").Field} v @returns {string} */ const ownedType = (v) => OWNERSHIP.declarations.has(v) ? (HELPER_IMPORTS.add("xbuf"), (v.type.k === "x" ? `[${v.type.len}]byte` : "hXbuf.Buffer")) : goType(v.type);
 /** @param {string} name @returns {string} */ export const ident = (name) => {
+  // A single leading underscore is reserved for compiler-only supplied flags.
+  if (name.startsWith("\0")) return `_sup_${ident(name.slice(1))}`;
   // INTF~ATTR, an interface's attribute in the object, keeps the ~ apart
   // from the _ of an attribute of the class's own
   const id = String(name).toLowerCase().replace(/~/g, "__").replace(/[^a-z0-9_]/g, "_");
-  const safe = GO_RESERVED.has(id) || /^\d/.test(id) ? `${id}_` : id;
+  const safe = id.startsWith("_") ? `_${id}` : GO_RESERVED.has(id) || /^\d/.test(id) ? `${id}_` : id;
   // ABAP fields cross generated Go package boundaries in a layered build.
   // A leading capital exports them; the rest of the spelling stays stable.
   return exportedFields ? safe[0].toUpperCase() + safe.slice(1) : safe;
@@ -492,13 +494,13 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
 /** @param {readonly import("./emit-go-types.ts").Class[]} classes @returns {string[]} */ function nativeCodepage(classes) {
   /** @type {string[]} */ const out = [];
   /** @param {string} fn @returns {boolean} */ const has = (fn) => classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === fn));
-  /** @param {string} cls @param {string} meth @param {string} p @returns {boolean | undefined} */ const sup = (cls, meth, p) => classes.find((c) => c.name === cls)?.methods.find((m) => m.name === meth)?.params.some((x) => x.name === p);
+  /** @param {string} cls @param {string} meth @param {string} p @returns {boolean | undefined} */ const sup = (cls, meth, p) => classes.find((c) => c.name === cls)?.methods.find((m) => m.name === meth)?.params.some((x) => x.suppliedOf === p);
   if (has("Native_CONV_OUT_CONVERT")) {
-    const withSup = sup("CL_ABAP_CONV_OUT_CE", "CONVERT", "SUP_N");
+    const withSup = sup("CL_ABAP_CONV_OUT_CE", "CONVERT", "N");
     append(out, [`func Native_CONV_OUT_CONVERT(s *abap.Session, me *CL_ABAP_CONV_OUT_CE, data string, n int32, buffer *string${withSup ? ", sup_n string" : ""}) {`], withSup ? ["\tif sup_n != \"\" {", "\t\tdata = abap.SubS(data, 0, n)", "\t}"] : ["\tif n != 0 {", `\t\tpanic(abap.NotCompiled("CL_ABAP_CONV_OUT_CE=>CONVERT", "N given"))`, "\t}"], [`\t*buffer = abap.EncodeText(me.${ident("MV_JS_ENCODING")}, data)`, "}", ""]);
   }
   if (has("Native_CONV_IN_CONVERT")) {
-    const withSup = sup("CL_ABAP_CONV_IN_CE", "CONVERT", "SUP_N");
+    const withSup = sup("CL_ABAP_CONV_IN_CE", "CONVERT", "N");
     out.push(`func Native_CONV_IN_CONVERT(s *abap.Session, me *CL_ABAP_CONV_IN_CE, input string, n int32, data *string${withSup ? ", sup_n string" : ""}) {`,
       "\tif n != 0 {", `\t\tpanic(abap.NotCompiled("CL_ABAP_CONV_IN_CE=>CONVERT", "N given (open-abap ignores it)"))`, "\t}",
       `\t*data = abap.DecodeText(me.${ident("MV_JS_ENCODING")}, me.${ident("MV_IGNORE_CERR")} != "", input)`, "}", "");
@@ -741,10 +743,13 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     /** @type {string[]} */ const lines = [];
     const args = m.params.map((p, i) => {
       const v = `v${i}`;
-      if (p.dir !== "importing") { lines.push(`\t\t${v} := new(${goType(p.type)})`); return v; }
+      if (p.dir !== "importing") {
+        if (p.dir === "changing" && !p.optional) lines.push(`\t\tabap.DynCallError("CX_SY_DYN_CALL_PARAM_MISSING", ${JSON.stringify(`${cls.name}=>${m.name} ${p.name}`)})`);
+        lines.push(`\t\t${v} := new(${goType(p.type)})`); return v;
+      }
       if (p.suppliedOf) { lines.push(`\t\t${v} := ""`, `\t\tif _, ok := a[${JSON.stringify(p.suppliedOf)}]; ok {`, `\t\t\t${v} = "X"`, `\t\t}`); return v; }
       /** @param {string} d @returns {string} */ const read = (d) => (["i", "string", "c", "d", "t"].includes(p.type.k) ? unwrapTo(p.type, d)
-        : p.type.k === "data" ? d : byRef(p) ? `${d}.P.(*${goType(p.type)})` : `*${d}.P.(*${goType(p.type)})`);
+        : p.type.k === "ref" ? `abap.DynamicRef[${goType(p.type)}](${d})` : p.type.k === "data" ? d : byRef(p) ? `${d}.P.(*${goType(p.type)})` : `*${d}.P.(*${goType(p.type)})`);
       let absent = p.default !== undefined ? expr(defaults.find(d => d.name === p.name).value, {cls, method: m, loop: 0}) : p.optional ? zero(p.type)
         : `func() ${byRef(p) ? "*" : ""}${goType(p.type)} { abap.DynCallError("CX_SY_DYN_CALL_PARAM_MISSING", ${JSON.stringify(`${cls.name}=>${m.name} ${p.name}`)}); return ${byRef(p) ? "nil" : zero(p.type)} }()`;
       if (byRef(p) && p.default !== undefined) absent = `func() *${goType(p.type)} { v := ${absent}; return &v }()`;

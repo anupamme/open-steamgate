@@ -404,15 +404,15 @@ export function whereColumns(t) {
 
 /**
  * p IS SUPPLIED: the callee must know whether its caller passed p, so every
- * parameter some implementation asks about gets a hidden SUP_<p> ('X' or ''),
+ * parameter some implementation asks about gets a hidden NUL-prefixed identity ('X' or ''),
  * filled in at each call. Keyed by the class that declares the method, so a
  * redefinition and the class interface keep one signature.
  */
-/** the hidden SUP_<p> parameters of a method, after its own */
+/** the hidden supplied-flag parameters of a method, after its own */
 /** @param {import("./frontend-types.ts").FrontendProgram} program @param {string} key @param {readonly import("./frontend-types.ts").FrontendParam[]} params @returns {readonly import("./frontend-types.ts").FrontendParam[]} */ function withSupplied(program, key, params) {
   /** @type {Set<string> | undefined} */ const set = suppliedAnswer(program, key);
   if (!set) return params;
-  /** @type {import("./ir.ts").Param[]} */ const hidden = params.filter((p) => set.has(p.name)).map((p) => ({name: `SUP_${p.name}`, dir: "importing", byValue: true, type: C(1), optional: true, suppliedOf: p.name}));
+  /** @type {import("./ir.ts").Param[]} */ const hidden = params.filter((p) => set.has(p.name)).map((p) => ({name: `\0${p.name}`, dir: "importing", byValue: true, type: C(1), optional: true, suppliedOf: p.name}));
   return [...params, ...hidden];
 }
 
@@ -5793,7 +5793,7 @@ const FUNCTIONS = {
   if (supplied) {
     const nm = supplied.name;
     if (!ctx.sig.params.some((p) => p.suppliedOf === nm)) throw new Unsupported(`${nm} IS SUPPLIED: not a parameter this method's declaration tracks`);
-    /** @type {import("./ir.ts").Condition} */ const r = {c: "not", x: {c: "initial", x: {e: "var", name: `SUP_${nm}`, type: C(1)}}};
+    /** @type {import("./ir.ts").Condition} */ const r = {c: "not", x: {c: "initial", x: {e: "var", name: ctx.sig.params.find((p) => p.suppliedOf === nm).name, type: C(1)}}};
     return supplied.negated !== not ? {c: "not", x: r} : r;
   }
   if (/\bIS\s+(NOT\s+)?ASSIGNED\b/.test(text)) {

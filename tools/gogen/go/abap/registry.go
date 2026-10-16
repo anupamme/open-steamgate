@@ -2,6 +2,7 @@ package abap
 
 import (
 	"osg/gogen/dyncall"
+	"reflect"
 	"strings"
 )
 
@@ -43,6 +44,24 @@ func Up[T any, P any](p *P) T {
 		return z
 	}
 	return any(p).(T)
+}
+
+// DynamicRef reads the reference value, not its concrete storage type. Like
+// Up, widening an initial class pointer must leave the formal initial.
+func DynamicRef[T any](d Data) T {
+	var zero T
+	if d.T == nil || d.T.Kind != 'r' {
+		DynCallError("CX_SY_DYN_CALL_ILLEGAL_TYPE", "reference argument")
+	}
+	value := reflect.ValueOf(d.P).Elem().Interface()
+	if refNil(value) {
+		return zero
+	}
+	result, ok := value.(T)
+	if !ok {
+		DynCallError("CX_SY_DYN_CALL_ILLEGAL_TYPE", "reference argument")
+	}
+	return result
 }
 
 // Cast is ?= and CAST: an initial reference casts to initial, anything else

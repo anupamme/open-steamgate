@@ -47,7 +47,10 @@ export function staticRegistryJs(program, {definable, zero, unwrapTo, composite,
     const lines = [];
     const args = m.params.map((p, i) => {
       const v = `v${i}`;
-      if (p.dir !== "importing") { lines.push(`  const ${v} = {v: ${zero(p.type)}};`); return v; }
+      if (p.dir !== "importing") {
+        if (p.dir === "changing" && !p.optional) lines.push(`  abap.paramMissing(${JSON.stringify(`${cls.name}=>${m.name} ${p.name}`)});`);
+        lines.push(`  const ${v} = {v: ${zero(p.type)}};`); return v;
+      }
       if (p.suppliedOf) { lines.push(`  const ${v} = ${JSON.stringify(p.suppliedOf)} in a ? "X" : "";`); return v; }
       const d = `a[${JSON.stringify(p.name)}]`;
       const read = ["i", "string", "c", "d", "t"].includes(p.type.k) ? unwrapTo(p.type, d)
