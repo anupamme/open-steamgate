@@ -11,6 +11,13 @@ const artifactFields = ["syntaxResult", "parsedType", "def", "definition", "pars
 /** @param {import("./frontend-session-types.ts").InputSnapshot} inputs @returns {boolean} */ const hasBuiltArtifacts = (inputs) => [...inputs.objects.values()].some(({obj}) =>
   obj.syntaxResult || obj.def || obj.definition || obj.parsedType || obj.isDirty?.() === false);
 /** @param {string} s @returns {string} */ const hash = (s) => createHash("sha256").update(s).digest("hex");
+/** @param {import("./frontend-session-types.ts").InputSource} source @returns {string} */ export function rawHashOf(source) {
+  return source._rawHash ??= hash(source.raw);
+}
+// Artifact format 2 hashes the JSON string, not just raw bytes.
+/** @param {import("./frontend-session-types.ts").InputSource} source @returns {string} */ export function artifactHashOf(source) {
+  return source._artifactHash ??= hash(JSON.stringify(source.raw));
+}
 /** @param {Pick<import("./frontend-session-types.ts").ArtifactObject, "getType" | "getName">} obj @returns {string} */ export function objectKey(obj) {
   if (!keys.has(obj)) keys.set(obj, `${obj.getType()} ${obj.getName().toUpperCase()}`);
   return keys.get(obj);
@@ -23,12 +30,7 @@ const artifactFields = ["syntaxResult", "parsedType", "def", "definition", "pars
   for (const obj of reg instanceof core.Registry ? enumerate.call(reg) : reg.getObjects()) {
     const key = objectKey(obj), dependency = reg.isDependency?.(obj) ?? false;
     const sources = obj.getFiles().map((file) => {
-      const source = {file, name: file.getFilename(), raw: file.getRaw()};
-      Object.defineProperties(source, {
-        rawHash: {get() { return this._rawHash ??= hash(this.raw); }},
-        // Artifact format 2 hashes the JSON string, not just raw bytes.
-        artifactHash: {get() { return this._artifactHash ??= hash(JSON.stringify(this.raw)); }},
-      });
+      const source = {file, name: file.getFilename(), raw: file.getRaw(), _rawHash: undefined, _artifactHash: undefined};
       fileOwners.set(source.name, key); files.push(file);
       return source;
     });

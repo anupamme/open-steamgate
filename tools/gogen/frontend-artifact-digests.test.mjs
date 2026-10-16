@@ -278,3 +278,29 @@ ENDCLASS. CLASS zcl_projection IMPLEMENTATION. METHOD run. value = iv. ENDMETHOD
   clearReferences(scope);
   assert.notEqual(JSON.stringify(prepareArtifactDigests(p.reg).scope(scope)), projected, "scope references");
 }));
+
+test("source hashes stay lazy, independently memoized, and preserve both hash formats", async () => {
+  const {inputSnapshot, rawHashOf, artifactHashOf, core} = await import("./frontend-inventory.mjs");
+  const {createHash} = await import("node:crypto");
+  const reg = new core.Registry();
+  reg.addFile(new core.MemoryFile("z.prog.abap", 'REPORT z. WRITE `😀`.'));
+  const source = inputSnapshot(reg).objects.get("PROG Z").sources[0];
+  const hash = (raw) => createHash("sha256").update(raw).digest("hex");
+  assert.equal(source._rawHash, undefined);
+  assert.equal(source._artifactHash, undefined);
+  assert.equal(rawHashOf(source), hash(source.raw));
+  assert.equal(source._artifactHash, undefined);
+  assert.equal(artifactHashOf(source), hash(JSON.stringify(source.raw)));
+  const before = [rawHashOf(source), artifactHashOf(source)];
+  source.raw = "changed after memoization";
+  assert.deepEqual([rawHashOf(source), artifactHashOf(source)], before);
+});
+
+test("portable filenames preserve explicit missing values and path basenames", async () => {
+  const {portableFilename} = await import("./frontend-artifact-digests.mjs");
+  assert.equal(portableFilename(null), null);
+  assert.equal(portableFilename(undefined), null);
+  assert.equal(portableFilename(""), "");
+  assert.equal(portableFilename("/source/z.prog.abap"), "z.prog.abap");
+  assert.equal(portableFilename("C:\\source\\z.prog.abap"), "z.prog.abap");
+});

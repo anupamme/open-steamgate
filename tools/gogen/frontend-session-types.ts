@@ -173,7 +173,7 @@ export interface ArtifactFrame {
   named?: QueryTrie;
 }
 export interface QueryContext {kind: string; args: unknown[]}
-export interface InputSource {file: SourceFile; name: string; raw: string; rawHash: string; artifactHash: string}
+export interface InputSource {file: SourceFile; name: string; raw: string; _rawHash: string | undefined; _artifactHash: string | undefined}
 export interface InputSnapshot {
   objects: Map<string, {obj: ArtifactObject; dependency: boolean; sources: InputSource[]}>;
   fileOwners: Map<string, string>;
