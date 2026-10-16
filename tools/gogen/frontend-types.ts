@@ -131,3 +131,6 @@ export interface MethodContextState extends Omit<MethodContext, "fieldSymbols" |
   fieldSymbols?: Map<string, Type>;
   inits?: FrontendStmt[];
 }
+
+// The registry kinds TABL/VIEW/TTYP/DTEL each implement parseType.
+export type DataTypeObject = abaplint.Objects.Table | abaplint.Objects.View | abaplint.Objects.TableType | abaplint.Objects.DataElement;

@@ -3336,7 +3336,7 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
   }
   const target = outer.k === "data" ? ctx.genTarget : null;
   if (target === undefined || (outer.k === "data" && !target)) throw new Unsupported(`generic arithmetic into a generic value that is not a target: ${text}`);
-  /** @type {Record<string, import("./ir.ts").ArithmeticBranch>} */ const branches = {};
+  /** @type {Record<string, import("./frontend-types.ts").ValueExpr | {readonly reason: string}>} */ const branches = {};
   /** @type {import("./frontend-types.ts").ValueExpr[] | null} */ let leaves = null;
   for (const [code, calc] of [["I", I], ["8", INT8], ["P", P31], ["F", F]]) {
     GEN_CALC = true;
@@ -3352,10 +3352,7 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
         };
         walk(v);
       }
-      if (outer.k === "data") {
-        /** @type {Extract<import("./ir.ts").Expr, {e: "wrap"}>} */ const wrapped = {e: "wrap", x: v, type: {k: "data"}};
-        branches[code] = wrapped;
-      } else branches[code] = convert(v, outer);
+      branches[code] = outer.k === "data" ? /** @type {import("./frontend-types.ts").ValueExpr} */ ({e: "wrap", x: v, type: {k: "data"}}) : convert(v, outer);
     } catch (e) {
       if (!(e instanceof Unsupported)) throw e;
       branches[code] = {reason: `calculation type ${calc.k} of ${text}: ${e.message}`};
@@ -4676,10 +4673,7 @@ function selectSingle(sel, ctx, text) {
   const ddic = ctx.reg.getObject("TABL", name) ?? ctx.reg.getObject("VIEW", name) ?? ctx.reg.getObject("TTYP", name) ?? ctx.reg.getObject("DTEL", name);
   if (!/=>/.test(name) && !(ctx.scope.findType?.(name)) && ddic) {
     let at;
-    try {
-      if (!(ddic instanceof abaplint.Objects.Table || ddic instanceof abaplint.Objects.View || ddic instanceof abaplint.Objects.TableType || ddic instanceof abaplint.Objects.DataElement)) throw new Unsupported(`CREATE DATA TYPE ${name}: its type does not resolve`);
-      at = ddic.parseType(ctx.reg);
-    } catch { throw new Unsupported(`CREATE DATA TYPE ${name}: its type does not resolve`); }
+    try { at = /** @type {import("./frontend-types.ts").DataTypeObject} */ (ddic).parseType(ctx.reg); } catch { throw new Unsupported(`CREATE DATA TYPE ${name}: its type does not resolve`); }
     t = typeOf(at, name, ctx.program);
   } else t = namedType(node.findDirectExpression(Expressions.TypeName) ?? {concatTokens: () => m[2]}, ctx);
   if (["ref", "exc", "data", "dref"].includes(t.k)) throw new Unsupported(`CREATE DATA TYPE ${name}: a ${t.k}`);
@@ -5610,7 +5604,7 @@ const FUNCTIONS = {
   // Four/eight big-endian bytes, zero-padded or truncated on the left.
   if (["x", "xstring"].includes(to.k) && ["i", "int8"].includes(from.k)) return ok(from.k === "i" ? "i2x" : "i82x");
   // An exact upper-case hex literal supplies the bytes directly.
-  if (expr.e === "chars" && (to.k === "xstring" || (to.k === "x" && expr.value?.length === 2 * to.len)) && /^([0-9A-F]{2})*$/.test(expr.value)) {
+  if ((to.k === "xstring" || (to.k === "x" && /** @type {{readonly value?: {readonly length?: number} | null}} */ (expr).value?.length === 2 * to.len)) && expr.e === "chars" && /^([0-9A-F]{2})*$/.test(expr.value)) {
     return {e: "xbytes", value: expr.value, type: to};
   }
   // packed numbers (go/abap packed.go, A4H 2026-09-24, ZCL_GOGEN_T_PD*).
