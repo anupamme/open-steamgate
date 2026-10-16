@@ -979,7 +979,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     for (let sup = def.getSuperClass(), guard = 0; sup && guard < 20; guard += 1) {
       const sdef = clasDef(reg, sup);
       if (!sdef) break;
-      const found = sdef.getMethodDefinitions().getAll().find((x) => upper(x.getName()) === nm);
+      const found = sdef.getMethodDefinitions().getByName(nm);
       if (found && !found.isRedefinition()) return found;
       sup = sdef.getSuperClass();
     }
@@ -1132,7 +1132,7 @@ function compiledFunctionCall(node, ctx, text, name) {
       ctx.inits = [];
       hoistLocalConstants(body, ctx, {Nodes, Structures, Statements, Expressions, isTok, isExpr, isStruct, isStmt, upper, goName, initialValue, Unsupported});
       const bodyStatements = body === undefined ? [] : block(body, ctx);
-      const compiled = [];
+      /** @type {import("./frontend-types.ts").FrontendStmt[]} */ const compiled = [];
       append(compiled, ctx.inits, bodyStatements);
       /** @type {import("./frontend-types.ts").FrontendMethod} */ const ir = {...sig, fieldSymbols: [...ctx.fieldSymbols].map(([n, t]) => ({name: n, type: t})), locals: [...ctx.locals].map(([n, t]) => ({name: n, type: t})).sort((a, b) => a.name.localeCompare(b.name)),
         body: compiled, sinkUnsafe: !!ctx.sinkUnsafe, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}};
@@ -1372,7 +1372,7 @@ function compiledFunctionCall(node, ctx, text, name) {
 
 /** @param {import("@abaplint/core").Nodes.StructureNode} node @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").FrontendStmt} */ function tryBlock(node, ctx) {
   const body = bodyOf(node, ctx);
-  const seen = [];
+  /** @type {string[]} */ const seen = [];
   /** @type {import("./frontend-types.ts").FrontendCatch[]} */ const catches = node.findDirectStructures(Structures.Catch).map((c) => {
     const st = c.findDirectStatement(Statements.Catch);
     const names = st.findDirectExpressions(Expressions.ClassName).map((n) => upper(n.concatTokens()));
@@ -3336,8 +3336,8 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
   }
   const target = outer.k === "data" ? ctx.genTarget : null;
   if (target === undefined || (outer.k === "data" && !target)) throw new Unsupported(`generic arithmetic into a generic value that is not a target: ${text}`);
-  /** @type {Record<string, import("./ir.ts").ArithmeticBranch>} */ const branches = {};
-  let leaves = null;
+  /** @type {Record<string, import("./frontend-types.ts").ValueExpr | {readonly reason: string}>} */ const branches = {};
+  /** @type {import("./frontend-types.ts").ValueExpr[] | null} */ let leaves = null;
   for (const [code, calc] of [["I", I], ["8", INT8], ["P", P31], ["F", F]]) {
     GEN_CALC = true;
     try {
@@ -3352,7 +3352,7 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
         };
         walk(v);
       }
-      branches[code] = outer.k === "data" ? {e: "wrap", x: v, type: {k: "data"}} : convert(v, outer);
+      branches[code] = outer.k === "data" ? /** @type {import("./frontend-types.ts").ValueExpr} */ ({e: "wrap", x: v, type: {k: "data"}}) : convert(v, outer);
     } catch (e) {
       if (!(e instanceof Unsupported)) throw e;
       branches[code] = {reason: `calculation type ${calc.k} of ${text}: ${e.message}`};
@@ -3679,7 +3679,7 @@ function localInterfaceConstant(id, attr, local, reg) {
  * superclass's; a REDEFINITION declares no parameters, so its origin's */
 /** @param {import("@abaplint/core").IRegistry} reg @param {string} cls @param {string} meth @returns {import("./frontend-types.ts").MethodDefinition | undefined} */ function declaredMethod(reg, cls, meth) {
   for (const c of [cls, ...ancestors(reg, cls)]) {
-    const m = clasDef(reg, c)?.getMethodDefinitions().getAll().find((x) => upper(x.getName()) === meth);
+    const m = clasDef(reg, c)?.getMethodDefinitions().getByName(meth);
     if (m && !m.isRedefinition()) return m;
   }
   return undefined;
@@ -3700,7 +3700,8 @@ function localInterfaceConstant(id, attr, local, reg) {
   for (const c of [cls, ...ancestors(reg, cls)]) {
     const def = clasDef(reg, c);
     if (!def) return undefined;
-    const has = kind === "method" ? def.getMethodDefinitions().getAll().some((x) => upper(x.getName()) === name && !x.isRedefinition())
+    const method = kind === "method" ? def.getMethodDefinitions().getByName(name) : undefined;
+    const has = kind === "method" ? method !== undefined && !method.isRedefinition()
       : def.getAttributes().getAll().some((x) => upper(x.getName()) === name);
     if (has) return c;
   }
@@ -4672,7 +4673,7 @@ function selectSingle(sel, ctx, text) {
   const ddic = ctx.reg.getObject("TABL", name) ?? ctx.reg.getObject("VIEW", name) ?? ctx.reg.getObject("TTYP", name) ?? ctx.reg.getObject("DTEL", name);
   if (!/=>/.test(name) && !(ctx.scope.findType?.(name)) && ddic) {
     let at;
-    try { at = ddic.parseType(ctx.reg); } catch { throw new Unsupported(`CREATE DATA TYPE ${name}: its type does not resolve`); }
+    try { at = /** @type {import("./frontend-types.ts").DataTypeObject} */ (ddic).parseType(ctx.reg); } catch { throw new Unsupported(`CREATE DATA TYPE ${name}: its type does not resolve`); }
     t = typeOf(at, name, ctx.program);
   } else t = namedType(node.findDirectExpression(Expressions.TypeName) ?? {concatTokens: () => m[2]}, ctx);
   if (["ref", "exc", "data", "dref"].includes(t.k)) throw new Unsupported(`CREATE DATA TYPE ${name}: a ${t.k}`);
@@ -5603,7 +5604,7 @@ const FUNCTIONS = {
   // Four/eight big-endian bytes, zero-padded or truncated on the left.
   if (["x", "xstring"].includes(to.k) && ["i", "int8"].includes(from.k)) return ok(from.k === "i" ? "i2x" : "i82x");
   // An exact upper-case hex literal supplies the bytes directly.
-  if ((to.k === "xstring" || (to.k === "x" && expr.value?.length === 2 * to.len)) && expr.e === "chars" && /^([0-9A-F]{2})*$/.test(expr.value)) {
+  if ((to.k === "xstring" || (to.k === "x" && /** @type {{readonly value?: {readonly length?: number} | null}} */ (expr).value?.length === 2 * to.len)) && expr.e === "chars" && /^([0-9A-F]{2})*$/.test(expr.value)) {
     return {e: "xbytes", value: expr.value, type: to};
   }
   // packed numbers (go/abap packed.go, A4H 2026-09-24, ZCL_GOGEN_T_PD*).
@@ -5902,7 +5903,7 @@ const FUNCTIONS = {
   const te = fk.at(-1);
   if (!fc || !isExpr(te, Expressions.TableExpression)) throw new Unsupported(`line_exists form: ${chain.concatTokens()}`);
   /** @type {import("./frontend-types.ts").LineExistsHead} */ const head = {getChildren: () => fk.slice(0, -1), concatTokens: () => fk.slice(0, -1).map((k) => k.concatTokens()).join(""),
-    findFirstExpression: (t) => fk.slice(0, -1).map((k) => (isExpr(k, t) ? k : k.findFirstExpression?.(t))).find(Boolean), get: () => fc.get()};
+    findFirstExpression: (t) => fk.slice(0, -1).map((k) => (isExpr(k, t) ? k : k instanceof Nodes.ExpressionNode ? k.findFirstExpression(t) : undefined)).find(Boolean), get: () => fc.get()};
   const table = fk.length === 2 ? sourceOperand(fk[0], ctx) : fieldChain(head, ctx);
   if (table.type.k !== "table") throw new Unsupported("line_exists of a non-table");
   const inner = te.getChildren().filter((c) => !isTok(c, "[") && !isTok(c, "]"));
