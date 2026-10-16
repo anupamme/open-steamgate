@@ -2,6 +2,7 @@ import {append} from "./append.ts";
 import {convert, Unsupported} from "./frontend.mjs";
 
 // Registration and RECEIVING conversion share the identities resolved in lowering.
+/** @param {Pick<import("./emit-go-types.ts").Program, "classes" | "dynamicDispatch">} program */
 export function dynamicAdapters(program) {
   return (program.dynamicDispatch ?? []).map((entry) => {
     const cls = program.classes.find((c) => c.name === entry.owner);
