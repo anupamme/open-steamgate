@@ -44,7 +44,7 @@ import {typeKindOf, typeOf, rttiNamed, structOf, fieldOf, namedType} from "./fro
 
 import {TRANSPILER_MEANING, P_GENERIC, NATIVE, kernelOf, nativeArgs, AMC_HOST, AMC_CALLER, amcProgramOf, amcMethod, NATIVE_FM, DESTINATION_FM, NATIVE_ME, nativeMeSig, RUNTIME_CX, RUNTIME_CX_SUPER} from "./frontend-classes-native.mjs";
 import {sqlIrType, writeIrType, irCheck, lowName, mandtPred, andIr, sqlHost, sqlValue, SQL_OPS} from "./frontend-sql.mjs";
-
+/** @typedef {Pick<typeof import("./frontend-base.mjs"), "Nodes" | "Structures" | "Statements" | "Expressions" | "isTok" | "isExpr" | "isStruct" | "isStmt" | "upper" | "goName" | "Unsupported"> & {initialValue: typeof initialValue}} LocalConstantHelpers */
 import {source, componentsOf, arith, sourceOperand, callMethodChain, excHolder,
   omittedArgument, omittedFactoryCall} from "./frontend-expressions-calls.mjs";
 /** @typedef {import("./frontend-types.ts").MethodSignature} ClassSignature */
