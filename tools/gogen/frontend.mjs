@@ -1093,7 +1093,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     // a kernel service the host implements: the ABAP body (the transpiler's
     // @KERNEL code) is replaced by a call into the host
     if (nativeMethodBody(NATIVE_ME, className, name)) {
-      cls.methods.push({...sig, locals: [], fieldSymbols: [], calls: [], body: [{s: "native", fn: nativeMethodBody(NATIVE_ME, className, name), me: true}],
+      cls.methods.push({...sig, locals: [], fieldSymbols: [], calls: [], body: [{s: "native", fn: /** @type {string} */ (nativeMethodBody(NATIVE_ME, className, name)), me: true}],
         pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
       continue;
     }
@@ -3378,7 +3378,7 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
       GEN_CALC = false;
     }
   }
-  if (leaves === null) throw new Unsupported(`calculation type of ${text}: ${branches.I.reason}`);
+  if (leaves === null) throw new Unsupported(`calculation type of ${text}: ${(/** @type {Extract<import("./ir.ts").ArithmeticBranch, {readonly reason: string}>} */ (branches.I)).reason}`);
   const PLACE = new Set(["var", "attr", "static", "field", "fs", "row", "refattr"]);
   for (const l of leaves) if (!PLACE.has(l.e)) throw new Unsupported(`a generic operand that is not a field in ${text}`);
   return {e: "gen_arith", statics: statics.join(""), charTarget, target, leaves, branches: {I: branches.I, "8": branches["8"], P: branches.P, F: branches.F}, text, type: outer.k === "data" ? {k: "data"} : outer};
