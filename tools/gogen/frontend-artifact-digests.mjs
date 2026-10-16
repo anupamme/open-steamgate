@@ -1,12 +1,13 @@
 // Resolved snapshots, never registry graphs. A lazy table is installed per compile;
 // definitions and types are projected/hash-consed once within that table.
-import {inputSnapshot, core, artifactIdentity, sameArtifactIdentity} from "./frontend-inventory.mjs";
+import {inputSnapshot, artifactHashOf, core, artifactIdentity, sameArtifactIdentity} from "./frontend-inventory.mjs";
 import {recordedArtifactBuild, auditedBookkeeping, provenanceAuditActive} from "./frontend-provenance.mjs";
 import {createHash} from "node:crypto";
 import {basename} from "node:path";
 const tables = new WeakMap();
 export const artifactKey = (obj) => `${obj.getType()} ${obj.getName().toUpperCase()}`;
-export const portableFilename = (name) => name == null ? null : basename(name.replaceAll("\\", "/"));
+/** @param {string | null | undefined} name */
+export const portableFilename = (name) => name === null || name === undefined ? null : basename(name.replaceAll("\\", "/"));
 const pos = (p) => p ? [p.getRow(), p.getCol(), p.vrow ?? null, p.vcol ?? null] : null;
 const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 // Sort dictionaries with code-point order, not locale or insertion order.
@@ -147,7 +148,7 @@ class Digests {
         return typeof obj.parseType === "function" ? obj.parseType(this.registry) : undefined;
       });
       digest = auditedBookkeeping("resolved-artifact-projection", () => {
-        const files = inputSnapshot(this.registry).objects.get(key).sources.map((s) => [portableFilename(s.name), s.artifactHash]);
+        const files = inputSnapshot(this.registry).objects.get(key).sources.map((s) => [portableFilename(s.name), artifactHashOf(s)]);
         const expanded = (obj.getABAPFiles?.() ?? []).map((f) => [portableFilename(f.getFilename()),
           this.syntax(f.getStructure()), f.getStatements().map((s) => this.syntax(s))]);
         const def = obj.def ?? obj.definition;
