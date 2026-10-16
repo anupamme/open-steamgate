@@ -33,7 +33,7 @@ export function lowerFindResults(node: abaplint.Nodes.StatementNode, ctx: FindCo
   const all = tw.startsWith("FIND ALL");
   const ft = node.findDirectExpression(Expressions.FindType);
   const kind = ft ? upper(ft.concatTokens()) : "";
-  if (kind && kind !== "REGEX" && kind !== "PCRE") throw new Unsupported(`FIND ${kind} ... RESULTS`);
+  if (kind && kind !== "SUBSTRING" && kind !== "REGEX" && kind !== "PCRE") throw new Unsupported(`FIND ${kind} ... RESULTS`);
   const [pat, subj] = node.findDirectExpressions(Expressions.Source);
   const patX = source(pat, ctx);
   if (!(bytes ? ["x", "xstring"].includes(patX.type.k) : charlike(patX.type))) throw new Unsupported(`FIND ... RESULTS with a ${patX.type.k} pattern`);

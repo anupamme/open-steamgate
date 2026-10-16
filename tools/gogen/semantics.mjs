@@ -1,5 +1,4 @@
-import {checkDemoCopies, compileSemantics} from "./semantics-fixtures.mjs";
-import {DYNAMIC_EXPECT, checkDynamicCallOracle} from "./dynamic-call-oracle.mjs";
+import {checkDemoCopies, compileSemantics, SEMANTICS_ORACLE_EXPECT, checkSemanticsOracles} from "./semantics-fixtures.mjs";
 import {copyJsRuntime} from "./copy-js-runtime.mjs";
 import {writeGo} from "./symbols.ts";
 // Each testdata class's static RUN returns a string, checked on both emitters.
@@ -16,7 +15,7 @@ import {emitJs} from "./emit-js.mjs";
 import {home} from "./home.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
-  ...DYNAMIC_EXPECT,
+  ...SEMANTICS_ORACLE_EXPECT,
   // Node/open-abap-core measured 2026-10-15; SAP root superclass is unmeasured (measure on A4H).
   ZCL_GOGEN_T_SUPERC: "\\CLASS=ZCL_GOGEN_T_SUPERB/\\CLASS=ZCL_GOGEN_T_SUPERC/0/\\CLASS=ZCL_GOGEN_T_SUPERB/0/\\CLASS=ZCL_GOGEN_T_SUPERA/1/",
   // unmeasured; measure on A4H: exception widening, identity and mixed PREVIOUS chains.
@@ -905,7 +904,7 @@ const CORE = ["ZCL_LNT_P_BASE_CHAI", "CX_SY_ZERODIVIDE", "CX_SY_ARITHMETIC_ERROR
   "/UI2/CL_JSON", "CL_SXML_STRING_READER", "CX_SXML_PARSE_ERROR", "CX_SXML_ERROR", "CL_ABAP_CODEPAGE",
   // raw DEFLATE and zip (parity-wave2, ZCL_GOGEN_T_GZIP, ZCL_GOGEN_T_ZIP)
   "CL_ABAP_GZIP", "CL_ABAP_ZIP"];
-await checkDynamicCallOracle(selected, home, core, join(here, "testdata"));
+await checkSemanticsOracles(selected, home, core, join(here, "testdata"));
 const program = compileSemantics({folders: [join(here, "testdata"), core, ajson], objects: [...objects, ...(objects.includes("zcl_gogen_t__pilot") ? ["zcl_gogen_t_pilchild"] : []), ...groups, ...CORE]});
 // the classes that carry a test: a static RUN of their own (the others are
 // the classes those tests use)

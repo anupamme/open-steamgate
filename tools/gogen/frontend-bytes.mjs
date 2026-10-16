@@ -57,7 +57,7 @@ export function lowerByteFind(node, ctx, text, kids, words, tw, h) {
   const {source, lvalue, convert} = h;
   // A4H oracle P2 ALL C3: non-overlapping byte results, with optional count.
   if (keywordForm(tw, "FIND ALL OCCURRENCES OF IN IN BYTE MODE", ["", "MATCH COUNT"], ["", "RESULTS"])
-    && !node.findDirectExpression(Expressions.FindType)) {
+    && ["", "SUBSTRING"].includes(upper(node.findDirectExpression(Expressions.FindType)?.concatTokens() ?? ""))) {
     let count = null, resultNode = null;
     for (let i = 0; i < kids.length; i++) {
       if (words[i] === "COUNT") count = lvalue(kids[i + 1], ctx);

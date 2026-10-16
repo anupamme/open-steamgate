@@ -71,8 +71,8 @@ test("character REPLACE SECTION accepts fixed targets and either default operand
 });
 
 test("P2 ALL byte occurrences reuse RESULTS and accept MATCH COUNT", () => {
-  for (const tail of ["MATCH COUNT m", "RESULTS res", "MATCH COUNT m RESULTS res", ""]) {
-    const p = compile(`FIND ALL OCCURRENCES OF p IN xs IN BYTE MODE ${tail}.`,
+  for (const kind of ["", "SUBSTRING "]) for (const tail of ["MATCH COUNT m", "RESULTS res", "MATCH COUNT m RESULTS res", ""]) {
+    const p = compile(`FIND ALL OCCURRENCES OF ${kind}p IN xs IN BYTE MODE ${tail}.`,
       "TYPES: BEGIN OF sub, offset TYPE i, length TYPE i, END OF sub. TYPES subs TYPE STANDARD TABLE OF sub WITH DEFAULT KEY. TYPES: BEGIN OF result, line TYPE i, offset TYPE i, length TYPE i, submatches TYPE subs, END OF result. DATA xs TYPE xstring. DATA p TYPE xstring. DATA m TYPE i. DATA res TYPE STANDARD TABLE OF result WITH DEFAULT KEY.");
     assert.deepEqual(p.partial, []);
     const st = p.classes[0].methods[0].body.find((st) => st.s !== "nop");
