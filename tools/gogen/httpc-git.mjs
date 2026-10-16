@@ -27,7 +27,7 @@
 import {execFile, execFileSync, spawn} from "node:child_process";
 import {mkdirSync, rmSync, writeFileSync} from "node:fs";
 import {createServer} from "node:net";
-import {join} from "node:path";
+import {dirname, join} from "node:path";
 import {pathToFileURL} from "node:url";
 import {home} from "./home.mjs";
 
@@ -36,12 +36,13 @@ const work = join(here, ".out", "httpc-git");
 
 /* ------------------------------------------------------------ the remote */
 
-function makeRepo() {
+export function makeRepo(work = join(here, ".out", "httpc-git")) {
   rmSync(work, {recursive: true, force: true});
   const wt = join(work, "wt");
   mkdirSync(join(wt, "src", "sub"), {recursive: true});
   const git = (...a) => execFileSync("git", ["-c", "user.name=gogen", "-c", "user.email=gogen@example.invalid", "-c", "init.defaultBranch=main", ...a],
-    {cwd: wt, env: {...process.env, GIT_AUTHOR_DATE: "2026-09-24T12:00:00Z", GIT_COMMITTER_DATE: "2026-09-24T12:00:00Z"}}).toString();
+    {cwd: wt, env: {...process.env, GIT_CEILING_DIRECTORIES: dirname(wt),
+      ...(a[0] === "init" ? {} : {GIT_DIR: join(wt, ".git"), GIT_WORK_TREE: wt}), GIT_AUTHOR_DATE: "2026-09-24T12:00:00Z", GIT_COMMITTER_DATE: "2026-09-24T12:00:00Z"}}).toString();
   git("init", "-q");
   const long = Array.from({length: 200}, (_, i) => `line ${i} of a file that changes a little in every commit`).join("\n");
   for (let n = 1; n <= 3; n++) {
@@ -53,7 +54,7 @@ function makeRepo() {
   }
   git("tag", "v1");
   execFileSync("git", ["clone", "-q", "--bare", wt, join(work, "repo.git")]);
-  return execFileSync("git", ["rev-parse", "HEAD"], {cwd: wt}).toString().trim();
+  return execFileSync("git", ["rev-parse", "HEAD"], {cwd: wt, env: {...process.env, GIT_DIR: join(wt, ".git"), GIT_WORK_TREE: wt}}).toString().trim();
 }
 
 /* ------------------------------------------------------------ the server */
@@ -190,6 +191,7 @@ function goSide(url) {
 
 /* ------------------------------------------------------------------- main */
 
+if (process.argv[1] === new URL(import.meta.url).pathname) {
 const head = makeRepo();
 const srv = gitServer();
 await new Promise((r) => srv.server.listen(0, "127.0.0.1", r));
@@ -222,3 +224,4 @@ try {
   srv.server.close();
 }
 process.exit(bad ? 1 : 0);
+}

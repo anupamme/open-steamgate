@@ -18,7 +18,7 @@
 import {execFileSync} from "node:child_process";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {basename, join} from "node:path";
+import {basename, dirname, join} from "node:path";
 import {Git} from "./osd-git.mjs";
 import {ObjectStore, TYPES, nameOf} from "./osd-store.mjs";
 import {runsAs} from "./osd-main.mjs";
@@ -188,9 +188,10 @@ export class Import {
 
   // the way out for a remote OSD cannot speak to, an ssh URL for instance
   #binary(url, into, options) {
-    execFileSync("git", ["clone", "--depth", "1", ...(options.branch ? ["--branch", options.branch] : []), url, into], {stdio: "pipe"});
-    const commit = execFileSync("git", ["rev-parse", "HEAD"], {cwd: into, encoding: "utf8"}).trim();
-    const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {cwd: into, encoding: "utf8"}).trim();
+    const env = {...process.env, GIT_CEILING_DIRECTORIES: dirname(into), GIT_DIR: join(into, ".git"), GIT_WORK_TREE: into};
+    execFileSync("git", ["clone", "--depth", "1", ...(options.branch ? ["--branch", options.branch] : []), url, into], {cwd: into, env: {...process.env, GIT_CEILING_DIRECTORIES: dirname(into)}, stdio: "pipe"});
+    const commit = execFileSync("git", ["rev-parse", "HEAD"], {cwd: into, env, encoding: "utf8"}).trim();
+    const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {cwd: into, env, encoding: "utf8"}).trim();
     return {commit, branch, via: "git", ms: 0};
   }
 

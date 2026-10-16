@@ -8,7 +8,9 @@ import {runsAs} from "./osd-main.mjs";
 import {librariesFromLock} from "./osd-lock.mjs";
 import {libraryPath} from "./osd-lib-path.mjs";
 
-const git = (cwd, ...args) => execFileSync("git", args, {cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"]}).trim();
+const git = (cwd, ...args) => execFileSync("git", args, {cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+  env: {...process.env, GIT_CEILING_DIRECTORIES: dirname(resolve(cwd)),
+    ...(args[0] === "init" ? {} : {GIT_DIR: resolve(cwd, ".git"), GIT_WORK_TREE: resolve(cwd)})}}).trim();
 const exists = (path) => { try { lstatSync(path); return true; } catch { return false; } };
 const head = (path) => { try { return git(path, "rev-parse", "HEAD"); } catch { return "missing"; } };
 const SHARED_CMD = "node tools/osd-libs.mjs --sync --shared";
@@ -80,7 +82,7 @@ export function missing(root = ".") {
 }
 
 function cloneInto(path, lib) {
-  git(dirname(path), "init", "--quiet", path);
+  git(path, "init", "--quiet");
   git(path, "remote", "add", "origin", lib.url);
   git(path, "fetch", "--quiet", "--depth", "1", "origin", lib.ref);
   git(path, "checkout", "--quiet", "--detach", "FETCH_HEAD");
