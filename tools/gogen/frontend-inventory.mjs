@@ -44,22 +44,28 @@ const artifactFields = ["syntaxResult", "parsedType", "def", "definition", "pars
   return snapshot;
 }
 
-// Observe parse boundaries even when callers prepare registries before compile.
-// Re-parsing an edited registry does not certify its retained consumer caches.
-for (const method of ["parse", "parseAsync"]) {
-  const original = core.Registry.prototype[method];
-  core.Registry.prototype[method] = function(...args) {
-    const before = inputSnapshot(this, true), previous = parsed.get(this);
-    // The first observed parse cannot vouch for artifacts built before observation.
-    const untrusted = !previous && hasBuiltArtifacts(before);
-    const finish = () => {
-      if (!untrusted && (!previous || previous.signature === before.signature && previous.configObject === before.configObject)) parsed.set(this, inputSnapshot(this, true));
-    };
-    const result = original.apply(this, args);
-    if (result?.then) return result.then((value) => { finish(); return value; });
-    finish(); return result;
+// Explicit parse boundaries keep module initialization free of prototype mutation.
+// Re-parsing edited inputs cannot certify retained consumer caches. Only parses
+// that go through these helpers count: a registry a caller parsed some other way
+// (reg.parse(), or core's own parse inside findIssues) reaches freshRegistry
+// unobserved and is rebuilt, which is correct but costs a full parse.
+/** @param {import("@abaplint/core").IRegistry} reg @param {unknown[]} args @param {boolean} async */
+function observeParse(reg, args, async) {
+  const before = inputSnapshot(reg, true), previous = parsed.get(reg);
+  // The first observed parse cannot vouch for artifacts built before observation.
+  const untrusted = !previous && hasBuiltArtifacts(before);
+  const finish = () => {
+    if (!untrusted && (!previous || previous.signature === before.signature && previous.configObject === before.configObject)) parsed.set(reg, inputSnapshot(reg, true));
   };
+  const result = async ? reg.parseAsync(...args) : reg.parse(...args);
+  if (result?.then) return result.then((value) => { finish(); return value; });
+  finish(); return result;
 }
+
+/** @param {import("@abaplint/core").IRegistry} reg @param {...unknown} args */
+export function parseObserved(reg, ...args) { return observeParse(reg, args, false); }
+/** @param {import("@abaplint/core").IRegistry} reg @param {...unknown} args */
+export function parseObservedAsync(reg, ...args) { return observeParse(reg, args, true); }
 
 /** @param {import("./frontend-session-types.ts").Registry} reg @param {import("./frontend-session-types.ts").SessionInput} session @returns {import("./frontend-session-types.ts").Registry} */ export function freshRegistry(reg, session) {
   const inputs = inputSnapshot(reg, true), previous = parsed.get(reg);
@@ -70,14 +76,14 @@ for (const method of ["parse", "parseAsync"]) {
   // A never-parsed registry can be parsed in place. A prebuilt registry without
   // an observed boundary must be rebuilt, as must every edited retained one.
   const built = hasBuiltArtifacts(inputs);
-  if (!previous && !built) { reg.parse(); return reg; }
+  if (!previous && !built) { parseObserved(reg); return reg; }
   const fresh = new core.Registry(new core.Config(inputs.config));
   for (const {dependency, sources} of inputs.objects.values()) for (const source of sources) {
     const file = new core.MemoryFile(source.name, source.raw);
     if (dependency) fresh.addDependency(file); else fresh.addFile(file);
   }
   if (session) for (const key of Object.keys(session)) delete session[key];
-  fresh.parse();
+  parseObserved(fresh);
   origins.set(fresh, inputOrigin(reg));
   replacements.set(reg, {signature: inputs.signature, configObject: inputs.configObject, reg: fresh});
   return fresh;

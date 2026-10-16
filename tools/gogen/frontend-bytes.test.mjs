@@ -1,3 +1,4 @@
+import {parseObserved} from "./frontend-inventory.mjs";
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {mkdtempSync, writeFileSync, rmSync} from "node:fs";
@@ -82,8 +83,8 @@ test("P2 ALL byte occurrences reuse RESULTS and accept MATCH COUNT", () => {
 });
 
 test("SECTION without operands is not a section in abaplint's grammar", () => {
-  const reg = new core.Registry().addFile(new core.MemoryFile("zempty.prog.abap",
-    "REPLACE SECTION OF xs WITH p IN BYTE MODE.\nFIND p IN SECTION OF xs IN BYTE MODE.")).parse();
+  const reg = parseObserved(new core.Registry().addFile(new core.MemoryFile("zempty.prog.abap",
+    "REPLACE SECTION OF xs WITH p IN BYTE MODE.\nFIND p IN SECTION OF xs IN BYTE MODE.")));
   const [replace, find] = reg.getFirstObject().getABAPFiles()[0].getStatements();
   assert.equal(replace.get().constructor.name, "Unknown");
   // FIND parses SECTION as the subject variable and OF xs as an option,

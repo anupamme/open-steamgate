@@ -4,7 +4,7 @@ import {require, abaplint, Rearranger, Nodes, Statements, Structures, Expression
   Unsupported, notInProgram, I, F, INT8, P31, S, C, X, XS, EXC, isExpr, isStmt, isStruct, isTok,
   tokenStr, upper, goName, refuseSorted, sameSort, sameType, composite, byRef, numeric, charlike} from "./frontend-base.mjs";
 export {Unsupported, I, F, INT8, S, sameType, composite, byRef} from "./frontend-base.mjs";
-import {inputOrigin, rttiClassInventory, rttiLocalSupers} from "./frontend-inventory.mjs";
+import {parseObserved, inputOrigin, rttiClassInventory, rttiLocalSupers} from "./frontend-inventory.mjs";
 import {suppliedIndex, suppliedAnswer, suppliedSignature, localDiscovery, lockAnswer, finalOutput, rttiProjection} from "./frontend-queries.mjs";
 import {enumerateObjects, auditedBookkeeping, withRole, beginProvenanceCompile} from "./frontend-provenance.mjs";
 import {prepareArtifactDigests} from "./frontend-artifact-digests.mjs";
@@ -96,7 +96,7 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
     }
   };
   for (const folder of folders) walk(folder);
-  if (!registry) reg.parse();
+  if (!registry) parseObserved(reg);
   require("./frontend-inventory.mjs").prepareCdsRegistry(reg, ddls, !registry || folders.length > 0, cdsViewsByRegistry);
   REG = reg;
   // Load cache code and its module state only for an explicit opt-in.

@@ -1,3 +1,4 @@
+import {parseObserved} from "./frontend-inventory.mjs";
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {mkdtempSync, writeFileSync, rmSync, readdirSync, readFileSync} from "node:fs";
@@ -121,7 +122,7 @@ test("a stored complete candidate refuses a current unknown observation", () => 
     config.syntax = {...config.syntax, version: "v758", errorNamespace: "."};
     config.rules = {check_syntax: true, parser_error: true};
     const reg = new core.Registry(new core.Config(JSON.stringify(config)));
-    reg.addFile(new core.MemoryFile("z.clas.abap", classSource("Z"))); reg.parse();
+    reg.addFile(new core.MemoryFile("z.clas.abap", classSource("Z"))); parseObserved(reg);
     [...reg.getObjects()]; // Deliberately unaudited caller observation.
     return build(dir, ["Z"], {registry: reg});
   });
@@ -130,7 +131,7 @@ test("a stored complete candidate refuses a current unknown observation", () => 
 }));
 
 test("completeness is recomputed: every dependency/raw hash and unknown marker matters; non-artifact roles do not", () => {
-  const reg = new core.Registry(); reg.addFile(new core.MemoryFile("z.clas.abap", classSource("Z"))); reg.parse();
+  const reg = new core.Registry(); reg.addFile(new core.MemoryFile("z.clas.abap", classSource("Z"))); parseObserved(reg);
   const program = {reg, supplied: new Map(), lockObjects: new Map()}, value = {name: "Z", replay: {ops: []}};
   const node = {owner: "CLAS Z", digest: "owner-digest", dependencies: [], rows: []};
   const graph = {nodes: {"CLAS Z": node}};

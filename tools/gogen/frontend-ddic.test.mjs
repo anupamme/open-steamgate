@@ -1,3 +1,4 @@
+import {parseObserved} from "./frontend-inventory.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createRequire} from "node:module";
@@ -13,7 +14,7 @@ const table = (fields, tabclass = "TRANSP") => `<?xml version="1.0" encoding="ut
 const registry = (fields, tabclass) => {
   const reg = new abaplint.Registry();
   reg.addFile(new abaplint.MemoryFile("zprobe.tabl.xml", table(fields, tabclass)));
-  return reg.parse();
+  return parseObserved(reg);
 };
 
 test("fields typed by a data element, a built-in or a structure pass", () => {

@@ -1,3 +1,4 @@
+import {parseObserved} from "./frontend-inventory.mjs";
 import {artifactDigestStats, artifactDigestsOf} from "./frontend-artifact-digests.mjs";
 // Fresh-process no-cache/cold/warm timings, cache size and output byte parity.
 import {execFileSync} from "node:child_process";
@@ -18,7 +19,7 @@ function child({folders, objects, recording, mode = "none", cacheDir}) {
   const start = performance.now();
   const compile = () => {
     const reg = orderedRegistry(folders, [], {parse: false});
-    reg.parse();
+    parseObserved(reg);
     return compileProgram({registry: reg, folders, objects, tolerant: true,
       cacheDir: mode === "none" ? undefined : cacheDir, provenance: recording, includeTests: new Set(["ZCL_CONTROL_0000"])});
   };

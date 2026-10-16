@@ -1,3 +1,4 @@
+import {parseObserved} from "./frontend-inventory.mjs";
 // Lazy type pools exercise the real cache seam without eager findIssues().
 import {test} from "node:test";
 import assert from "node:assert/strict";
@@ -19,7 +20,7 @@ const registry = (files) => {
   cfg.rules = {check_syntax: true, parser_error: true};
   const reg = new core.Registry(new core.Config(JSON.stringify(cfg)));
   for (const [name, raw] of Object.entries(files)) reg.addFile(new core.MemoryFile(name, raw));
-  reg.parse(); prepareArtifactDigests(reg);
+  parseObserved(reg); prepareArtifactDigests(reg);
   return reg;
 };
 const lower = ({reg}) => {
