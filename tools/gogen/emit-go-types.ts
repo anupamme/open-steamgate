@@ -33,7 +33,8 @@ export type Expr = RuntimeFields<Exclude<IR.Expr, {e: 'call' | 'int' | 'struct' 
 export interface LockField extends Pick<IR.TableColumn, 'name' | 'kind'> { readonly length: number }
 export interface NativeArgument { readonly value: Expr; readonly ref?: boolean }
 export interface ArithmeticBranchProbe { readonly e?: string; readonly reason?: string }
-type StatementFields<T> = T extends {s: 'native'} ? Omit<T, 'args'> & {readonly args?: readonly NativeArgument[]}
+export interface AssignmentStmt { readonly s: 'assign' | 'set_data'; readonly target: Expr; readonly value: Expr }
+type StatementFields<T> = T extends {s: 'assign' | 'set_data'} ? AssignmentStmt : T extends {s: 'native'} ? Omit<T, 'args'> & {readonly args?: readonly NativeArgument[]}
   : T extends {s: 'kernel_loop'} ? Omit<T, 'args' | 'pos'> & {readonly args: readonly NativeArgument[]; readonly pos?: IR.Position}
   : T extends {s: 'call_enq'} ? Omit<T, 'fields'> & {readonly fields?: readonly LockField[]}
   : T extends {s: 'concat'} ? Omit<T, 'sep'> & {readonly sep: Expr | null}
@@ -51,6 +52,10 @@ export type Stmt = StatementFields<RuntimeFields<IR.Stmt>> & {readonly pos?: IR.
 export type Condition = RuntimeFields<Exclude<IR.Condition, {c: 'cmp'}>>
   | (RuntimeFields<Omit<Extract<IR.Condition, {c: 'cmp'}>, 'type'>> & {readonly type?: IR.Type});
 export type Argument = RuntimeFields<IR.Argument>;
+export interface ImportingArgument { readonly value: Expr; readonly type?: IR.Type; readonly byValue?: boolean }
+export interface EventArgument { readonly name: string; readonly value: Expr }
+export interface DynamicResultMove { readonly key: string; readonly type: IR.Type; readonly value: Expr }
+export type DynamicSqlStrings = Extract<Expr, {e: 'strlist'}> | (Exclude<Expr, {e: 'strlist'}> & {readonly type: IR.Type});
 // whereOf emits INITIAL only with fx, and comparisons only with a value.
 export type Where = {readonly op: 'initial' | 'notinitial'; readonly fx: Expr}
   | {readonly op: '=' | '<>' | '<' | '<=' | '>' | '>='; readonly name?: string;

@@ -68,7 +68,7 @@ export function prepareDynamicStatics(program, {defaultValue, aliasTarget}) {
     while (owner && !seen.has(owner)) {
       seen.add(owner);
       const c = program.classes.find((c) => c.name === owner);
-      impl = [...(c?.methods ?? []), ...(c?.stubs ?? [])].find((m) => m.name === name && m.static);
+      impl = [...(c?.methods ?? []), ...(c?.stubs ?? [])].find(/** @param {import("./frontend-types.ts").StaticMethodIdentity} m */ (m) => m.name === name && m.static);
       if (impl) break;
       owner = c?.super;
     }

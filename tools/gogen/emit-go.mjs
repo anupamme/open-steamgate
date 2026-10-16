@@ -1083,7 +1083,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
 }
 
 /** an IMPORTING argument: a composite by reference goes as a pointer, by VALUE as a clone */
-/** @param {import("./emit-go-types.ts").Argument} a @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function importingArg(a, ctx) {
+/** @param {import("./emit-go-types.ts").ImportingArgument} a @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function importingArg(a, ctx) {
   if (a.byValue === undefined || !composite(a.type)) return expr(a.value, ctx);
   if (!a.byValue) return addressable(a.value) ? `&${place(a.value, ctx)}` : `abap.Ptr(${expr(a.value, ctx)})`;
   return copied(expr(a.value, ctx), a.value.type, a.value);
@@ -1330,7 +1330,7 @@ const LINES = !env("GOGEN_NOLINE");
     if (movePair(st, next, ctx, body[i - 1])) {
       // BumpTable keys on the address of the slice HEADER, not its backing
       // array. Preserve both bumps; clearing the source cannot invalidate a.
-      /** @type {Extract<import("./emit-go-types.ts").Stmt, {s: "assign"}>} */ const assign = st; append(lines, stmt({...assign, moveTable: true}, ctx, d), stmt(next, ctx, d));
+      /** @type {Extract<import("./emit-go-types.ts").Stmt, {s: "assign" | "set_data"}>} */ const assign = st; append(lines, stmt({...assign, moveTable: true}, ctx, d), stmt(next, ctx, d));
       i++;
     } else append(lines, stmt(st, ctx, d));
   }
@@ -1431,7 +1431,7 @@ const LINES = !env("GOGEN_NOLINE");
       }
       return [
         `${t}if ${n} := ${expr(st.index, ctx)}; ${n} >= 1 && int(${n}) <= len(${tb}) {`,
-        `${t}\t${place(st.into, ctx)} = ${copied(rowValue(st.table.type, `${tb}[${n}-1]`), st.into.type)}`,
+        `${t}\t${place(st.into, ctx)} = ${copied(rowValue(st.table.type, `${tb}[${n}-1]`), (/** @type {Exclude<import("./emit-go-types.ts").Expr, {e: "strlist"}>} */ (st.into)).type)}`,
         `${t}\ts.Sy.Subrc = 0`,
         `${t}\ts.Sy.Tabix = ${n}`,
         `${t}} else {`,
@@ -1536,7 +1536,7 @@ const LINES = !env("GOGEN_NOLINE");
     }
     case "raise_event": {
       const ev = EVENTS.get(st.event);
-      const fields = st.args.map((a) => `${ident(a.name)}: ${copied(expr(a.value, ctx), a.value.type, a.value)}`).join(", ");
+      const fields = st.args.map(/** @param {import("./emit-go-types.ts").EventArgument} a */ (a) => `${ident(a.name)}: ${copied(expr(a.value, ctx), a.value.type, a.value)}`).join(", ");
       return [`${t}abap.RaiseEvent(s, ${JSON.stringify(st.event)}, ${st.sender ? `any(${expr(st.sender, ctx)})` : "nil"}, ${ev.static}, func() any { return ${evType(st.event)}{${fields}} })`];
     }
     case "raise_runtime": return [`${t}panic(abap.ArithmeticError{Class: ${JSON.stringify(st.cls)}, Op: ${JSON.stringify(st.op)}})`];
@@ -1960,7 +1960,7 @@ ${t}	}`));
     case "select_dyn": {
       // dynamic Open SQL (go/abap selectdyn.go): the parts given at run time
       // as strings, the target as generic data
-      /** @param {import("./emit-go-types.ts").Expr | null} v @returns {string} */ const strs = (v) => (v === null ? "nil" : v.e === "strlist" ? `[]string{${v.values.map((x) => JSON.stringify(x)).join(", ")}}`
+      /** @param {import("./emit-go-types.ts").DynamicSqlStrings | null} v @returns {string} */ const strs = (v) => (v === null ? "nil" : v.e === "strlist" ? `[]string{${v.values.map((x) => JSON.stringify(x)).join(", ")}}`
         : v.type.k === "table" ? expr(v, ctx) : `[]string{${expr(v, ctx)}}`);
       return [`${t}abap.SelectDyn(s, abap.DynSelect{Table: ${expr(st.table, ctx)}, Fields: ${strs(st.fields)}, Star: ${st.fields === null}, ` +
         `Where: ${st.where === null ? `""` : expr(st.where, ctx)}, HasWhere: ${st.where !== null}, GroupBy: ${strs(st.groupBy)}, OrderBy: ${strs(st.orderBy)}, ` +
