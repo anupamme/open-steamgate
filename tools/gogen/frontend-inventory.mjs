@@ -5,8 +5,8 @@ const require = createRequire(import.meta.url);
 /** @type {typeof import("@abaplint/core")} */ export const core = createRequire(require.resolve("@abaplint/transpiler/package.json"))("@abaplint/core");
 /** @type {import("@abaplint/core").Registry["getObjects"]} */ const enumerate = core.Registry.prototype.getObjects;
 const /** @type {WeakMap<import("./frontend-session-types.ts").Registry, import("./frontend-session-types.ts").InputSnapshot>} */ snapshots = new WeakMap(), /** @type {WeakMap<import("./frontend-session-types.ts").Registry, import("./frontend-session-types.ts").InputSnapshot>} */ parsed = new WeakMap(), /** @type {WeakMap<import("./frontend-session-types.ts").Registry, import("./frontend-cache-types.ts").Replacement>} */ replacements = new WeakMap(), /** @type {WeakMap<import("./frontend-session-types.ts").Registry, import("./frontend-session-types.ts").Registry>} */ origins = new WeakMap(), /** @type {WeakMap<Pick<import("./frontend-session-types.ts").ArtifactObject, "getType" | "getName">, string>} */ keys = new WeakMap();
-const artifactFields = ["syntaxResult", "parsedType", "def", "definition", "parsed", "modules", "includes"];
-/** @param {import("./frontend-session-types.ts").ArtifactObject} obj @returns {import("./frontend-session-types.ts").ArtifactIdentity} */ export const artifactIdentity = (obj) => artifactFields.map((name) => obj[name]);
+/** @type {("syntaxResult" | "parsedType" | "def" | "definition" | "parsed" | "modules" | "includes")[]} */ const artifactFields = ["syntaxResult", "parsedType", "def", "definition", "parsed", "modules", "includes"];
+/** @param {import("./frontend-session-types.ts").ArtifactObject} obj @returns {import("./frontend-session-types.ts").ArtifactIdentity} */ export const artifactIdentity = (obj) => artifactFields.map((name) => /** @type {import("./frontend-session-types.ts").ArtifactIdentityFields} */ (obj)[name]);
 /** @param {import("./frontend-session-types.ts").ArtifactIdentity | undefined} a @param {import("./frontend-session-types.ts").ArtifactIdentity} b @returns {boolean | undefined} */ export const sameArtifactIdentity = (a, b) => a?.every((value, i) => value === b[i]);
 /** @param {import("./frontend-session-types.ts").InputSnapshot} inputs @returns {boolean} */ const hasBuiltArtifacts = (inputs) => [...inputs.objects.values()].some(({obj}) =>
   obj.syntaxResult || obj.def || obj.definition || obj.parsedType || obj.isDirty?.() === false);
@@ -19,7 +19,10 @@ const artifactFields = ["syntaxResult", "parsedType", "def", "definition", "pars
 /** @param {import("./frontend-session-types.ts").Registry} reg @param {boolean} refresh @returns {import("./frontend-session-types.ts").InputSnapshot} */ export function inputSnapshot(reg, refresh = false) {
   if (!refresh && snapshots.has(reg)) return snapshots.get(reg);
   // AUDITED bookkeeping: enumerate effective inputs, never semantic resolution.
-  const objects = new Map(), fileOwners = new Map(), files = [], signature = [];
+  const /** @type {Map<string, {obj: import("./frontend-session-types.ts").ArtifactObject, dependency: boolean, sources: import("./frontend-session-types.ts").InputSource[]}>} */ objects = new Map(),
+    /** @type {Map<string, string>} */ fileOwners = new Map(),
+    /** @type {import("./frontend-session-types.ts").SourceFile[]} */ files = [],
+    /** @type {[string, boolean, [string, string][]][]} */ signature = [];
   for (const obj of reg instanceof core.Registry ? enumerate.call(reg) : reg.getObjects()) {
     const key = objectKey(obj), dependency = reg.isDependency?.(obj) ?? false;
     const sources = obj.getFiles().map((file) => {
@@ -30,13 +33,13 @@ const artifactFields = ["syntaxResult", "parsedType", "def", "definition", "pars
         artifactHash: {get() { return this._artifactHash ??= hash(JSON.stringify(this.raw)); }},
       });
       fileOwners.set(source.name, key); files.push(file);
-      return source;
+      return /** @type {import("./frontend-session-types.ts").InputSource} */ (source);
     });
     objects.set(key, {obj, dependency, sources});
     signature.push([key, dependency, sources.map((s) => [s.name, s.raw])]);
   }
-  const config = JSON.stringify(reg.getConfig?.().get() ?? {});
-  const snapshot = {objects, fileOwners, files, config, configObject: reg.getConfig?.(),
+  /** @type {string} */ const config = JSON.stringify(reg.getConfig?.().get() ?? {});
+  /** @type {import("./frontend-session-types.ts").InputSnapshot} */ const snapshot = {objects, fileOwners, files, config, configObject: reg.getConfig?.(),
     signature: JSON.stringify([config, signature])};
   snapshots.set(reg, snapshot);
   return snapshot;
@@ -44,9 +47,9 @@ const artifactFields = ["syntaxResult", "parsedType", "def", "definition", "pars
 
 // Observe parse boundaries even when callers prepare registries before compile.
 // Re-parsing an edited registry does not certify its retained consumer caches.
-for (const method of ["parse", "parseAsync"]) {
-  const original = core.Registry.prototype[method];
-  core.Registry.prototype[method] = function(...args) {
+for (const method of /** @type {const} */ (["parse", "parseAsync"])) {
+  /** @type {import("./frontend-session-types.ts").ParseMethod} */ const original = core.Registry.prototype[method];
+  /** @type {import("./frontend-session-types.ts").ParseMethods} */ (core.Registry.prototype)[method] = /** @this {import("./frontend-session-types.ts").Registry} @param {[input?: import("./frontend-session-types.ts").ParseInput]} args */ function(...args) {
     const before = inputSnapshot(this, true), previous = parsed.get(this);
     // The first observed parse cannot vouch for artifacts built before observation.
     const untrusted = !previous && hasBuiltArtifacts(before);

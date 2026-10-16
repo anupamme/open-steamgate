@@ -6,6 +6,7 @@ import {createHash} from "node:crypto";
 import {basename} from "node:path";
 const tables = new WeakMap();
 export const artifactKey = (obj) => `${obj.getType()} ${obj.getName().toUpperCase()}`;
+/** @param {string | null | undefined} name @returns {string | null} */
 export const portableFilename = (name) => name == null ? null : basename(name.replaceAll("\\", "/"));
 const pos = (p) => p ? [p.getRow(), p.getCol(), p.vrow ?? null, p.vcol ?? null] : null;
 const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -18,6 +19,32 @@ export function canonical(value) {
     throw new TypeError(`unsupported semantic data: ${value.constructor?.name}`);
   return Object.fromEntries(Object.keys(value).sort().map((k) => [k, canonical(value[k])]));
 }
+// Each dictionary has one concrete payload; projected values are opaque to hashing.
+/**
+ * @overload
+ * @param {{[key: string]: {token: import("@abaplint/core").Token, ooType: "CLAS" | "INTF"}}} dict
+ * @param {(value: {token: import("@abaplint/core").Token, ooType: "CLAS" | "INTF"}) => unknown} project
+ * @returns {[string, unknown][]}
+ */
+/**
+ * @overload
+ * @param {{[key: string]: import("@abaplint/core").TypedIdentifier}} dict
+ * @param {(value: import("@abaplint/core").TypedIdentifier) => unknown} project
+ * @returns {[string, unknown][]}
+ */
+/**
+ * @overload
+ * @param {{[key: string]: import("@abaplint/core").IClassDefinition}} dict
+ * @param {(value: import("@abaplint/core").IClassDefinition) => unknown} project
+ * @returns {[string, unknown][]}
+ */
+/**
+ * @overload
+ * @param {{[key: string]: import("@abaplint/core").IInterfaceDefinition}} dict
+ * @param {(value: import("@abaplint/core").IInterfaceDefinition) => unknown} project
+ * @returns {[string, unknown][]}
+ */
+/** @param {{[key: string]: unknown}} dict @param {Function} project @returns {[string, unknown][]} */
 const entries = (dict, project) => Object.keys(dict ?? {}).sort().map((k) => [k, project(dict[k])]);
 const all = (container) => [...(container?.getAll() ?? [])];
 const location = (id) => [id.constructor.name, id.getName(), portableFilename(id.getFilename()), pos(id.getStart())];

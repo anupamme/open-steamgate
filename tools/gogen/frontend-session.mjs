@@ -34,8 +34,8 @@ const effects = new Set(["skipped", "partial"]);
 }
 
 /** @param {import('./frontend-session-types.ts').SessionProgram} program @returns {import('./frontend-session-types.ts').ProgramSnapshot} */ function snapshot(program) {
-  return new Map(Object.entries(program).filter(([key]) => !current.has(key) && !effects.has(key)).map(([key, value]) =>
-    [key, value instanceof Map ? new Map(value) : value instanceof Set ? new Set(value) : value]));
+  return /** @type {import("./frontend-session-types.ts").ProgramSnapshot} */ (new Map(Object.entries(program).filter(([key]) => !current.has(key) && !effects.has(key)).map(([key, value]) =>
+    [key, value instanceof Map ? new Map(value) : value instanceof Set ? new Set(value) : value])));
 }
 
 /** @param {import('./frontend-session-types.ts').ProgramSnapshot} before @param {import('./frontend-session-types.ts').SessionProgram} program @returns {boolean} */ function unchanged(before, program) {
@@ -69,15 +69,15 @@ export const compileClass = artifactLowering(/** @param {import('./frontend-sess
   const file = obj.getMainABAPFile();
   const key = obj.getName().toUpperCase();
   /** @type {import('./frontend-session-types.ts').SessionEntry | undefined} */ const cached = session?.classes.get(key);
-  if (cached && cached.file === file && cached.structure === file.getStructure() && cached.supplied === suppliedKey(program, key) && (!cached.replay || replayLowering(program, cached.replay))) {
+  if (file && cached && cached.file === file && cached.structure === file.getStructure() && cached.supplied === suppliedKey(program, key) && (!cached.replay || replayLowering(program, cached.replay))) {
     inheritStoredProvenance(program.reg, obj, cached.provenance);
     program.currentClass = cached.current.currentClass;
     program.currentOwner = cached.current.currentOwner;
     program.currentTypes = cached.current.currentTypes;
     for (const [k, sig] of cached.sigs ?? []) program.sigs.set(k, sig);
     if (!cached.replay) {
-      append(program.skipped, cached.skipped);
-      append(program.partial, cached.partial);
+      append(program.skipped, cached.skipped ?? []);
+      append(program.partial, cached.partial ?? []);
     }
     counts.reused++;
     counts.reusedClasses.push(key);
@@ -90,18 +90,19 @@ export const compileClass = artifactLowering(/** @param {import('./frontend-sess
   // any lowering that changed shared program state; only diagnostics and
   // current-class context and elementary own-method signatures can be
   // replayed without changing naming/order.
-  /** @type {boolean | null | undefined} */ const candidate = session && !sensitiveSource.test(file.getRaw());
+  /** @type {boolean | null | undefined} */ const candidate = session && file && !sensitiveSource.test(file.getRaw());
   /** @type {import('./frontend-session-types.ts').ProgramSnapshot | undefined} */ const before = candidate ? snapshot(program) : undefined;
   const start = {skipped: program.skipped.length, partial: program.partial.length};
-  /** @type {import('./frontend-session-types.ts').RecordedLowering | undefined} */ const recorded = session && !candidate && !/\bFOR\s+ALL\s+ENTRIES\b/i.test(file.getRaw()) ? recordLowering(program, (tracked) => lower({...ctx, program: tracked}, obj)) : undefined;
+  /** @type {import('./frontend-session-types.ts').RecordedLowering | undefined} */ const recorded = session && file && !candidate && !/\bFOR\s+ALL\s+ENTRIES\b/i.test(file.getRaw()) ? recordLowering(program, (tracked) => lower({...ctx, program: tracked}, obj)) : undefined;
   /** @type {import('./frontend-session-types.ts').ClassIR} */ const ir = recorded ? recorded.ir : lower(ctx, obj);
-  /** @type {import('./frontend-session-types.ts').SignatureChanges | undefined} */ const sigs = candidate ? ownSignatures(before.get("sigs"), program.sigs, key) : undefined;
-  if (candidate && sigs && unchanged(before, program) && elementary(ir, key)) {
+  /** @type {import('./frontend-session-types.ts').Signatures | undefined} */ const beforeSigs = before?.get("sigs");
+  const sigs = beforeSigs ? ownSignatures(beforeSigs, program.sigs, key) : undefined;
+  if (session && file && before && sigs && unchanged(before, program) && elementary(ir, key)) {
     session.classes.set(key, {file, structure: file.getStructure(), ir, sigs, supplied: suppliedKey(program, key),
       current: Object.fromEntries([...current].map((k) => [k, program[k]])),
       skipped: program.skipped.slice(start.skipped), partial: program.partial.slice(start.partial)});
   }
-  if (recorded?.replay) session.classes.set(key, {file, structure: file.getStructure(), ir,
+  if (session && file && recorded?.replay) session.classes.set(key, {file, structure: file.getStructure(), ir,
     replay: recorded.replay, supplied: suppliedKey(program, key),
     current: Object.fromEntries([...current].map((k) => [k, program[k]]))});
   /** @type {import('./frontend-session-types.ts').SessionEntry | undefined} */ const entry = session?.classes.get(key);

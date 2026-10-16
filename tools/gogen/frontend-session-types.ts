@@ -2,6 +2,7 @@
 // Erasable contracts for session reuse and observational provenance. Opaque
 // values below are identity/fingerprint payloads, never interpreted as IR here.
 import type * as Core from '@abaplint/core';
+import type {ABAPFile, AbstractType, IClassDefinition, IInterfaceDefinition, Issue, IProgress, ISpaghettiScope, Types} from '@abaplint/core';
 import type {Class, Method, UnsupportedMethod} from './emit-go-types.ts';
 import type {FunctionModule as IRFunctionModule} from './ir.ts';
 
@@ -12,8 +13,18 @@ export interface Registry extends Core.IRegistry {
   getObject(type: 'FUGR', name: string): Core.Objects.FunctionGroup | undefined;
   getObject(type: string | undefined, name: string | undefined): Core.IObject | undefined;
 }
+// A common call signature for the two installed parse wrappers. The synchronous
+// result has no then member; Promise is the only asynchronous core result.
+export type ParseResult = (Core.Registry & {then?: undefined}) | Promise<Core.Registry>;
+// IRunInput is private in the pinned core; mirror its two public input fields.
+export interface ParseInput {progress?: IProgress; outputPerformance?: boolean}
+export type ParseMethod = (this: Registry, input?: ParseInput) => ParseResult;
+export interface ParseMethods {
+  parse: ParseMethod;
+  parseAsync: ParseMethod;
+}
 export type SourceFile = Core.IFile;
-export type ArtifactIdentity = unknown[];
+export type ArtifactIdentity = (SyntaxResult | AbstractType | IClassDefinition | IInterfaceDefinition | readonly ABAPFile[] | Types.FunctionModuleDefinition[] | string[] | undefined)[];
 export type RegistryObjects = (this: Registry) => Iterable<ArtifactObject>;
 // The frontend's enqueue seam retains DDIC lock field descriptors.
 export interface LockField {readonly name: string; readonly kind: string; readonly length?: number}
@@ -25,19 +36,38 @@ export type ClassIR = CacheValue<Class>;
 export type Signature = Method | UnsupportedMethod;
 export type Signatures = Map<string, Signature>;
 export type SignatureChanges = [string, Signature][];
-export interface ProgramSnapshot extends Map<string, unknown> {
-  get(key: 'sigs'): Signatures;
+// Known program entries retain their payload types; future enumerable entries
+// remain opaque to unchanged(), which compares identity only.
+export interface ProgramSnapshot {
+  readonly size: number;
+  get(key: 'reg'): Registry | undefined;
+  get(key: 'sigs'): Signatures | undefined;
+  get(key: 'supplied'): Map<string, Set<string>> | undefined;
+  get(key: 'functionModules'): Map<string, FunctionModule> | undefined;
+  get(key: 'frontendCounts'): FrontendCounts | undefined;
   get(key: string): unknown;
 }
-export interface ArtifactObject {
+export interface FrontendCounts {lowered: number; reused: number; loweredClasses: string[]; reusedClasses: string[]}
+// Core keeps ISyntaxResult private; mirror its concrete public fields.
+export interface SyntaxResult {readonly issues: Issue[]; readonly spaghetti: ISpaghettiScope}
+export interface ArtifactFields {
+  syntaxResult?: SyntaxResult;
+  parsedType?: AbstractType;
+  def?: IClassDefinition | IInterfaceDefinition;
+  definition?: IClassDefinition | IInterfaceDefinition;
+}
+// Keep private base-class slots out of the public object view: intersecting
+// those names with core subclasses would erase instanceof narrowing.
+export interface ArtifactIdentityFields extends ArtifactFields {
+  parsed?: readonly ABAPFile[];
+  modules?: Types.FunctionModuleDefinition[];
+  includes?: string[];
+}
+export interface ArtifactObject extends ArtifactFields {
   getType(): string;
   getName(): string;
   getFiles(): readonly SourceFile[];
   isDirty?(): boolean;
-  syntaxResult?: unknown;
-  parsedType?: unknown;
-  def?: unknown;
-  definition?: unknown;
 }
 // Local class adapters retain the owning core object beside their own getters.
 export interface ClassObject {
@@ -62,7 +92,7 @@ export interface SessionProgram {
   currentOwner?: string;
   currentTypes?: Set<string>;
   functionModules: Map<string, FunctionModule>;
-  frontendCounts: {lowered: number; reused: number; loweredClasses: string[]; reusedClasses: string[]};
+  frontendCounts: FrontendCounts;
 }
 // A replay is an ordered transcript of heterogeneous program observations and
 // effects. Payloads remain opaque until frontend-replay validates/applies them.
@@ -89,6 +119,7 @@ export interface CacheSession {
   // Preparation clears all own fields, including disk-cache extensions.
   [key: string]: unknown;
   registry: Registry;
+  cacheDir?: string;
   config: ReturnType<Registry['getConfig']> | undefined;
   files: SourceFile[];
   classes: Map<string, SessionEntry>;
