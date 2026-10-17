@@ -139,7 +139,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   // Eager collections keep first writes inside the replay proxies. Anonymous
   // type identities use a Map so their ordered effects can be replayed too;
   // these keys already belong to the registry retained for this compilation.
-  /** @type {import("./frontend-types.ts").FrontendProgram} */ const program = /** @type {import("./frontend-types.ts").FrontendProgram} */ (/** @type {unknown} */ ({anonStructs: new Map(), badStructs: new Map(), ddicOutputLen: new Map(),
+  /** @type {import("./frontend-types.ts").FrontendProgram} */ const program = /** @type {import("./frontend-types.ts").FrontendProgram} */ (/** @type {unknown} */ ({supplied: new Map(), functionModules: new Map(), anonStructs: new Map(), badStructs: new Map(), ddicOutputLen: new Map(),
     excAttrs: new Set(), dynStatics: new Set(), intfOwnAttrs: new Map(), interfaceAttrs: new Map(), structs: new Map(), consts: new Map(), classes: [], skipped: [], missing: new Set(), wanted: new Set(wanted.map(upper)),
     diagnostics, frontendCounts: {lowered: 0, reused: 0, loweredClasses: [], reusedClasses: []}, interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: [], events: new Map()}));
   if (PERSIST_LOWERING) Object.assign(program, {faeN: 0, localDefs: new Map()});
