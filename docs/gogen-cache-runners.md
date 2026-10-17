@@ -647,3 +647,28 @@ changed-path `osd-leak-scan --paths` exit-code gate passed. The size gate checke
 `frontend.mjs` is net -13 lines against `origin/main` (`b9e20a38`) at the final
 gate. Go compilation was skipped in the large phase matrix; the small binary
 tests compiled and executed reports.
+
+## Final proof at 3619f752 (2026-10-17, rebased on 1bb46530)
+
+This is a fresh six-case proof on the final branch, with the review fixes
+included: selection rows recorded for scoped misses, idle global artifact rows
+failing closed, and the provenance graph re-read in every round. The setup is
+the same as the earlier runs: Go build skipped, every large child in a 70 GiB
+scope.
+
+| Run | Cache | Total (s) | Lowered / reused |
+| --- | --- | ---: | ---: |
+| Cold | off | 544.6 | 3,055 / 0 |
+| Cold | on | 1,310.6 | 9 / 3,046 |
+| Unchanged warm | off | 552.2 | 3,055 / 0 |
+| Unchanged warm | on | 339.6 | 7 / 3,048 |
+| Edited | off | 519.7 | 3,055 / 0 |
+| Edited | on | 692.8 | 7 / 3,048 |
+
+- **Byte-identity.** All four comparisons were byte-identical: unchanged warm
+  against recorded, cold on against off, disabled control against cold, and
+  edited warm against edited cold.
+- **Edited run.** It is now 692.8 s, down from 965.1 s on step 4b (#800). It is
+  still slower than the cache-off edited run. Most of the remaining cost repeats
+  in each of the runner's six closure rounds, which is what step 4b.3
+  (collapsing the rounds by certified previous selection) targets.
