@@ -152,7 +152,7 @@ export function analyzeOwnership(program: ProgramInput): Ownership {
   }, fixed(p: Expr | null | undefined, ctx: Context): number {
     const decl = p?.e === "var" && !p.ref ? ctx.method!.locals!.find((v): boolean => v.name === p.name) : undefined;
     return decl?.type.k === "x" && declarations.has(decl) ? decl.type.len : 0;
-  }, has(p: Expr | AttributeProbe | null | undefined, ctx: Context): boolean | undefined {
-    return p?.e === "static" ? p.owner === ctx.cls.name && attrs.get(p.owner)?.has(p.name) : p?.e === "attr" ? attrs.get(ctx.cls.name!)?.has(p.name) : p?.e === "var" && !p.ref && locals.get(localKey(ctx.cls, ctx.method!))?.has(p.name);
+  }, has(p: Expr | AttributeProbe | null | undefined, ctx: Context): p is Extract<Expr, {e: "var" | "attr" | "static"}> {
+    return (p?.e === "static" ? p.owner === ctx.cls.name && attrs.get(p.owner)?.has(p.name) : p?.e === "attr" ? attrs.get(ctx.cls.name!)?.has(p.name) : p?.e === "var" && !p.ref && locals.get(localKey(ctx.cls, ctx.method!))?.has(p.name)) as boolean;
   }};
 }

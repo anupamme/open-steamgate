@@ -1,4 +1,4 @@
-import type {Program, Class, Argument} from './ir.ts';
+import type {Program, Class, Argument} from './emit-go-types.ts';
 import {omittedFactoryCall, Unsupported} from './frontend.mjs';
 
 // Resolve all omitted constructor arguments before emitting declarations:
@@ -17,7 +17,7 @@ export function constructorFactories(program: Program): Map<string, ConstructorF
       const canOmit = params.every((p) => p.optional || p.default !== undefined || p.suppliedOf);
       program.currentOwner = cls.name;
       try {
-        const args = canOmit && params.length ? omittedFactoryCall(program, at!,
+        const args = canOmit && params.length ? (omittedFactoryCall as (program: Program, cls: Class, method: import("./frontend-types.ts").FactoryMethod) => Extract<import("./emit-go-types.ts").Expr, {e: "call"}>)(program, at!,
           {name: 'CONSTRUCTOR', params, returning: {type: {k: 'ref', name: cls.name}}}).args : [];
         result.set(cls.name, {canOmit, args});
       } catch (e) {

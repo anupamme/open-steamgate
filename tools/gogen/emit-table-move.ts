@@ -77,7 +77,7 @@ export function analyzeTableMoves(program: ProgramInput, stable: Stable): MovePa
       }
     });
   }
-  return (st, next, ctx, previous): boolean => {
+  return (st, next, ctx, previous): st is Extract<Stmt, {s: "assign" | "set_data"}> => {
     while (next?.s === "seq" && next.body.length === 1) next = next.body[0];
     if (st.s !== "assign" || next?.s !== "clear" || !("type" in st.target) || st.target.type?.k !== "table") return false;
     const b = movePath(st.value), cleared = movePath(next.target);

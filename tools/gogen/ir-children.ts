@@ -18,14 +18,14 @@ interface RefusedBranch { readonly reason: string }
 // This is the complete expression property graph, including non-expression
 // records. The recursive call below checks its closure against every IR union
 // member, so new child shapes cannot silently disappear from the traversal.
-type ExpressionNode = Expr | Condition | Argument | Type | Field | SecondaryKey | TableKey |
+type ExpressionNode = IRNode | Expr | Condition | Argument | Type | Field | SecondaryKey | TableKey |
   TemplatePart | TemplateOptions | ArithmeticBranches | Exceptions | Exceptions['map'] |
   ConversionField | ConditionalBranch | RefusedBranch;
 type ExpressionValue = ExpressionNode | readonly ExpressionValue[] | string | number | boolean | null | undefined;
 function isArray(value: ExpressionValue): value is readonly ExpressionValue[] { return Array.isArray(value); }
-function isExpression(node: ExpressionNode): node is Expr { return 'e' in node && typeof node.e === 'string'; }
+function isExpression(node: ExpressionNode): node is Expr | RuntimeExpr { return 'e' in node && typeof node.e === 'string'; }
 
-export function someExpression(value: ExpressionValue, predicate: (node: Expr) => boolean): boolean {
+export function someExpression(value: ExpressionValue, predicate: (node: Expr | RuntimeExpr) => boolean): boolean {
   if (!value || typeof value !== 'object') return false;
   if (isArray(value)) return value.some((child) => someExpression(child, predicate));
   if (isExpression(value) && predicate(value)) return true;
