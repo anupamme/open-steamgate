@@ -1,12 +1,16 @@
 // Runtime-only opt-in counters; importing the compiler performs no host action.
+/** @type {{round: number, enabled: boolean, phases: Map<string, number>, active: Set<string>} | undefined} */
 let current;
 export function frontendRound() { return current?.round ?? 1; }
 export function timingEnabled() {
   return process.env.OSABAP_TIMING === "1" || !!process.env.GOGEN_CACHE_DIAGNOSTICS;
 }
 export function beginFrontendRound(round = 1) {
-  current = {round, enabled: timingEnabled(), phases: new Map(), active: new Set()};
+  /** @type {Map<string, number>} */ const phases = new Map();
+  /** @type {Set<string>} */ const active = new Set();
+  current = {round, enabled: timingEnabled(), phases, active};
 }
+/** @template T @param {string} phase @param {() => T} run @returns {T} */
 export function timedFrontend(phase, run) {
   if (!current?.enabled || current.active.has(phase)) return run();
   const state = current, start = performance.now(); state.active.add(phase);
