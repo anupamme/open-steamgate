@@ -147,6 +147,7 @@ function pruneVersions(root, current) {
   } catch { /* Cache housekeeping must not change compilation. */ }
 }
 
+/** @returns {import("./frontend-session-types.ts").CacheDisk | undefined} */
 export function objectCache(registry, root) {
   if (!root) return;
   // Test-only. No other environment variable may enable weakened cache keys.
@@ -331,7 +332,7 @@ function suppliedKey(program, owner) {
   return JSON.stringify([...program.supplied].filter(([k]) => k.startsWith(`${owner}=>`)).map(([k, v]) => [k, [...v]]));
 }
 
-export const compileDiskClass = artifactLowering(function compileDiskClass(ctx, obj, lower, session) {
+export const compileDiskClass = artifactLowering(/** @param {import('./frontend-session-types.ts').LoweringContext} ctx @param {import('./frontend-session-types.ts').ClassObject} obj @param {import('./frontend-session-types.ts').ClassLowering} lower @param {import('./frontend-session-types.ts').CacheSession | null | undefined} session @returns {import('./frontend-session-types.ts').ClassIR} */ function compileDiskClass(ctx, obj, lower, session) {
   const program = ctx.program;
   const counts = program.frontendCounts;
   const file = obj.getMainABAPFile();
