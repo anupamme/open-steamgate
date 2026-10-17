@@ -61,7 +61,7 @@ const HOST_REPLACED = new Set(["ZCL_OSD_ENQ_KERNEL"]);
  */
 // skip(path): a file not to load, for a layered build where a later folder
 // hides an object an earlier one holds (osg-build.mjs; ultra/packs)
-export const compileProgram = withProvenance(function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry, session, cacheDir}) {
+export const compileProgram = withProvenance(/** @param {{folders: string[], objects: string[], tolerant?: boolean, skip?: (path: string) => boolean, includeTests?: boolean | Set<string>, registry?: import("./frontend-session-types.ts").Registry, session?: Partial<import("./frontend-session-types.ts").CacheSession> | null, cacheDir?: string, provenance?: unknown}} options */ function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry, session, cacheDir}) {
   const config = abaplint.Config.getDefault().get();
   config.syntax = {...config.syntax, version: "v758", errorNamespace: "."};
   // only the syntax check and parser errors are read below (parser_error is a
@@ -83,7 +83,7 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
       if (e.isDirectory()) walk(path);
       else if (isSourceIdentity(e.name) || skip(path)) continue;
       else if (e.name.toLowerCase().endsWith(".clas.testclasses.abap") && includeTests !== true
-          && !includeTests?.has?.(objName(e.name).toUpperCase())) continue;
+          && !(includeTests instanceof Set && includeTests.has(objName(e.name).toUpperCase()))) continue;
       else if (/\.(abap|xml)$/i.test(e.name) && !registry) {
         const source = readFileSync(path, "utf8");
         // Later rounds can select any loaded object. Normalize once before
@@ -97,12 +97,17 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
   };
   for (const folder of folders) walk(folder);
   if (!registry) parseObserved(reg);
-  require("./frontend-inventory.mjs").prepareCdsRegistry(reg, ddls, !registry || folders.length > 0, cdsViewsByRegistry);
+  /** @type {typeof import("./frontend-inventory.mjs")} */ (require("./frontend-inventory.mjs")).prepareCdsRegistry(reg, ddls, !registry || folders.length > 0, cdsViewsByRegistry);
   REG = reg;
   // Load cache code and its module state only for an explicit opt-in.
-  const diskFrontend = cacheDir ? require("./frontend-object-cache.mjs") : undefined;
+  // Only the three entry points, not the module namespace, are held.
+  /** @type {Pick<typeof import("./frontend-object-cache.mjs"), "cacheSession" | "prepareDiskSession" | "compileDiskClass"> | undefined} */ let diskFrontend;
+  if (cacheDir) {
+    const {cacheSession, prepareDiskSession, compileDiskClass} = /** @type {typeof import("./frontend-object-cache.mjs")} */ (require("./frontend-object-cache.mjs"));
+    diskFrontend = {cacheSession, prepareDiskSession, compileDiskClass};
+  }
   if (diskFrontend) session = diskFrontend.cacheSession(session, reg, cacheDir);
-  const cdsIdentity = require("./frontend-inventory.mjs").prepareCdsSession(session, reg);
+  const cdsIdentity = /** @type {typeof import("./frontend-inventory.mjs")} */ (require("./frontend-inventory.mjs")).prepareCdsSession(session, reg);
   if (diskFrontend) {
     auditedBookkeeping("session-prepare", () => diskFrontend.prepareDiskSession(session, reg)); // Input guards only.
   } else {
@@ -150,7 +155,7 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
   LOCAL_DEFS.clear();
   /** @type {import("./frontend-types.ts").LocalClass[]} */ const localDefs = [];
   for (const obj of enumerateObjects(reg, "local-dispatch", [], "scheduling", (o) => o instanceof abaplint.Objects.Class && wanted.includes(o.getName().toLowerCase()) && (includeTests || LOCAL_CLASSES.has(upper(o.getName()))))) {
-    localDiscovery(reg, obj, includeTests === true || includeTests?.has?.(upper(obj.getName())), () => {
+    localDiscovery(reg, obj, includeTests === true || (includeTests instanceof Set && includeTests.has(upper(obj.getName()))), () => {
     if (LOCAL_CLASSES.has(upper(obj.getName()))) {
       const top = new abaplint.SyntaxLogic(reg, obj).run().spaghetti.getTop();
       for (const file of obj.getABAPFiles()) {
@@ -161,7 +166,7 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
         }
       }
     }
-    for (const l of localClasses(reg, obj, includeTests === true || includeTests?.has?.(upper(obj.getName())))) {
+    for (const l of localClasses(reg, obj, includeTests === true || (includeTests instanceof Set && includeTests.has(upper(obj.getName()))))) {
       program.locals.set(`${upper(obj.getName())}|${l.local}`, l.name);
       program.wanted.add(l.name);
       (PERSIST_LOWERING ? program.localDefs : LOCAL_DEFS).set(l.name, l.def);
