@@ -81,7 +81,7 @@ export function recordingPlan(reg, saved, identity) {
   return {inputs, refresh, changed, nodes: saved.nodes};
 }
 
-export function recordingSnapshot(reg, trace, identity, trusted) {
+export function recordingSnapshot(reg, trace, identity, trusted, stable = true) {
   const nodes = {}, reverse = {};
   for (const [owner, entry] of trace.entries) {
     const rows = [...entry.queries.values()].filter((q) => q.role === "artifact");
@@ -91,7 +91,7 @@ export function recordingSnapshot(reg, trace, identity, trusted) {
   }
   for (const readers of Object.values(reverse)) readers.sort();
   return {format: "gogen-recording-1", identity, inputs: effectiveInputs(reg), nodes, reverse,
-    fullOnly: [...trace.global.queries.values()].some((q) => q.role === "artifact")};
+    fullOnly: !stable || [...trace.global.queries.values()].some((q) => q.role === "artifact")};
 }
 
 export function certificateIndex(reg, graph, compute, entries) {

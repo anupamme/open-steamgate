@@ -15,7 +15,7 @@ import {toolIdentity} from "./frontend-object-cache.mjs";
 import {provenanceGraph, recordProvenance, compilationProvenanceOf, inheritStoredProvenance,
   beginProvenanceCompile, withArtifact, semanticQuery, auditedBookkeeping, auditBuiltArtifacts, scopedProvenance} from "./frontend-provenance.mjs";
 import {rttiProjection, selectionHas} from "./frontend-queries.mjs";
-import {core, parseObserved} from "./frontend-inventory.mjs";
+import {core, parseObserved, finishInputs} from "./frontend-inventory.mjs";
 import {readRecordingPlan, writeRecordingPlan} from "./frontend-v3-shadow.mjs";
 
 const source = (name, body) => `CLASS ${name} DEFINITION PUBLIC. PUBLIC SECTION.
@@ -89,6 +89,33 @@ test("idle scoped validation preserves unknown markers from audited provider bui
     assert.ok([...provenanceGraph(reg).artifacts.get("CLAS ZBASE").queries.values()].some((q) => q.kind === "unknown-scan" && q.args[0] === "untraced-artifact"));
   }, {expose:false, cacheDir:options.cacheDir});
   assert.equal(readRecordingPlan(options.cacheDir).nodes["CLAS ZBASE"].trusted, false);
+}));
+
+test("unrecorded inventory growth requires full recording", () => fixture(({options}) => {
+  let p;
+  recordProvenance(() => {
+    p = compileProgram({...options, includeTests:true});
+    // Model an input synthesized after the recorder's last inventory boundary.
+    p.reg.addFile(new core.MemoryFile("zlate.clas.abap", source("ZLATE", "rv = 0.")));
+    finishInputs(p.reg);
+  }, {expose:false, cacheDir:options.cacheDir});
+  const saved = readRecordingPlan(options.cacheDir);
+  assert.equal(saved.fullOnly, true, "unrecorded inventory changes require full observation");
+  recordProvenance(() => {
+    beginProvenanceCompile(p.reg);
+    assert.equal(scopedProvenance(), false, "a changed observation scope must restore full recording");
+  }, {expose:false, cacheDir:options.cacheDir});
+}));
+
+test("discarding retained provider rows marks the prebuilt artifact incomplete", () => fixture(({build, options}) => {
+  const p = build({includeTests:true}), saved = readRecordingPlan(options.cacheDir);
+  p.reg.setConfig(new core.Config(saved.inputs.config));
+  recordProvenance(() => {
+    beginProvenanceCompile(p.reg);
+    assert.equal(scopedProvenance(), true);
+    const rows = [...provenanceGraph(p.reg).artifacts.get("CLAS ZBASE").queries.values()];
+    assert.ok(rows.some((q) => q.kind === "unknown-scan" && q.args[0] === "provider-built-before-scope-refresh"));
+  }, {expose:false, cacheDir:options.cacheDir});
 }));
 
 for (const fault of ["reverse", "global"]) test(`recording plan with ${fault} damage restores full observation`, () => fixture(({dir, put, build, options}) => {

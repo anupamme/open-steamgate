@@ -71,12 +71,19 @@ class Recorder {
           && sources.every((s, n) => s.name === state.files.get(owner)[n][0] && s.raw === state.files.get(owner)[n][1]));
       if (!live) {
         const retained = new Map();
+        const gaps = [...plan.refresh].filter((owner) => {
+          const obj = inputs.objects.get(owner)?.obj;
+          return obj && (state.artifacts.has(obj) || this.checked?.has(obj));
+        });
         for (const [owner, node] of Object.entries(plan.nodes)) if (!plan.refresh.has(owner)) {
           const entry = empty(); retained.set(owner, entry);
           for (const row of node.rows) entry.queries.set(queryIdentity(row.role, row.phase, owner, row), row);
           for (const edge of node.edges) entry.edges.add(edge);
         }
         state.entries = retained; state.global = empty();
+        // A retained build whose rows we just discarded cannot become a new,
+        // complete provider merely because its cached identity still matches.
+        for (const owner of gaps) this.artifactGap(state, owner, "provider-built-before-scope-refresh");
       }
       state.lowerings.clear();
       this.refresh = plan.refresh;
@@ -306,6 +313,7 @@ class Recorder {
     }
     if (completed && recorder.scopeReg) {
       const state = recorder.state(recorder.scopeReg), inputs = inputSnapshot(recorder.scopeReg);
+      const observed = recorder.inventories.get(recorder.scopeReg);
       try {
         timedFrontend("finalization", () => writeRecordingPlan(cacheDir, recordingSnapshot(recorder.scopeReg, state, recorder.identity,
           (owner) => {
@@ -313,7 +321,7 @@ class Recorder {
             return state.artifacts.has(obj) && (!(obj instanceof core.ABAPObject) || !!obj.syntaxResult)
               && (typeof obj?.parseType !== "function" || recorder.completedBuilds.has(obj)
                 || recorder.refresh && !recorder.refresh.has(owner));
-          })));
+          }, observed?.signature === inputs.signature && observed.configObject === inputs.configObject)));
       } catch { /* Missing or incomplete metadata restores full recording. */ }
     }
     active = undefined; restore();
