@@ -104,7 +104,7 @@ import {textLiteral} from "./frontend-literals.ts";
     if (item.ctor) { const v = constructor(item.ctor, ctx, item.hint); return t === undefined ? v : convert(v, t); }
     if (item.bool) {
       // xsdbool: a c(1) 'X' or blank; boolc: a string 'X' or ' '
-      /** @type {import("./frontend-types.ts").ValueExpr} */ const v = {e: "bool", cond: cond(item.cond, ctx), blank: item.bool === "BOOLC" ? " " : "", type: item.bool === "BOOLC" ? S : C(1)};
+      const v = {e: "bool", cond: cond(item.cond, ctx), blank: item.bool === "BOOLC" ? " " : "", type: item.bool === "BOOLC" ? S : C(1)};
       return t === undefined ? v : convert(v, t);
     }
     if (item.descr) { const v = descrAttr(item.descr.call, item.descr.attr, ctx); return t === undefined ? v : convert(v, t); }
