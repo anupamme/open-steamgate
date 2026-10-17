@@ -61,18 +61,18 @@ const HOST_REPLACED = new Set(["ZCL_OSD_ENQ_KERNEL"]);
  */
 // skip(path): a file not to load, for a layered build where a later folder
 // hides an object an earlier one holds (osg-build.mjs; ultra/packs)
-export const compileProgram = withProvenance(/** @param {import("./frontend-session-types.ts").CompileOptions} options */ function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry, session, cacheDir, dependencyCache = false, closureContext}) {
+export const compileProgram = withProvenance(/** @param {import("./frontend-session-types.ts").CompileOptions} options */ function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry, session, cacheDir, dependencyCache = false, closureContext, strictRoots}) {
   const config = abaplint.Config.getDefault().get();
   config.syntax = {...config.syntax, version: "v758", errorNamespace: "."};
   // only the syntax check and parser errors are read below (parser_error is a
   // rule too: without it a statement that does not parse is dropped silently);
   // the default config runs every lint rule, which was 45 % of a build
   config.rules = {check_syntax: true, parser_error: true};
-  // Reset the ordinary module counter on each compile, as on main.
+  // Reset counters per compile.
   FAE_N = 0;
   PERSIST_LOWERING = !!cacheDir;
   /** @type {import("./frontend-session-types.ts").Registry} */ const reg = registry ?? /** @type {import("./frontend-session-types.ts").Registry} */ (new abaplint.Registry(new abaplint.Config(JSON.stringify(config))));
-  // Load every file for resolution; lower and report diagnostics for selected objects.
+  // Resolve files; diagnose selection.
   /** @param {string} fn @returns {string} */ const objName = (fn) => fn.split("/").pop().split(".")[0].toLowerCase().replace(/#/g, "/");
   /** @type {string[]} */ let wanted = objects.map((o) => o.toLowerCase().replace(/#/g, "/"));
   /** @type {import("./frontend-cache-types.ts").CdsSource[]} */ const ddls = [];
@@ -126,7 +126,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   const diagnostics = syntaxDiagnostics(reg, (fn) => selectionHas(wanted, objName(fn)), objName, session)
     .filter((d) => !d.message.endsWith("RAISE EXCEPTION, must be object reference, got GenericObjectReferenceType"));
   prepareArtifactDigests(reg, !!session, closureContext);
-  if (diagnostics.length && !tolerant) throw new Error(diagnostics.map((d) => d.message).join("\n"));
+  if (diagnostics.length && (!tolerant || diagnostics.some(d => strictRoots?.has(d.object.toUpperCase())))) throw new Error(diagnostics.map((d) => d.message).join("\n"));
   const broken = new Set(diagnostics.map((d) => d.object.toLowerCase()));
   if (broken.size > 0) wanted = wanted.filter((w) => !broken.has(w));
 

@@ -148,6 +148,11 @@ export interface DiskFrontend {
 }
 export interface CompileOptions {
   closureContext?: {round: number};
+  strictRoots?: Set<string>;
+  selectionCache?: {
+    read(options: CompileOptions): {selection: string[]; evidence: string; rounds: unknown[]} | undefined;
+    write(options: CompileOptions, selection: string[], rounds: unknown[]): void;
+  };
   folders: string[];
   objects: string[];
   tolerant?: boolean;

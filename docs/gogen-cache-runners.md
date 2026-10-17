@@ -672,3 +672,60 @@ scope.
   still slower than the cache-off edited run. Most of the remaining cost repeats
   in each of the runner's six closure rounds, which is what step 4b.3
   (collapsing the rounds by certified previous selection) targets.
+
+## Certified runner selections (step 4b.3)
+
+The report runner's existing `OSD_GOGEN_CACHE` opt-in now also permits selection
+seeding. Default-off invocations retain discovery from the original roots.
+`compileClosedProgram` receives a host adapter; it imports no new builtins and
+performs no module-initialization I/O. The adapter lives outside the compiler
+import closure, alongside the existing runner recording certificate.
+
+The atomically published, checksummed `runner-selection.json` binds the original
+ordered roots, ordered layer-relative input names and raw content hashes, tool
+identity, runner syntax/skip policy, tolerant mode and test inclusion. Its round
+ledger records the input and expanded selections, lowering-time missing names,
+owner/superclass edges and additions. The reader checks the derivation from the
+original roots to the final selection, including a terminating closed round.
+Missing, malformed or inconsistent metadata starts discovery from roots.
+Supplied registries and sessions are conservatively ineligible.
+
+Unchanged inputs certify the previous selection directly. Across edits, this
+first implementation uses a deliberately narrow AST proof: only the plain,
+noninterpolated template in a method-local
+`DATA(name) = CONV string( |literal| ).` initializer may change. The parser must
+recognize the complete statement and method context; macros, INCLUDEs, unknown
+statements, interpolation, escape sequences and multiline literals do not
+qualify. Raw text outside qualifying template values remains bound byte for
+byte. The initializer's string type, declaration, references and all other
+statements therefore remain unchanged. Discovery does not propagate this local
+runtime value into class selection, supplied signatures or CATCH membership.
+This covers the proof's existing literal edit without claiming support for
+arbitrary method-body edits. Dependency, superclass, declaration, macro,
+inventory and other unsupported changes restart from roots, allowing obsolete
+classes to disappear. Object-cache certificates and replay still independently
+validate every IR hit.
+
+A certified invocation compiles the saved final selection once, then runs the
+existing missing-class/superclass check and continues rounds if necessary.
+Explicit roots retain strict syntax diagnostics; discovered dependencies remain
+tolerant. Timing reports identify the actual number of executed rounds and
+whether certification used exact input identity, local string initializers, or
+discovery from roots. The proof still saves each completed case immediately.
+
+The fresh-process selection oracle disables both object caching and selection
+seeding on its reference side. It covers additions/removals, superclass changes,
+macro-hidden references, supplied redefinitions, CATCH descendants, broken
+discovered dependencies and repeated edits/reverts in both line modes. A
+negative control deliberately compiles a stale closed superset and requires
+its bytes to differ from discovery from roots.
+
+Pre-proof validation passed 264 focused cache, certificate, replay, provenance,
+closure and osabap tests (598.0 s), plus 20 fresh-process selection tests
+(77.5 s), with no failures or skips. The CI oracle inside that matrix exercised
+60 supported mutations in 62 attempts with zero mismatches (125.0 s). Both
+reverse-edge negative controls passed. Node suites used `--preserve-symlinks
+--test-concurrency=1`; the four host-boundary checks, TypeScript, the 153-budget
+size gate and the explicit ten-path leak-scan exit-code gate also passed.
+`frontend.mjs` is net zero lines and one byte smaller than `origin/main`
+`c9dad34f`.
