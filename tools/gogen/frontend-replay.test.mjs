@@ -195,8 +195,7 @@ test("frontend program state is initialized eagerly", () => {
 
 test("oversized fingerprints refuse caching and stop further recording without losing effects", () => {
   const p = program();
-  let fingerprints = 0;
-  const oversized = {toJSON() { fingerprints++; return "x".repeat((1 << 20) + 1); }};
+  const oversized = {value: "x".repeat((1 << 20) + 1)};
   p.sigs.set("BIG", oversized);
   const result = recordLowering(p, (tracked) => {
     for (let i = 0; i < 10000; i++) assert.equal(tracked.sigs.get("BIG"), oversized);
@@ -205,7 +204,6 @@ test("oversized fingerprints refuse caching and stop further recording without l
   });
   assert.equal(result.ir, 42);
   assert.equal(result.replay, undefined);
-  assert.equal(fingerprints, 1);
   assert.equal(p.wanted.has("AFTER"), true);
 });
 
@@ -229,4 +227,53 @@ test("an oversized current input refuses replay atomically", () => {
   const next = program(); next.sigs.set("VALUE", "x".repeat((1 << 20) + 1));
   assert.equal(replayLowering(next, cached.replay), false);
   assert.deepEqual(next.skipped, []);
+});
+
+test("guard values distinguish JSON collisions, recursively and after persistence", () => {
+  const values = [undefined, null, NaN, Infinity, -Infinity, -0, 0, false, true, "0",
+    {}, {a: undefined}, {a: null}, {a: NaN}, {a: -0}, {a: 0}, [], [undefined], [null], Array(1),
+    new Map(), {map: []}, new Map([["x", undefined]]), new Map([["x", null]]),
+    new Set(), {set: []}, new Set([undefined]), new Set([null]),
+    new Date(0), new Date(1), new Date(NaN), "1970-01-01T00:00:00.000Z", 0n, 1n,
+    Object.assign(Object.create(null), {a: 1}), {a: 1}];
+  for (let i = 0; i < values.length; i++) {
+    const recorded = recordLowering({m: new Map([["value", values[i]]])}, (p) => p.m.get("value"));
+    assert.ok(recorded.replay, `supported guard value ${i}`);
+    for (const replay of [recorded.replay, deserialize(serialize(compactLowering(recorded))).replay]) {
+      for (let j = 0; j < values.length; j++) {
+        assert.equal(replayLowering({m: new Map([["value", values[j]]])}, replay), !!replay && i === j,
+          `guard value ${i} against ${j}`);
+      }
+    }
+  }
+});
+
+test("fingerprints use stable object keys and preserve collection order and aliasing", () => {
+  const first = {a: undefined, b: {n: -0}};
+  const recorded = recordLowering({value: first}, (p) => p.value);
+  assert.ok(recorded.replay);
+  assert.equal(replayLowering({value: {b: {n: -0}, a: undefined}}, recorded.replay), true);
+  const shared = {};
+  for (const [value, changed] of [[{a: shared, b: shared}, {a: {}, b: {}}],
+    [new Map([["a", 1], ["b", 2]]), new Map([["b", 2], ["a", 1]])],
+    [new Set([1, 2]), new Set([2, 1])]]) {
+    const recorded = recordLowering({value}, (p) => p.value instanceof Map ? [...p.value] : p.value instanceof Set ? [...p.value] : p.value);
+    assert.ok(recorded.replay);
+    assert.equal(replayLowering({value: changed}, recorded.replay), false);
+  }
+});
+
+test("unsupported guard values refuse caching without invoking user serialization", () => {
+  let calls = 0;
+  class Custom { constructor() { this.a = 1; } }
+  const values = [Symbol("x"), () => 1, new Custom(), new WeakMap(), new WeakSet(), /x/,
+    {toJSON() { calls++; return null; }}, {[Symbol("x")]: 1}, new Proxy({}, {}),
+    Object.defineProperty({}, "constructor", {get() { calls++; return Object; }}),
+    Object.defineProperty({}, "x", {get() { calls++; return 1; }, enumerable: true})];
+  for (const value of values) {
+    const result = recordLowering({value}, (p) => p.value);
+    assert.equal(result.ir, value);
+    assert.equal(result.replay, undefined);
+  }
+  assert.equal(calls, 0);
 });

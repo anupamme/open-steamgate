@@ -130,6 +130,10 @@ export function installHooks(core, requireCore, r) {
             // A borrowed artifact may have escaped through a raw inventory.
             // Its registry cannot be inferred, so refuse the enclosing lowering.
             const frame = r.stack.findLast((f) => f.lowering);
+            // Outside lowering there is no consumer or registry to attach a
+            // diagnostic to (e.g. supplied-index scheduling). withArtifact
+            // links the object before lowering consumes it; any unowned read
+            // within that frame is refused below, even for pure getters.
             if (frame && !r.auditDepth) r.query(frame.state, {kind: "unknown-scan",
               args: ["unowned-artifact-read", method], result: [], phase: frame.phase}, frame.key);
             return fn.apply(this, args);

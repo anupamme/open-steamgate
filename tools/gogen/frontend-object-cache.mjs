@@ -35,10 +35,14 @@ const toolSource = (name) => toolPath(name) && [".mjs", ".ts", ".cjs", ".json"].
 function toolSources() {
   let names;
   try {
-    names = execFileSync("git", ["ls-files", "-z", "--cached", "--", "tools"],
-      {cwd: home, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 1 << 24}).split("\0").filter(Boolean);
+    const options = {cwd: home, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 1 << 24};
+    if (execFileSync("git", ["rev-parse", "--show-prefix"], options).trim()) throw new Error("nested home");
+    names = execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "tools"],
+      options).split("\0").filter(Boolean);
+    if (!names.length) throw new Error("no tool files in Git");
   } catch {
-    // Source distributions without Git retain the same production-file filter.
+    // Source distributions, including homes inside another checkout, walk
+    // all tool files with the same production-file filter.
     names = walk(join(home, "tools"), true).map((file) => file.slice(home.length + 1));
   }
   return names.filter(toolSource).sort().map((name) => join(home, name)).filter(existsSync);
@@ -48,7 +52,7 @@ let sharedIdentity;
 export function toolIdentity(sourceIndependent = false) {
   if (identities.has(sourceIndependent)) return identities.get(sourceIndependent);
   if (!sharedIdentity) {
-    const hash = createHash("sha256").update("gogen-object-cache-tool-3");
+    const hash = createHash("sha256").update("gogen-object-cache-tool-4");
     const fileHash = (name, file) => hash.update(JSON.stringify([name, digest(readFileSync(file))]));
     // Actual tool sources, locks and installed builds define the compiler.
     // Repository commits (including docs-only ones) do not change its identity.

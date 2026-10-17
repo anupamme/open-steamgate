@@ -2,10 +2,11 @@
 // racing index update is a miss; entries and indexes always publish atomically.
 import {readFileSync, writeFileSync, renameSync, rmSync} from "node:fs";
 import {randomUUID} from "node:crypto";
+import {replayLowering} from "./frontend-replay.mjs";
 const LIMIT = 4;
 const reads = (value) => value.replay?.ops.filter((op) => op.kind === "read" && op.key === "caught" && op.method === "get") ?? [];
 export function projectionMatches(value, program) {
-  try { return reads(value).every((op) => JSON.stringify(program.caught?.get(...op.args)) === op.value); }
+  try { return replayLowering(program, {ops: reads(value), written: []}); }
   catch { return false; }
 }
 export function readVariants(file) {

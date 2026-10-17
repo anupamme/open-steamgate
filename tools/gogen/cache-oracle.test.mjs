@@ -137,9 +137,13 @@ test("docs-only Git commits preserve tool identity; tool content changes it", ()
       git("add", "-f", relative);
       assert.equal(identity(), before, `${relative} must not enter compiler identity`);
     }
-    const scratch = join(dir, "tools/gogen/identity-scratch.mjs");
-    writeFileSync(scratch, "// untracked scratch\n");
-    assert.equal(identity(), before, "untracked scratch must not enter compiler identity");
+    const scratch = join(dir, "tools/gogen/frontend-identity-helper.mjs");
+    writeFileSync(scratch, "export const identityFixture = 1;\n");
+    const importer = join(dir, "tools/gogen/frontend-object-cache.mjs");
+    writeFileSync(importer, readFileSync(importer, "utf8") + '\nimport "./frontend-identity-helper.mjs";\n');
+    const withImport = identity();
+    writeFileSync(scratch, "export const identityFixture = 2;\n");
+    assert.notEqual(identity(), withImport, "an untracked imported module must enter compiler identity");
     const tool = join(dir, "tools/gogen/frontend-source-key.mjs");
     writeFileSync(tool, readFileSync(tool, "utf8") + "\n// tool identity test edit\n");
     assert.notEqual(identity(), before, "working-tree tool contents must enter compiler identity");
@@ -147,9 +151,10 @@ test("docs-only Git commits preserve tool identity; tool content changes it", ()
     for (const extension of ["mjs", "ts", "cjs", "json"]) {
       const previous = identity();
       writeFileSync(join(nested, `module.${extension}`), extension === "json" ? "{}\n" : "// future module\n");
-      assert.equal(identity(), previous, "a new module enters identity only after git add");
+      const untracked = identity();
+      assert.notEqual(untracked, previous, `untracked nested tools/**/*.${extension} must enter compiler identity`);
       git("add", `tools/future-frontend-dependency/module.${extension}`);
-      assert.notEqual(identity(), previous, `tracked nested tools/**/*.${extension} must enter compiler identity`);
+      assert.equal(identity(), untracked, "staging a module must preserve its content identity");
     }
     const noGit = join(dir, "no-git"); mkdirSync(noGit);
     symlinkSync("/bin/false", join(noGit, "git"));
@@ -158,5 +163,33 @@ test("docs-only Git commits preserve tool identity; tool content changes it", ()
     assert.equal(identity(fallbackEnv), fallback, "the directory fallback excludes tests too");
     writeFileSync(scratch, "// fallback production edit\n");
     assert.notEqual(identity(fallbackEnv), fallback, "without Git the fallback hashes production files on disk");
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+for (const nested of [false, true]) test(`tool identity walks extracted homes in an outer repo (nested=${nested})`, () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-extracted-identity-"));
+  const extracted = nested ? join(dir, "extracted-home") : dir;
+  const git = (...args) => execFileSync("git", args, {cwd: dir, encoding: "utf8", stdio: "pipe"});
+  try {
+    mkdirSync(extracted, {recursive: true});
+    cpSync(join(home, "tools"), join(extracted, "tools"), {recursive: true});
+    symlinkSync(join(home, "node_modules"), join(extracted, "node_modules"));
+    git("init", "--quiet");
+    writeFileSync(join(dir, "outer.txt"), "outer repository\n");
+    git("add", "outer.txt");
+    // The outer repository tracks no tools. A prefix or an empty Git list
+    // must select the full walk, including ignored distribution tool sources.
+    writeFileSync(join(dir, ".gitignore"), nested ? "extracted-home/\n" : "tools/\n");
+    const identity = () => execFileSync(process.execPath, ["--input-type=module", "-e", `
+      import {toolIdentity} from ${JSON.stringify(pathToFileURL(join(extracted, "tools/gogen/frontend-object-cache.mjs")).href)};
+      console.log(toolIdentity());
+    `], {cwd: extracted, encoding: "utf8"}).trim();
+    assert.equal(git("ls-files", "--", nested ? "extracted-home/tools" : "tools").trim(), "");
+    const before = identity(), tool = join(extracted, "tools/gogen/frontend-source-key.mjs");
+    writeFileSync(tool, readFileSync(tool, "utf8") + "\n// extracted tool edit\n");
+    assert.notEqual(identity(), before, "extracted production tool edits must invalidate identity");
+    const after = identity(), fixture = join(extracted, "tools/gogen/frontend-replay.test.mjs");
+    writeFileSync(fixture, "// excluded distribution test\n");
+    assert.equal(identity(), after, "the fallback must still exclude tests");
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });

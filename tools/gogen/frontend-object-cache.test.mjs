@@ -233,7 +233,7 @@ ENDCLASS.`;
       for (const e of catcher) {
         const value = e.valueBytes ? deserialize(e.valueBytes) : e.value;
         assert.ok(value.replay.ops.some((op) => op.kind === "read" && op.key === "caught"
-          && JSON.parse(op.value) === true), `${name} guards selected exception presence`);
+          && op.value === JSON.stringify(["boolean", true])), `${name} guards selected exception presence`);
         assert.ok(!value.replay.ops.some((op) => op.key === "wanted" && (op.kind === "measure" || !op.method)));
       }
     }

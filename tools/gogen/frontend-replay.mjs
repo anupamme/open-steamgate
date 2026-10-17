@@ -1,4 +1,5 @@
 import {definitionFingerprint} from "./frontend-artifact-digests.mjs";
+import {types} from "node:util";
 import {isCaughtIndex} from "./frontend-hierarchy.mjs";
 // Record the program inputs a lowering actually reads and its ordered effects.
 // Registry/file identity is guarded by the enclosing immutable session.
@@ -6,35 +7,77 @@ const context = new Set(["currentClass", "currentOwner", "currentTypes"]);
 const ignored = new Set(["reg", "frontendCounts"]);
 // Definitions borrow their owning artifact's resolved semantics as well as location.
 const definitions = new Set(["ClassDefinition", "InterfaceDefinition"]);
-const definition = (v) => v && typeof v === "object" && definitions.has(v.constructor?.name)
-  && typeof v.getName === "function" && typeof v.getFilename === "function" && typeof v.getStart === "function";
+const definition = (v) => {
+  const proto = Object.getPrototypeOf(v);
+  if (!proto || types.isProxy(proto)) return false;
+  const ctor = Object.getOwnPropertyDescriptor(proto, "constructor")?.value;
+  return definitions.has(ctor?.name) && typeof v.getName === "function"
+    && typeof v.getFilename === "function" && typeof v.getStart === "function";
+};
 // Cache recording must stay bounded even for a generated class with thousands
 // of repeated reads. Exceeding a budget refuses reuse; it never truncates guards.
 const MAX_VALUES = 65536, MAX_FINGERPRINT_CHARS = 1 << 20;
 const MAX_OPS = 65536, MAX_TRANSCRIPT_CHARS = 1 << 24;
+// Guard values use a typed graph encoding: JSON is only the final framing.
+// Plain dictionaries have canonical key order; arrays retain holes/own fields,
+// and Map/Set retain iteration order. References preserve sharing and cycles.
+// Unknown prototypes, proxies, symbols, functions and accessors refuse replay;
+// never invoke toJSON or silently erase a value that lowering could observe.
 function fingerprint(value, registry) {
-  const kind = typeof value;
-  if (value === undefined) return undefined;
-  if (value === null || kind === "boolean") return value === null ? "null" : value ? "true" : "false";
-  if (kind === "number" || kind === "string") {
-    if (kind === "string" && value.length > MAX_FINGERPRINT_CHARS) throw new RangeError("replay fingerprint budget");
-    const encoded = JSON.stringify(value);
-    if (encoded.length > MAX_FINGERPRINT_CHARS) throw new RangeError("replay fingerprint budget");
-    return encoded;
-  }
   let values = 0, characters = 0;
+  const seen = new Map();
   const fault = process.env.GOGEN_CACHE_ORACLE_FAULT;
   const locationOnly = fault === "fingerprint-location-only" || fault === "no-version,fingerprint-location-only";
-  const encoded = JSON.stringify(value, (_, v) => {
-    if (++values > MAX_VALUES || (typeof v === "string" && (characters += v.length) > MAX_FINGERPRINT_CHARS)
-        || ((v instanceof Map || v instanceof Set) && v.size > MAX_VALUES / 2)
-        || (Array.isArray(v) && v.length > MAX_VALUES)) throw new RangeError("replay fingerprint budget");
-    return v instanceof Map ? {map: [...v]} : v instanceof Set ? {set: [...v]}
-      : definition(v) ? locationOnly
+  const text = (s) => {
+    if ((characters += s.length) > MAX_FINGERPRINT_CHARS) throw new RangeError("replay fingerprint budget");
+    return s;
+  };
+  const encode = (v) => {
+    if (++values > MAX_VALUES) throw new RangeError("replay fingerprint budget");
+    const kind = typeof v;
+    if (v === null) return ["null"];
+    if (kind === "undefined") return ["undefined"];
+    if (kind === "boolean") return ["boolean", v];
+    if (kind === "string") return ["string", text(v)];
+    if (kind === "number") return ["number", Object.is(v, -0) ? "-0" : String(v)];
+    if (kind === "bigint") return ["bigint", text(String(v))];
+    if (kind !== "object" || types.isProxy(v)) throw new TypeError("unsupported replay value");
+    if (seen.has(v)) return ["reference", seen.get(v)];
+    const id = seen.size;
+    seen.set(v, id);
+    if (definition(v)) {
+      const summary = locationOnly
         ? {definition: [v.constructor.name, v.getName(), v.getFilename(), v.getStart().getRow(), v.getStart().getCol()]}
-        : definitionFingerprint(registry, v) : v;
-  });
-  if (encoded?.length > MAX_FINGERPRINT_CHARS) throw new RangeError("replay fingerprint budget");
+        : definitionFingerprint(registry, v);
+      // This fixed compiler-owned envelope also exposes the owner to the v3
+      // dependency collector. Its strings are bounded like ordinary values.
+      text(JSON.stringify(summary));
+      return ["definition", id, summary];
+    }
+    const proto = Object.getPrototypeOf(v), keys = Reflect.ownKeys(v);
+    if (keys.length > MAX_VALUES) throw new RangeError("replay fingerprint budget");
+    if (keys.some((k) => typeof k !== "string")) throw new TypeError("symbol replay key");
+    const extensible = Object.isExtensible(v);
+    if ([Map.prototype, Set.prototype, Date.prototype].includes(proto)) {
+      if (keys.length) throw new TypeError("custom replay collection fields");
+      if (proto === Date.prototype) return ["date", id, extensible, encode(Date.prototype.getTime.call(v))];
+      if (v.size > MAX_VALUES / 2) throw new RangeError("replay fingerprint budget");
+      return proto === Map.prototype
+        ? ["map", id, extensible, [...v].map(([k, value]) => [encode(k), encode(value)])]
+        : ["set", id, extensible, [...v].map(encode)];
+    }
+    const array = proto === Array.prototype && Array.isArray(v);
+    if (!array && proto !== Object.prototype && proto !== null) throw new TypeError("unsupported replay prototype");
+    if (array && v.length > MAX_VALUES) throw new RangeError("replay fingerprint budget");
+    const fields = keys.sort().map((key) => {
+      const d = Object.getOwnPropertyDescriptor(v, key);
+      if (!Object.hasOwn(d, "value")) throw new TypeError("replay accessor");
+      return [text(key), d.enumerable, d.configurable, d.writable, encode(d.value)];
+    });
+    return [array ? "array" : proto === null ? "dictionary" : "object", id, extensible, fields];
+  };
+  const encoded = JSON.stringify(encode(value));
+  if (encoded.length > MAX_FINGERPRINT_CHARS) throw new RangeError("replay fingerprint budget");
   return encoded;
 }
 const clone = (v) => isCaughtIndex(v) ? v : v instanceof Map ? new Map(v) : v instanceof Set ? new Set(v) : Array.isArray(v) ? [...v] : v;
