@@ -1,4 +1,4 @@
-/** @param {(name: string) => string} goName */
+/** @param {string} owner @param {string} name @param {import("./ir.ts").Type} type @param {(name: string) => string} goName @returns {import("./frontend-types.ts").StaticSlotExpr} */
 export const staticSlot = (owner, name, type, goName) => ({e: "static", owner, name, type, go: goName(`${owner}=>${name}`)});
 
 // Static attributes share storage in their declaring class, including inherited names.
@@ -9,7 +9,7 @@ export function resolveStatic(owner, attr, ctx, deps, write = false) {
   /** @type {import("@abaplint/core").IRegistry} */ const reg = ctx.reg;
   const intf = reg.getObject("INTF", owner)?.getDefinition();
   const clas = clasDef(ctx.reg, owner);
-  /** @type {Map<string, {def: import("@abaplint/core").IInterfaceDefinition; source: string}>} */ const localInterfaces = ctx.program.localInterfaces;
+  /** @type {Map<string, {def: import("@abaplint/core").IInterfaceDefinition; source: string}>} */ const localInterfaces = /** @type {Map<string, {def: import("@abaplint/core").IInterfaceDefinition; source: string}>} */ (ctx.program.localInterfaces);
   const local = localInterfaces.get(`${ctx.program.currentOwner}|${owner}`);
   const def = intf ?? clas ?? local?.def;
   if (def === undefined) throw new Unsupported(`${owner}=>${attr}: ${owner} is not in the program`);

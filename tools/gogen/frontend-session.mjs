@@ -76,8 +76,8 @@ export const compileClass = artifactLowering(/** @param {import('./frontend-sess
     program.currentTypes = cached.current.currentTypes;
     for (const [k, sig] of cached.sigs ?? []) program.sigs.set(k, sig);
     if (!cached.replay) {
-      append(program.skipped, cached.skipped);
-      append(program.partial, cached.partial);
+      append(program.skipped, /** @type {string[]} */ (cached.skipped));
+      append(program.partial, /** @type {string[]} */ (cached.partial));
     }
     counts.reused++;
     counts.reusedClasses.push(key);
@@ -95,7 +95,7 @@ export const compileClass = artifactLowering(/** @param {import('./frontend-sess
   const start = {skipped: program.skipped.length, partial: program.partial.length};
   /** @type {import('./frontend-session-types.ts').RecordedLowering | undefined} */ const recorded = session && !candidate && !/\bFOR\s+ALL\s+ENTRIES\b/i.test(file.getRaw()) ? recordLowering(program, (tracked) => lower({...ctx, program: tracked}, obj)) : undefined;
   /** @type {import('./frontend-session-types.ts').ClassIR} */ const ir = recorded ? recorded.ir : lower(ctx, obj);
-  /** @type {import('./frontend-session-types.ts').SignatureChanges | undefined} */ const sigs = candidate ? ownSignatures(before.get("sigs"), program.sigs, key) : undefined;
+  /** @type {import('./frontend-session-types.ts').SignatureChanges | undefined} */ const sigs = candidate ? ownSignatures(/** @type {import('./frontend-session-types.ts').ProgramSnapshot} */ (before).get("sigs"), program.sigs, key) : undefined;
   if (candidate && sigs && unchanged(before, program) && elementary(ir, key)) {
     session.classes.set(key, {file, structure: file.getStructure(), ir, sigs, supplied: suppliedKey(program, key),
       current: Object.fromEntries([...current].map((k) => [k, program[k]])),

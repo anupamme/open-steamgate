@@ -39,7 +39,7 @@ export function orderedRegistry(folders, order = [], {parse = true} = {}) {
   const selected = order.map((name) => files.find((f) => f.name === name));
   slots.forEach((slot, i) => { files[slot] = selected[i]; });
   for (const {name, path} of files) registry.addFile(new abaplint.MemoryFile(name,
-    normalizeSource(readFileSync(path, "utf8"), name, abaplint)));
+    normalizeSource(readFileSync(path, "utf8"), name, {Registry: abaplint.Registry, MemoryFile: abaplint.MemoryFile})));
   if (parse) parseObserved(registry);
   return registry;
 }

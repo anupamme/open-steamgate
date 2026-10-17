@@ -1,5 +1,8 @@
-import type {Expr, Stmt, ConcatBytesParts, ConcatBytesTable} from './ir.ts';
-import type {OwnershipContext, OwnedExpressionRenderers, OwnedRenderers, ByteRenderers} from './emit-ownership.ts';
+import type {Expr, Stmt, Type} from './emit-go-types.ts';
+interface FixedBytePlace { readonly type: Extract<Type, {k: 'x'}> }
+type ConcatBytesParts = Extract<Stmt, {s: 'concat_bytes'; parts: readonly Expr[]}>;
+type ConcatBytesTable = Extract<Stmt, {s: 'concat_bytes'; table: Expr}>;
+import type {OwnedPlace, OwnershipContext, OwnedExpressionRenderers, OwnedRenderers, ByteRenderers} from './emit-ownership.ts';
 import {someExpression} from './ir-children.ts';
 import {packedChecksum} from "./emit-packedint.ts";
 // Owned xstring emission leaves types, signatures and generic descriptors alone.
@@ -8,7 +11,7 @@ export function ownedExpression(e: Expr, ctx: OwnershipContext, h: OwnedExpressi
   const checksum = packedChecksum(e, ctx, h);
   if (checksum !== null) return checksum;
   if (ownership.has(e, ctx)) return ownership.fixed(e, ctx) ? `string(${place(e, ctx)}[:])` : `${place(e, ctx)}.Snapshot()`;
-  if (e.e === "conv" && e.kind === "x2i" && ownership.has(e.x, ctx) && e.x.type.k === "x") return ownership.fixed(e.x, ctx) === 1 ? `int32(${place(e.x, ctx)}[0])` : `${h.helper("xsmall.Int")}(${place(e.x, ctx)}[:])`;
+  if (e.e === "conv" && e.kind === "x2i" && ownership.has(e.x, ctx) && (e.x as OwnedPlace).type.k === "x") return ownership.fixed(e.x, ctx) === 1 ? `int32(${place(e.x, ctx)}[0])` : `${h.helper("xsmall.Int")}(${place(e.x, ctx)}[:])`;
   if (e.e === "xstrlen" && ownership.has(e.x, ctx)) return ownership.fixed(e.x, ctx) ? `int32(${ownership.fixed(e.x, ctx)})` : `${place(e.x, ctx)}.Len()`;
   if (e.e === "substr" && ownership.has(e.x, ctx) && !ownership.fixed(e.x, ctx)) return `${place(e.x, ctx)}.Sub(${e.off ? expr(e.off, ctx) : "0"}, ${e.len ? expr(e.len, ctx) : "-1"})`;
   return null;
@@ -19,18 +22,18 @@ const purePart = (n: Expr): boolean => !someExpression(n, (child) =>
 
 export function ownedStatement(st: Stmt, ctx: OwnershipContext, t: string, h: OwnedRenderers): string[] | null {
   const {ownership, expr, place} = h;
-  if (st.s === "assign" && ownership.has(st.target, ctx) && st.target.type.k === "x") {
+  if (st.s === "assign" && ownership.has(st.target, ctx) && (st.target as OwnedPlace).type.k === "x") {
     const dst = `${place(st.target, ctx)}[:]`, v = st.value;
-    if (v.e === "conv" && v.kind === "i2x") return st.target.type.len === 1 ? [`${t}${place(st.target, ctx)}[0] = ${h.helper("xsmall.Byte")}(${expr(v.x, ctx)})`] : [`${t}${h.helper("xsmall.FromInt")}(${dst}, ${expr(v.x, ctx)})`];
+    if (v.e === "conv" && v.kind === "i2x") return (st.target as FixedBytePlace).type.len === 1 ? [`${t}${place(st.target, ctx)}[0] = ${h.helper("xsmall.Byte")}(${expr(v.x, ctx)})`] : [`${t}${h.helper("xsmall.FromInt")}(${dst}, ${expr(v.x, ctx)})`];
     const read = v.e === "conv" && v.kind === "xs2x" ? v.x : v;
-    if (read.e === "substr" && read.len?.e === "int" && read.len.value > 0 && ownership.has(read.x, ctx) && read.x.type.k === "xstring") return st.target.type.len === 1 && read.len.value === 1 ? [`${t}${place(st.target, ctx)}[0] = ${place(read.x, ctx)}.Byte(${read.off ? expr(read.off, ctx) : "0"})`] : [`${t}${place(read.x, ctx)}.ReadInto(${dst}, ${read.off ? expr(read.off, ctx) : "0"}, ${expr(read.len, ctx)})`];
-    if (ownership.has(v, ctx) && v.type.k === "x") return [`${t}copy(${dst}, ${place(v, ctx)}[:]); clear(${dst}[${Math.min(v.type.len, st.target.type.len)}:])`];
+    if (read.e === "substr" && read.len?.e === "int" && read.len.value > 0 && ownership.has(read.x, ctx) && (read.x as OwnedPlace).type.k === "xstring") return (st.target as FixedBytePlace).type.len === 1 && read.len.value === 1 ? [`${t}${place(st.target, ctx)}[0] = ${place(read.x, ctx)}.Byte(${read.off ? expr(read.off, ctx) : "0"})`] : [`${t}${place(read.x, ctx)}.ReadInto(${dst}, ${read.off ? expr(read.off, ctx) : "0"}, ${expr(read.len, ctx)})`];
+    if (ownership.has(v, ctx) && (v as OwnedPlace).type.k === "x") return [`${t}copy(${dst}, ${place(v, ctx)}[:]); clear(${dst}[${Math.min((v as FixedBytePlace).type.len, (st.target as FixedBytePlace).type.len)}:])`];
     return [`${t}${h.helper("xsmall.Set")}(${dst}, ${expr(v, ctx)})`];
   }
-  if (st.s === "clear" && ownership.has(st.target, ctx) && st.target.type.k === "x") return [`${t}clear(${place(st.target, ctx)}[:])`];
+  if (st.s === "clear" && ownership.has(st.target, ctx) && (st.target as OwnedPlace).type.k === "x") return [`${t}clear(${place(st.target, ctx)}[:])`];
   const slot = "target" in st ? st.target : undefined;
   if (!ownership.has(slot, ctx)) return null;
-  const target = place(slot, ctx);
+  const target = place(slot as OwnedPlace, ctx);
   if (st.s === "assign") return [`${t}${target}.Set(${expr(st.value, ctx)})`];
   if (st.s === "clear") return [`${t}${target}.Clear()`];
   if (st.s === "replace_bytes" && ownership.width(st.with, ctx) === 1 && st.len?.e === "int" && st.len.value === 1) return [`${t}s.Sy.Subrc = ${target}.StoreByte(${ownership.fixed(st.with, ctx) ? `${place(st.with, ctx)}[0]` : `${h.helper("xsmall.First")}(${expr(st.with, ctx)})`}, ${st.off ? expr(st.off, ctx) : "0"})`];

@@ -104,7 +104,7 @@ import {textLiteral} from "./frontend-literals.ts";
     if (item.ctor) { const v = constructor(item.ctor, ctx, item.hint); return t === undefined ? v : convert(v, t); }
     if (item.bool) {
       // xsdbool: a c(1) 'X' or blank; boolc: a string 'X' or ' '
-      const v = {e: "bool", cond: cond(item.cond, ctx), blank: item.bool === "BOOLC" ? " " : "", type: item.bool === "BOOLC" ? S : C(1)};
+      /** @type {import("./frontend-types.ts").ValueExpr} */ const v = {e: "bool", cond: cond(item.cond, ctx), blank: item.bool === "BOOLC" ? " " : "", type: item.bool === "BOOLC" ? S : C(1)};
       return t === undefined ? v : convert(v, t);
     }
     if (item.descr) { const v = descrAttr(item.descr.call, item.descr.attr, ctx); return t === undefined ? v : convert(v, t); }
@@ -213,8 +213,8 @@ import {textLiteral} from "./frontend-literals.ts";
 
 // Host exceptions use the ordinary call IR, including defaults, references,
 // output temporaries and IS SUPPLIED flags. No constructor shortcut is used.
-/** @param {import("./ir.ts").Program | import("./frontend-types.ts").FrontendProgram} program @param {{name: string}} cls @param {import("./frontend-types.ts").FactoryMethod} method @returns {Extract<import("./frontend-types.ts").ValueExpr, {e: "call"}>} */ function omittedFactoryCall(program, cls, method) {
-  const ctx = {program, reg: program.reg, className: cls.name};
+/** @param {import("./ir.ts").Program | import("./frontend-types.ts").FrontendProgram | import("./emit-go-types.ts").ProgramInput} program @param {{name: string}} cls @param {import("./emit-go-types.ts").FactorySignature} method @returns {Extract<import("./frontend-types.ts").ValueExpr, {e: "call"}>} */ function omittedFactoryCall(program, cls, method) {
+  /** @type {import("./frontend-types.ts").NamedContext} */ const ctx = /** @type {import("./frontend-types.ts").NamedContext} */ ({program, reg: program.reg, className: cls.name});
   const args = method.params.map((p) => p.suppliedOf
     ? {dir: "importing", byValue: true, type: p.type, value: {e: "chars", value: "", type: p.type}}
     : p.dir === "importing" ? omittedArgument(p, ctx) : {dir: p.dir, place: null, type: p.type});

@@ -89,7 +89,7 @@ export function hoistLocalConstants(body, ctx, h) {
       if (value) add(name, init.target.type, {init: value});
       return;
     }
-    if (node instanceof Nodes.StructureNode) for (const child of node.getChildren()) walk(child);
+    if (/** @type {import("@abaplint/core").Nodes.StructureNode | import("@abaplint/core").Nodes.StatementNode} */ (node) instanceof Nodes.StructureNode) for (const child of /** @type {import("@abaplint/core").Nodes.StructureNode} */ (node).getChildren()) walk(child);
   };
   walk(body);
 }
