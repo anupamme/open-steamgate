@@ -168,7 +168,7 @@ export function replayGuardKey(op) {
       if (ignored.has(key) || context.has(key)) return value;
       // Event registration examines previously emitted classes. Retry it.
       if (key === "classes") { refuse("classes-read"); return value; }
-      if (value instanceof Map || value instanceof Set || Array.isArray(value)) {
+      if (value instanceof Map || value instanceof Set || Array.isArray(value) || isCaughtIndex(value)) {
         if (!wrappers.has(value)) wrappers.set(value, new Proxy(value, {
           get(collection, method) {
             if (method === "size" || method === "length") {

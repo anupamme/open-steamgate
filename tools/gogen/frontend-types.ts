@@ -67,7 +67,7 @@ export interface FrontendProgram extends Omit<Mutable<Program>, "classes" | "str
   dynamicDispatch?: {key: string; owner: string; method: string; defaults: {name: string; value: Expr}[]}[];
   excAttrs: Set<string>; dynStatics: Set<string>; intfOwnAttrs: Map<string, readonly InterfaceAttribute[]>; interfaceAttrs: Map<string, readonly InterfaceAttribute[]>;
   consts: Map<string, FrontendConstant>; skipped: string[]; partial: string[];
-  missing: Set<string>; wanted: Set<string>; caught?: Map<string, boolean>; interfaces: Set<string>; events: Map<string, Event>;
+  missing: Set<string>; wanted: Set<string>; caught?: import("./frontend-hierarchy.mjs").CaughtIndex; interfaces: Set<string>; events: Map<string, Event>;
   diagnostics: readonly Diagnostic[]; broken: string[];
   frontendCounts: {lowered: number; reused: number; loweredClasses: string[]; reusedClasses: string[]};
   localDefs?: Map<string, abaplint.IClassDefinition>; faeN?: number;
