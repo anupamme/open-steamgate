@@ -2,6 +2,7 @@
 import {createHash, randomUUID} from "node:crypto";
 import {mkdirSync, readFileSync, renameSync, rmSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
+import {selectionScope} from "./runner-selection-scope.mjs";
 import {discoveryEvidence} from "./runner-selection-evidence.mjs";
 const digest = value => createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex");
 function closedSelection(saved) {
@@ -27,6 +28,7 @@ export function runnerSelectionCache(cacheDir, identity, files, policy) {
     const saved = JSON.parse(readFileSync(file, "utf8"));
     if (saved.checksum === digest(saved.contents)) previous = saved.contents;
   } catch { /* Discovery from original roots. */ }
+  const scope = selectionScope(previous?.key?.identity === identity ? previous.scope : undefined);
   const current = () => files.map(({layer, name, hash, path}) => ({layer, name, hash,
     evidence: discoveryEvidence(name, readFileSync(path, "utf8"))}));
   let inputs;
@@ -35,7 +37,7 @@ export function runnerSelectionCache(cacheDir, identity, files, policy) {
   return {
     read(options) {
       try {
-        if (options.registry || options.session || digest(previous?.key) !== digest(key(options))) return;
+        if (!scope.available || options.registry || options.session || digest(previous?.key) !== digest(key(options))) return;
         if (!Array.isArray(previous?.inputs) || previous.inputs.length !== files.length
             || !previous.inputs.every(row => row && typeof row.hash === "string" && typeof row.evidence === "string")) return;
         const closed = closedSelection(previous);
@@ -52,11 +54,14 @@ export function runnerSelectionCache(cacheDir, identity, files, policy) {
         return {selection: previous.selection, closed, evidence: exact ? "exact-inputs" : "local-string-initializers", rounds: previous.rounds};
       } catch { return; } // Incomplete evidence always restarts discovery.
     },
+    check(reg, seeded) { return scope.check(reg, seeded); },
     write(options, selection, rounds) {
       if (options.registry || options.session) return;
       const temp = `${file}.${randomUUID()}.pending`;
       try {
-        const contents = {key: key(options), inputs: inputs ?? current(), selection, rounds};
+        const loaded = scope.snapshot();
+        if (!loaded) return;
+        const contents = {key: key(options), inputs: inputs ?? current(), selection, rounds, scope: loaded};
         mkdirSync(cacheDir, {recursive: true});
         writeFileSync(temp, JSON.stringify({contents, checksum: digest(contents)})); renameSync(temp, file);
       } catch { /* Unavailable metadata is a miss. */ }

@@ -8,15 +8,28 @@ import {withRole} from "./frontend-provenance.mjs";
 /** @param {import("./frontend-session-types.ts").CompileOptions} options @returns {import("./frontend-types.ts").FrontendProgram} */
 export function compileClosedProgram(options) {
   const original = options;
-  const seed = options.selectionCache?.read(options);
+  let cache = options.selectionCache;
+  let seed = cache?.read(options);
   const rounds = seed ? [...seed.rounds] : [];
   const closureContext = {round: 1};
   if (seed) options = {...options, objects: seed.selection, tolerant: true,
     strictRoots: options.tolerant ? undefined : new Set(original.objects.map(n => n.toUpperCase().replaceAll("#", "/")))};
   options = {...options, closureContext};
   let program = compileProgram(options);
-  const selected = new Set(seed?.closed ?? program.wanted);
+  let selected = new Set(seed?.closed ?? program.wanted);
   for (;;) {
+    const certified = withRole("scheduling", () => cache?.check?.(program.reg, !!seed));
+    if (certified === false) {
+      // The preflight raced the loader (including edit/revert races). The
+      // loaded registry is the authority; discard the seed before emitting.
+      cache = undefined; seed = undefined; rounds.length = 0;
+      closureContext.round++;
+      options = {...original, selectionCache: undefined, closureContext};
+      program = compileProgram(options);
+      selected = new Set(program.wanted);
+      continue;
+    }
+    if (seed && typeof certified === "string") seed.evidence = certified;
     const more = withRole("scheduling", () => {
       const superEdges = [...selected].map(n => [n, program.reg.getObject("CLAS", n)?.getDefinition()?.getSuperClass()?.toUpperCase()]).filter(row => row[1]);
       const supers = superEdges.map(row => row[1]);
@@ -26,7 +39,7 @@ export function compileClosedProgram(options) {
       return added;
     });
     if (!more.length) {
-      original.selectionCache?.write(original, options.objects, rounds);
+      cache?.write(original, options.objects, rounds);
       Object.assign(program, {closureRounds: closureContext.round, selectionEvidence: seed?.evidence ?? "discovery-from-roots"});
       return program;
     }

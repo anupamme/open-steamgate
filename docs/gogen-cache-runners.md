@@ -696,6 +696,15 @@ carry a valid AST proof. Missing, malformed or inconsistent metadata starts
 discovery from roots.
 Supplied registries and sessions are conservatively ineligible.
 
+The filesystem scan is a preflight, not selection authority. After compilation,
+the adapter validates the normalized inputs actually loaded in the registry:
+ordered owners, file order/content, dependency roles, configuration and actual
+CDS identity. A scan/load mismatch discards the seed and restarts from the
+original roots before emission, including an edit/revert race that a second
+filesystem scan would miss. Input-scope changes between cold closure rounds
+prevent certificate publication. The actual loaded scope uses the same guarded
+AST proof for eligible edits; unchanged normalized files retain their evidence.
+
 Unchanged inputs certify the previous selection directly. Across edits, this
 first implementation uses a deliberately narrow AST proof: only the plain,
 noninterpolated, equal-width template in a method-local
@@ -731,11 +740,15 @@ negative control deliberately compiles a stale closed superset and requires
 its bytes to differ from discovery from roots.
 
 Pre-proof validation passed 264 focused cache, certificate, replay, provenance,
-closure and osabap tests (600.5 s), plus 26 hardened fresh-process selection tests
-(84.6 s), with no failures or skips. The CI oracle inside that matrix exercised
+closure and osabap tests (600.5 s), plus 30 hardened fresh-process selection tests
+(91.4 s), with no failures or skips. The CI oracle inside that matrix exercised
 60 supported mutations in 62 attempts with zero mismatches (125.0 s). Both
 reverse-edge negative controls passed. Node suites used `--preserve-symlinks
 --test-concurrency=1`; the four host-boundary checks, TypeScript, the 153-budget
-size gate and the explicit eleven-path leak-scan exit-code gate also passed.
+size gate and the explicit twelve-path leak-scan exit-code gate also passed.
 `frontend.mjs` is net one line and 183 bytes smaller than `origin/main`
 `c9dad34f`.
+
+A real osabap emit-only smoke closes in seven cold rounds and one exact-input
+warm round, with all four generated artifacts byte-identical. Loaded-input
+scan/load and edit/revert races restart from roots in both source-line modes.

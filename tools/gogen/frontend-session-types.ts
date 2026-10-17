@@ -151,6 +151,7 @@ export interface CompileOptions {
   strictRoots?: Set<string>;
   selectionCache?: {
     read(options: CompileOptions): {selection: string[]; closed?: string[]; evidence: string; rounds: unknown[]} | undefined;
+    check?(reg: Registry, seeded: boolean): boolean | string;
     write(options: CompileOptions, selection: string[], rounds: unknown[]): void;
   };
   folders: string[];

@@ -13,10 +13,20 @@ const childCode = `
 import {compileClosedProgram} from ${JSON.stringify(new URL("frontend-closure.mjs", import.meta.url).href)};
 import {prepareRunnerCache, finishRunnerCache} from ${JSON.stringify(new URL("runner-cache-recording.mjs", import.meta.url).href)};
 import {artifactsOf} from ${JSON.stringify(new URL("cache-oracle-capture.mjs", import.meta.url).href)};
-const {input, cacheDir, objects, policy, tolerant, forceSelection} = JSON.parse(process.argv[1]);
+import {readFileSync, writeFileSync} from "node:fs";
+import {join} from "node:path";
+const {input, cacheDir, objects, policy, tolerant, forceSelection, mutateAfterPrepare, restoreAtCheck} = JSON.parse(process.argv[1]);
 const folders = [input];
 const runner = prepareRunnerCache(folders, cacheDir ? {cacheDir, dependencyCache: true, provenance: false} : {}, policy);
 try {
+ if (mutateAfterPrepare) {
+   const file = join(input, "zentry.clas.abap"), original = readFileSync(file, "utf8");
+   writeFileSync(file, mutateAfterPrepare);
+   if (restoreAtCheck) {
+     const check = runner.options.selectionCache.check;
+     runner.options.selectionCache.check = (...args) => { writeFileSync(file, original); return check(...args); };
+   }
+ }
  const p = compileClosedProgram({...runner.options, folders, objects, tolerant, ...(forceSelection ? {selectionCache: {read: () => ({selection: forceSelection, closed: forceSelection, evidence: "test-forced", rounds: []}), write() {}}} : {})});
  finishRunnerCache(runner.certificate);
  console.log(JSON.stringify({artifacts: artifactsOf(p).artifacts, wanted: [...p.wanted], rounds: p.closureRounds, evidence: p.selectionEvidence}));
@@ -177,3 +187,14 @@ test("exact source and AST certificate encodings have distinct evidence domains"
   const unrelated = JSON.stringify([valid.replace("|x|", "|<local-string-value:3>|"), [], [], false]);
   assert.notEqual(discoveryEvidence("z.clas.abap", valid), discoveryEvidence("z.clas.abap", unrelated));
 });
+
+for (const noline of [false, true]) for (const restoreAtCheck of [false, true]) test(`loaded-input scope rejects a scan/load race; noline=${noline}, revert=${restoreAtCheck}`, () => fixture(({input, cache}) => {
+  oracle(input, cache, {}, noline);
+  const result = capture(input, cache, {mutateAfterPrepare: source("zentry", ""), restoreAtCheck}, noline);
+  const cold = capture(input, undefined, {}, noline);
+  assert.ok(!result.error, result.error);
+  assert.deepEqual(result.artifacts, cold.artifacts);
+  assert.deepEqual(result.wanted, cold.wanted);
+  assert.equal(result.evidence, "discovery-from-roots");
+  assert.ok(result.rounds > cold.rounds, "discarded seeded work is counted and discovery restarts from original roots");
+}));
