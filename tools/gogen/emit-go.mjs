@@ -1332,7 +1332,7 @@ const LINES = !env("GOGEN_NOLINE");
     if (movePair(st, next, ctx, body[i - 1])) {
       // BumpTable keys on the address of the slice HEADER, not its backing
       // array. Preserve both bumps; clearing the source cannot invalidate a.
-      /** @type {Extract<import("./emit-go-types.ts").Stmt, {s: "assign" | "set_data"}>} */ const assign = st; append(lines, stmt({...assign, moveTable: true}, ctx, d), stmt(next, ctx, d));
+      /** @type {Extract<import("./emit-go-types.ts").Stmt, {s: "assign" | "set_data"}>} */ const assign = /** @type {Extract<import("./emit-go-types.ts").Stmt, {s: "assign" | "set_data"}>} */ (st); append(lines, stmt({...assign, moveTable: true}, ctx, d), stmt(next, ctx, d));
       i++;
     } else append(lines, stmt(st, ctx, d));
   }
