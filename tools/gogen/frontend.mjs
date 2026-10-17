@@ -39,7 +39,7 @@ import {hostPred as rangeHostPred} from "../ir-ranges.mjs";
 import * as WIR from "../ir-writes.mjs";
 import {samcOf, suppliedMethods, suppliedComparison, cdsMappingError, rearrangedClass, inlineTableLocals, nativeMethodBody} from "./frontend-analysis.mjs";
 import {join} from "./host-io.ts";
-import {caughtOnce, chainHas} from "./frontend-hierarchy.mjs";
+import {caughtOnce, chainHas, caughtIndex} from "./frontend-hierarchy.mjs";
 import {typeKindOf, typeOf, rttiNamed, structOf, fieldOf, namedType} from "./frontend-types-signatures.mjs";
 
 import {TRANSPILER_MEANING, P_GENERIC, NATIVE, kernelOf, nativeArgs, AMC_HOST, AMC_CALLER, amcProgramOf, amcMethod, NATIVE_FM, DESTINATION_FM, NATIVE_ME, nativeMeSig, RUNTIME_CX, RUNTIME_CX_SUPER} from "./frontend-classes-native.mjs";
@@ -191,7 +191,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   });
   // lock objects must be known before methods compile: their key order is
   // part of every generated ENQUEUE / DEQUEUE argument
-  program.lockObjects = lockObjectRegistry(reg, program);
+  program.lockObjects = lockObjectRegistry(reg, program); program.caught = caughtIndex(reg, program.wanted, (c) => clasDef(reg, c)?.getSuperClass()?.toUpperCase() ?? RUNTIME_CX_SUPER[c]);
   const lowerClass = (ctx, obj) => {
     const saved = PROGRAM;
     PROGRAM = ctx.program; // Global type helpers must use the tracked program too.

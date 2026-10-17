@@ -13,6 +13,7 @@ export interface SuppliedIndex {
 export interface QueryProgram {
   reg: Registry;
   supplied: Map<string, Set<string>>;
+  caught?: Map<string, readonly string[]>;
   lockObjects?: Map<string, LockDescriptor>;
 }
 export interface QueryContext {reg: Registry; program: QueryProgram}
@@ -20,6 +21,7 @@ export interface CurrentQueryAnswer {
   result: readonly (string | number | boolean | null | undefined)[];
   providers: readonly string[];
   parameters?: string[];
+  complete?: boolean;
   descriptor?: LockDescriptor | 'MISSING';
 }
 export interface Replacement {

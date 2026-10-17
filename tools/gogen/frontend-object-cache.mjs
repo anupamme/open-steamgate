@@ -1,5 +1,6 @@
 import {cacheDiagnostic, diagnosticCache} from "./frontend-cache-diagnostics.mjs";
-import {artifactLowering, storedProvenance, inheritStoredProvenance, recordingProvenance} from "./frontend-provenance.mjs";
+import {artifactLowering, storedProvenance, inheritStoredProvenance, recordingProvenance, auditedBookkeeping} from "./frontend-provenance.mjs";
+import {projectionVariant, projectionMatches, readVariants, rememberVariant} from "./frontend-cache-variants.mjs";
 import {recordLowering, replayLowering} from "./frontend-replay.mjs";
 // Portable class lowerings. The registry still parses/checks normally; replay
 // verifies the program inputs and ordering before applying cached IR effects.
@@ -206,16 +207,21 @@ export function objectCache(registry, root, dependencyCache = false) {
   const selection = (program) => digest(JSON.stringify([...program.wanted]));
   const wholeSelection = (value) => value.replay?.ops.some((op) => op.key === "wanted"
     && (op.kind === "measure" || (op.kind === "read" && !op.method)));
+  const variantOf = (value, program) => wholeSelection(value) ? selection(program) : projectionVariant(value);
+  const variantIndex = (owner, name) => location(owner, name) + ".variants.json";
   const pending = [], provenanceGraphs = new Map();
   const cache = {
     shadow, dependencyCache,
+    // A validated dependency hit is also valid under this generation's full
+    // registry-content guard. Publish it for the next recording-off run.
+    promote(owner, value, program) { cache.persist({owner, value, reads: [], program}); },
     diagnose: (owner, name) => diagnostic?.miss(owner, name),
     refused: (owner, name, reason) => diagnostic?.remember(owner, name, reason),
     begin() { pending.length = 0; shadow?.reset(); },
     read(owner, name, program) {
       // Keep a separate variant only when lowering read the complete closure.
       // Membership-only transcripts remain reusable across different shards.
-      for (const variant of ["", selection(program)]) try {
+      for (const variant of new Set(["", selection(program), ...readVariants(variantIndex(owner, name))])) try {
         const bytes = readFileSync(location(owner, name, variant));
         const payload = bytes.subarray(65);
         if (bytes.subarray(0, 64).toString() !== digest(payload)) continue;
@@ -236,7 +242,10 @@ export function objectCache(registry, root, dependencyCache = false) {
           entry.value.provenance = {rows: [...own.rows, ...lowering.rows],
             edges: [...new Set([...own.dependencies, ...lowering.dependencies].filter((k) => k !== owner))]};
         }
-        if (entry.key === sourceKey(owner, entry.reads) && portable(entry.value)) {
+        // Derived indexes are rebuilt before lowering. Filter variants by that
+        // immutable answer before full ordered replay, without adding reads.
+        if (entry.key === sourceKey(owner, entry.reads) && portable(entry.value)
+            && auditedBookkeeping("cache-projection-variant", () => projectionMatches(entry.value, program))) {
           if (Date.now() - touched > TOUCH_MS) { touched = Date.now(); touch(join(root, version)); }
           return entry.value;
         }
@@ -270,7 +279,7 @@ export function objectCache(registry, root, dependencyCache = false) {
         }
         const {provenance, ...payload} = value;
         pending.push({owner, value: {name: value.name}, valueBytes: serialize(payload),
-          reads: [...reads], variant: wholeSelection(value) ? selection(program) : ""});
+          reads: [...reads], variant: variantOf(value, program)});
         return true;
       } catch (error) {
         diagnostic?.remember(owner, value.name, error.message);
@@ -308,14 +317,16 @@ export function objectCache(registry, root, dependencyCache = false) {
         try { value = compactLowering(value); } catch (error) { cacheDiagnostic({event: "persist-refused", name: value.name, reason: error.message}); diagnostic?.remember(owner, value.name, error.message); return; }
         if (!portable(value)) { cacheDiagnostic({event: "persist-refused", name: value.name, reason: "nonportable-value"}); diagnostic?.remember(owner, value.name, "nonportable-value"); return; }
       }
-      const file = location(owner, value.name, variant ?? (wholeSelection(value) ? selection(program) : "")), temp = `${file}.${randomUUID()}.pending`;
+      variant ??= variantOf(value, program);
+      const file = location(owner, value.name, variant), temp = `${file}.${randomUUID()}.pending`;
       try {
         mkdirSync(join(root, version), {recursive: true});
         const payload = deflateRawSync(serialize({key: sourceKey(owner, reads), reads, ...(metadata ? {metadata} : {}), ...(valueBytes ? {valueBytes} : {}), value}), {level: 1});
         writeFileSync(temp, Buffer.concat([Buffer.from(digest(payload) + "\n"), payload]));
         renameSync(temp, file);
+        rememberVariant(variantIndex(owner, value.name), variant);
         diagnostic?.remember(owner, value.name, "stored");
-        cacheDiagnostic({event: "persist", name: value.name, key: sourceKey(owner, reads), version, variant: variant ?? (wholeSelection(value) ? selection(program) : "")});
+        cacheDiagnostic({event: "persist", name: value.name, key: sourceKey(owner, reads), version, variant});
       } catch { /* Cache availability must not change compilation. */ }
       finally { try { rmSync(temp, {force: true}); } catch { /* Unavailable root. */ } }
     },
@@ -368,6 +379,7 @@ export const compileDiskClass = artifactLowering(/** @param {import('./frontend-
     ? session?.disk?.shadow?.probe(owner, key, program) : undefined;
   if (prediction) session.disk.shadow.validate(prediction, ctx, obj, lower);
   let miss = {reason: "no-entry"};
+  let fromDependency = false;
   let cached = session?.classes.get(key);
   const replay = (entry) => entry && entry.file === file && entry.structure === file.getStructure()
     && entry.supplied === suppliedKey(program, key) && entry.replay && replayLowering(program, entry.replay, (row) => { miss = row; });
@@ -384,6 +396,7 @@ export const compileDiskClass = artifactLowering(/** @param {import('./frontend-
     const stored = prediction?.value;
     cached = stored?.name === key ? {...stored, file, structure: file.getStructure()} : undefined;
     valid = replay(cached);
+    fromDependency = valid;
     if (!valid && prediction?.row) miss = {reason: prediction.row.reason};
   }
   if (valid) {
@@ -393,6 +406,10 @@ export const compileDiskClass = artifactLowering(/** @param {import('./frontend-
     counts.reused++;
     counts.reusedClasses.push(key);
     session?.classes.set(key, cached);
+    if (fromDependency) {
+      const {file: ignoredFile, structure: ignoredStructure, ...value} = cached;
+      session.disk.promote(owner, value, program);
+    }
     if (prediction && !prediction.row.wouldReuseV3) {
       prediction.row.currentComplete = false;
       prediction.row.completenessReason = "no-validated-v3-candidate";

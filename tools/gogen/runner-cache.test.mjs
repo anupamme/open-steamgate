@@ -82,6 +82,9 @@ test("runner dependency mode reuses unchanged classes across paths and invalidat
     assert.notEqual(edited.hash, cold.hash);
     assert.deepEqual(edited.counts.loweredClasses, ["ZBASE", "ZREADER"]);
     assert.deepEqual(edited.counts.reusedClasses, ["ZOTHER"]);
+    const next = capture({...moved, dependencyCache: false});
+    assert.equal(next.hash, edited.hash);
+    assert.equal(next.counts.lowered, 0, "validated dependency hits were promoted for the recording-off warm run");
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 

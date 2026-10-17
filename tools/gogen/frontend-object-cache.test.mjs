@@ -223,13 +223,19 @@ ENDCLASS.`;
     }
     // the leaf superclass changes emitted owner IR and exception metadata
     assert.notEqual(outputs[0], outputs[1]);
-    // and the entry's key names the hierarchy it read, not only the global version
+    // The replay guard binds the exact hierarchy answer, including the hidden
+    // descendant, instead of all selected implementation bytes.
     const entries = readdirSync(cacheDir, {recursive: true}).filter((f) => /^[0-9a-f]{64}\//.test(f) && f.endsWith(".bin"))
       .map((f) => deserialize(inflateRawSync(readFileSync(join(cacheDir, f)).subarray(65))));
     for (const name of ["ZCL_CATCHER", "ZCL_CATCHER2"]) {
       const catcher = entries.filter((e) => e.value.name === name);
       assert.ok(catcher.length > 0, name);
-      for (const e of catcher) assert.ok(e.reads.includes("CLAS ZCX_HIDDEN"), `${name} reads ZCX_HIDDEN`);
+      for (const e of catcher) {
+        const value = e.valueBytes ? deserialize(e.valueBytes) : e.value;
+        assert.ok(value.replay.ops.some((op) => op.kind === "read" && op.key === "caught"
+          && JSON.parse(op.value).includes("ZCX_HIDDEN")), `${name} guards ZCX_HIDDEN`);
+        assert.ok(!value.replay.ops.some((op) => op.key === "wanted" && (op.kind === "measure" || !op.method)));
+      }
     }
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
@@ -277,17 +283,18 @@ test("source cycles and transitive readers invalidate without disturbing unrelat
   assert.equal(after("CLAS D", []), before("CLAS D", []));
 });
 
-test("whole-closure readers reuse the matching variant in both growing rounds", () => {
+test("CATCH readers reuse across unrelated closure growth and miss for a new matching subclass", () => {
   const dir = mkdtempSync(join(tmpdir(), "gogen-object-variants-")), cacheDir = join(dir, "cache");
   try {
     writeFileSync(join(dir, "cx_root.clas.abap"), source("cx_root", "rv = 1."));
     writeFileSync(join(dir, "zcl_try.clas.abap"), source("zcl_try", "TRY. rv = 1. CATCH cx_root. rv = 2. ENDTRY."));
     writeFileSync(join(dir, "zcl_other.clas.abap"), source("zcl_other", "rv = 3."));
+    writeFileSync(join(dir, "zcx_new.clas.abap"), "CLASS zcx_new DEFINITION PUBLIC INHERITING FROM cx_root. ENDCLASS. CLASS zcx_new IMPLEMENTATION. ENDCLASS.");
     const args = {folders: [dir], objects: ["CX_ROOT", "ZCL_TRY"], cacheDir};
     const session = {}, first = compileProgram({...args, session});
     const all = {...args, objects: [...args.objects, "ZCL_OTHER"]};
     const second = compileProgram({...all, registry: first.reg, session});
-    assert.ok(second.frontendCounts.loweredClasses.includes("ZCL_TRY"));
+    assert.ok(second.frontendCounts.reusedClasses.includes("ZCL_TRY"));
     const freshSession = {}, repeatedFirst = compileProgram({...args, session: freshSession});
     assert.equal(emitGo(repeatedFirst), emitGo(first));
     assert.ok(repeatedFirst.frontendCounts.reusedClasses.includes("ZCL_TRY"));
@@ -295,6 +302,13 @@ test("whole-closure readers reuse the matching variant in both growing rounds", 
     assert.equal(emitGo(repeatedSecond), emitGo(second));
     assert.ok(repeatedSecond.frontendCounts.reusedClasses.includes("ZCL_TRY"));
     assert.equal(emitGo(repeatedSecond), emitGo(compileProgram({...all, cacheDir: undefined})));
+    const grown = {...all, objects: [...all.objects, "ZCX_NEW"]};
+    const added = compileProgram(grown);
+    assert.ok(added.frontendCounts.loweredClasses.includes("ZCL_TRY"));
+    assert.equal(emitGo(added), emitGo(compileProgram({...grown, cacheDir: undefined})));
+    assert.ok(compileProgram(grown).frontendCounts.reusedClasses.includes("ZCL_TRY"));
+    assert.ok(compileProgram(args).frontendCounts.reusedClasses.includes("ZCL_TRY"), "initial CATCH answer survives the final closure answer");
+    assert.ok(compileProgram(grown).frontendCounts.reusedClasses.includes("ZCL_TRY"));
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 
@@ -581,8 +595,9 @@ for (const dependencyCache of [false, true]) test(`concurrent fresh compilers pu
   const dir = mkdtempSync(join(tmpdir(), "gogen-cache-concurrent-"));
   try {
     const input = join(dir, "input"), cacheDir = join(dir, "cache"); mkdirSync(input);
-    writeFileSync(join(input, "zcl_parallel.clas.abap"), source("zcl_parallel", "rv = 7."));
-    const options = {folders: [input], objects: ["ZCL_PARALLEL"], cacheDir, dependencyCache, provenance: false};
+    writeFileSync(join(input, "cx_root.clas.abap"), source("cx_root", "rv = 1."));
+    writeFileSync(join(input, "zcl_parallel.clas.abap"), source("zcl_parallel", "TRY. rv = 7. CATCH cx_root. rv = 0. ENDTRY."));
+    const options = {folders: [input], objects: ["CX_ROOT", "ZCL_PARALLEL"], cacheDir, dependencyCache, provenance: false};
     const code = `
       import {compileProgram} from ${JSON.stringify(new URL("frontend.mjs", import.meta.url).href)};
       import {emitGo} from ${JSON.stringify(new URL("emit-go.mjs", import.meta.url).href)};
@@ -604,7 +619,8 @@ for (const dependencyCache of [false, true]) test(`concurrent fresh compilers pu
     assert.equal(results[0].go, results[1].go);
     const warm = await run();
     assert.equal(warm.go, results[0].go);
-    assert.deepEqual(warm.counts.reusedClasses, ["ZCL_PARALLEL"]);
+    assert.deepEqual(warm.counts.reusedClasses, ["CX_ROOT", "ZCL_PARALLEL"]);
+    assert.ok(readdirSync(cacheDir, {recursive: true}).some((f) => f.endsWith(".variants.json")));
     assert.equal(readdirSync(cacheDir, {recursive: true}).some((f) => f.endsWith(".pending")), false);
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });

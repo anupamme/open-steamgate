@@ -186,7 +186,7 @@ export type ObservationKind =
   | 'supplied-index' | 'locals' | 'local-dispatch' | 'selected-groups'
   | 'selected-classes' | 'ownership-dispatch' | 'table-inventory'
   | 'lock-inventory' | 'rtti-inventory' | 'rtti' | 'exception-supers'
-  | 'tables' | 'locks';
+  | 'tables' | 'locks' | 'caught';
 export type Query = QueryBase & (
   | {kind: ObservationKind}
   | {kind: 'supplied'; parameters: string[]}
@@ -199,6 +199,7 @@ export interface QueryEntry {queries: Map<string, QueryRow>; edges: Set<string>}
 // Leaves contain true; intermediate nodes are Maps indexed by scalar tuples.
 export interface QueryTrie extends Map<QueryScalar, QueryTrie | true> {}
 export interface RegistryState {
+  unknownVersion: number;
   reg: Registry;
   config: ReturnType<Registry['getConfig']> | undefined;
   entries: Map<string, QueryEntry>;
@@ -234,6 +235,8 @@ export interface StoredProvenance {rows: QueryRow[]; edges: string[]}
 export interface Manifest {hits: QueryRow[]; misses: QueryRow[]; scans: QueryRow[]; unknownScans: QueryRow[]}
 export type ProvenanceInput = Registry | {reg?: Registry; registry?: Registry};
 export interface ProvenanceGraph {
+  // Observer-only safety memo revision; never serialized or hashed as input.
+  unknownVersion: number;
   artifacts: Map<string, QueryEntry>;
   lowerings: Map<string, QueryEntry>;
   global: QueryEntry;

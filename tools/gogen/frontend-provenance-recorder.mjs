@@ -34,7 +34,7 @@ class Recorder {
   /** @param {import('./frontend-session-types.ts').Registry} reg @returns {import('./frontend-session-types.ts').RegistryState} */ state(reg) {
     let state = registries.get(reg);
     if (!state) {
-      state = {reg, config: reg.getConfig(), entries: new Map(), lowerings: new Map(), scheduling: empty(), finalOutput: empty(), global: empty(), files: new Map(), artifacts: new Map()};
+      state = {reg, config: reg.getConfig(), entries: new Map(), lowerings: new Map(), scheduling: empty(), finalOutput: empty(), global: empty(), files: new Map(), artifacts: new Map(), unknownVersion: 0};
       registries.set(reg, state);
     }
     if (this.states.has(state)) return state;
@@ -98,6 +98,7 @@ class Recorder {
     if (entry.queries.has(id)) return;
     const row = {role, artifact: owner ?? "<registry>", phase, ...query};
     entry.queries.set(id, row);
+    if (role === "artifact" && row.kind === "unknown-scan") state.unknownVersion++;
     if (role === "artifact" && owner && !row.scan && !projectedQuery(row)) for (const key of [...row.result, ...row.providers ?? []]) {
       if (key !== owner && state.entries.has(key)) entry.edges.add(key);
     }
@@ -374,7 +375,7 @@ class Recorder {
 /** @param {import('./frontend-session-types.ts').Registry} reg @returns {import('./frontend-session-types.ts').ProvenanceGraph | undefined} */ export function provenanceGraph(reg) {
   const state = registries.get(reg);
   if (!state) return;
-  return {artifacts: state.entries, lowerings: state.lowerings, global: state.global};
+  return {artifacts: state.entries, lowerings: state.lowerings, global: state.global, unknownVersion: state.unknownVersion};
 }
 
 /** @returns {Promise<void>} */ async function main() {

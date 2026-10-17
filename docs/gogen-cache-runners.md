@@ -22,6 +22,8 @@ entries. The certificate hashes raw input bytes, logical relative filenames,
 layer order and tool content; it contains no filesystem timestamps or build-root
 paths. It is a performance hint, never authority to reuse IR. A stale or corrupt
 certificate cannot bypass the normal global key or replay validation.
+Validated dependency hits are promoted atomically into the current global
+generation, so the recording-off warm run following an edit has those entries.
 
 Cache entries and graph/index files publish by unique temporary file plus atomic
 rename. Concurrent writers may lose a candidate from the bounded v3 index; this
@@ -75,7 +77,7 @@ Dependency keys now hash strongly connected components once per immutable
 graph, then combine their content certificates. Traversal numbers never enter
 the key; sorted symbolic members, artifact digests, query answers and child
 certificates do. Mutable graphs supplied by callers are recomputed. The preserved
-first-pass graph contains 6,184,673 artifact query rows; an offline probe computed
+pre-CATCH-projection graph contains 6,184,673 artifact query rows; an offline probe computed
 877 saved entry keys in 43.0 seconds, rather than revisiting the shared closure
 for each entry.
 
@@ -87,6 +89,16 @@ their artifact/raw-file guards. Frozen provider lists are shared, and only
 immutable scalar arrays receive memoized set certificates. Tests cover body
 edits, added `IS SUPPLIED`, new implementors, dependency cycles, mutable answers
 and the existing mutation oracle.
+
+The real runner's closure rounds exposed another overbroad guard: CATCH
+memoization read the selected-set size and then walked the complete selection
+inside each class's tracking proxy. A growing closure invalidated otherwise
+unchanged catchers. CATCH now reads a prebuilt selected-subclass index. Its query
+guards the exact sorted matching names, including unnamed descendants and new
+selected subclasses. Hierarchy inputs with unknown observations refuse dependency
+reuse. The twenty-member ancestry limit, cycles, local names and runtime fallback
+parents retain their existing behavior. Exact CATCH-answer variant indexes are
+bounded and published atomically, so initial/final closure answers can both survive.
 
 ## Reproduction and evidence
 
@@ -116,3 +128,20 @@ source symlinks are dereferenced while copying. All measured invocations use
 different build roots. The report records cache-off cold/warm controls,
 cache-on cold/warm, and edited warm/cold controls. Go compilation and execution
 are covered separately by the real runner and Unit tests.
+
+## Changed files
+
+The implementation is based on `7503cdee`; it does not require the subsequent
+parse-observation work on main.
+
+| Area | Files |
+| --- | --- |
+| Runner opt-in and timing | `tools/osd-run.mjs`, `tools/gogen/osabap.mjs`, `unit.mjs`, `runner-cache.mjs`, `runner-cache-recording.mjs` |
+| Cache and replay | `tools/gogen/frontend.mjs`, `frontend-inventory.mjs`, `frontend-object-cache.mjs`, `frontend-replay.mjs`, `frontend-cache-diagnostics.mjs`, `frontend-cache-variants.mjs`, `frontend-cache-types.ts`, `frontend-session-types.ts`, `frontend-types.ts` |
+| Dependency certificates | `tools/gogen/frontend-components.mjs`, `frontend-query-contract.mjs`, `frontend-queries.mjs`, `frontend-hierarchy.mjs`, `frontend-provenance.mjs`, `frontend-provenance-recorder.mjs`, `frontend-provenance-metadata.mjs`, `frontend-v3-key.mjs`, `frontend-v3-queries.mjs`, `frontend-v3-shadow.mjs` |
+| Hot paths | `tools/gogen/frontend-dynamic-call.mjs`, `frontend-static.mjs`, `emit-dynamic-call.mjs` |
+| Tests and proof | `tools/gogen/runner-cache.test.mjs`, `frontend-object-cache.test.mjs`, `frontend-replay.test.mjs`, `frontend-v3-shadow.test.mjs`, `osabap.test.mjs`, `cache-runner-proof.mjs` |
+| Documentation and CI | `docs/gogen-cache-runners.md`, `docs/gogen-cache.md`, `.github/workflows/gogen.yml` |
+
+Filenames without a directory in this table share the preceding `tools/gogen/`
+prefix. `frontend.mjs` adds and removes six lines against the task base.

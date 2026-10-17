@@ -1,5 +1,8 @@
 import {parseObserved} from "./frontend-inventory.mjs";
 import {projectionAnswer} from "./frontend-query-contract.mjs";
+import {caughtIndex, chainHas, currentCaughtAnswer} from "./frontend-hierarchy.mjs";
+import {copyReplayProgram} from "./frontend-replay.mjs";
+import {libraryPath} from "../osd-lib-path.mjs";
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {mkdtempSync, writeFileSync, rmSync, readdirSync, readFileSync} from "node:fs";
@@ -8,7 +11,7 @@ import {tmpdir} from "node:os";
 import {compileProgram} from "./frontend.mjs";
 import {classSource, syntheticCorpus} from "./cache-oracle-corpus.mjs";
 import {compareArtifacts, artifactsOf} from "./cache-oracle-capture.mjs";
-import {provenanceOf, recordProvenance} from "./frontend-provenance.mjs";
+import {provenanceOf, recordProvenance, withArtifact, semanticQuery} from "./frontend-provenance.mjs";
 import {core} from "./frontend-inventory.mjs";
 import {keyComputer, sealDependencyGraph, hashV3} from "./frontend-v3-key.mjs";
 
@@ -28,6 +31,56 @@ const build = (dir, objects, extra = {}) => compileProgram({folders: [dir], obje
 const report = (p) => p.frontendCounts.shadowV3;
 const row = (p, name) => report(p).entries.find((e) => e.name === name);
 const reuse = (p) => report(p).entries.filter((e) => e.wouldReuseV3).length;
+
+test("the CATCH index preserves the twenty-member walk, cycles and local names", () => {
+  const parents = new Map(Array.from({length: 22}, (_, i) => [`C${i}`, `C${i + 1}`]));
+  parents.set("A", "B"); parents.set("B", "A"); parents.set("OWNER:LOCAL", "C19");
+  const wanted = new Set(["C0", "A", "OWNER:LOCAL"]), reg = {}, owner = {};
+  const step = (name) => parents.get(name), index = caughtIndex(reg, wanted, step);
+  for (const ancestor of ["C0", "C19", "C20", "C21", "A", "B", "OWNER:LOCAL"])
+    assert.deepEqual(index.get(JSON.stringify([ancestor])), [...wanted].filter((name) => chainHas(owner, reg, name, ancestor, step)).sort());
+  assert.throws(() => index.set("[]", []), /read-only/);
+  assert.equal(copyReplayProgram({caught: index}).caught, index, "isolated replay shares the immutable derived index");
+});
+
+test("CATCH dependency replay ignores unrelated bodies but observes changed and newly selected subclasses", () => scratch((dir) => {
+  const cx = (name, parent) => `CLASS ${name} DEFINITION PUBLIC INHERITING FROM ${parent}. ENDCLASS. CLASS ${name} IMPLEMENTATION. ENDCLASS.`;
+  put(dir, {"zcx_base.clas.abap": cx("zcx_base", "cx_static_check"),
+    "zcx_other.clas.abap": cx("zcx_other", "cx_static_check"),
+    "zcx_hidden.clas.abap": cx("zcx_hidden", "zcx_base"),
+    "zreader.clas.abap": classSource("ZREADER", "TRY. rv = 1. CATCH zcx_base. rv = 2. ENDTRY."),
+    "zunrelated.clas.abap": classSource("ZUNRELATED", "rv = 3.")});
+  const names = ["ZCX_BASE", "ZCX_OTHER", "ZCX_HIDDEN", "ZREADER", "ZUNRELATED", "CX_ROOT", "CX_STATIC_CHECK"];
+  const options = {folders: [dir, join(libraryPath(process.cwd(), "open-abap-core"), "src")], objects: names,
+    cacheDir: join(dir, "cache"), dependencyCache: true, provenance: false, tolerant: true};
+  const run = (extra = {}) => compileProgram({...options, ...extra});
+  run();
+  put(dir, {"zunrelated.clas.abap": classSource("ZUNRELATED", "rv = 9.")});
+  const isolated = run();
+  assert.ok(isolated.frontendCounts.reusedClasses.includes("ZREADER"), JSON.stringify(row(isolated, "ZREADER")));
+  assert.equal(compareArtifacts(artifactsOf(isolated), artifactsOf(run({cacheDir: undefined}))).equal, true);
+  put(dir, {"zcx_hidden.clas.abap": cx("zcx_hidden", "zcx_other")});
+  const hierarchy = run();
+  assert.ok(hierarchy.frontendCounts.loweredClasses.includes("ZREADER"));
+  assert.equal(compareArtifacts(artifactsOf(hierarchy), artifactsOf(run({cacheDir: undefined}))).equal, true);
+  put(dir, {"zcx_added.clas.abap": cx("zcx_added", "zcx_base")});
+  const added = {objects: [...names, "ZCX_ADDED"]}, selected = run(added);
+  assert.ok(selected.frontendCounts.loweredClasses.includes("ZREADER"));
+  assert.equal(compareArtifacts(artifactsOf(selected), artifactsOf(run({...added, cacheDir: undefined}))).equal, true);
+}));
+
+test("a later unknown hierarchy observation makes the CATCH projection incomplete", () => recordProvenance(() => {
+  const config = core.Config.getDefault().get(); config.rules = {check_syntax: true, parser_error: true};
+  const reg = new core.Registry(new core.Config(JSON.stringify(config)));
+  for (const name of ["ZCL_A", "ZCL_B"]) reg.addFile(new core.MemoryFile(`${name.toLowerCase()}.clas.abap`, classSource(name)));
+  reg.parse(); reg.findIssues();
+  const index = caughtIndex(reg, new Set(["ZCL_A", "ZCL_B"]), () => undefined);
+  assert.equal(currentCaughtAnswer(index, ["ZCL_A"]).complete, true);
+  withArtifact({reg}, reg.getObject("CLAS", "ZCL_B"), () => semanticQuery(reg, "unknown-scan", ["hierarchy-test"], []), "artifact-read");
+  assert.equal(currentCaughtAnswer(index, ["ZCL_A"]).complete, false);
+  index.get(JSON.stringify(["ZCL_A"]));
+  assert.ok([...provenanceOf(reg).values()].some((manifest) => manifest.hits.some((q) => q.kind === "caught" && q.complete === false)));
+}));
 
 test("300-class shadow predictions: ten-class closure, isolated edit, unrelated addition; production stays global", () => scratch((dir) => {
   const names = Array.from({length: 300}, (_, i) => `ZC${String(i).padStart(4, "0")}`);

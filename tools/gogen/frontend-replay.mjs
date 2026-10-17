@@ -1,4 +1,5 @@
 import {definitionFingerprint} from "./frontend-artifact-digests.mjs";
+import {isCaughtIndex} from "./frontend-hierarchy.mjs";
 // Record the program inputs a lowering actually reads and its ordered effects.
 // Registry/file identity is guarded by the enclosing immutable session.
 const context = new Set(["currentClass", "currentOwner", "currentTypes"]);
@@ -36,7 +37,7 @@ function fingerprint(value, registry) {
   if (encoded?.length > MAX_FINGERPRINT_CHARS) throw new RangeError("replay fingerprint budget");
   return encoded;
 }
-const clone = (v) => v instanceof Map ? new Map(v) : v instanceof Set ? new Set(v) : Array.isArray(v) ? [...v] : v;
+const clone = (v) => isCaughtIndex(v) ? v : v instanceof Map ? new Map(v) : v instanceof Set ? new Set(v) : Array.isArray(v) ? [...v] : v;
 export function copyReplayProgram(program) {
   return Object.fromEntries(Object.entries(program).map(([k, v]) => [k, clone(v)]));
 }

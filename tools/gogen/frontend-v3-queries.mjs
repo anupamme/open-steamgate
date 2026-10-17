@@ -13,10 +13,10 @@ const methods = {"implicit-type-pool": "findTypePoolType", "implicit-type-pool-c
   "badi-definition": "isBadiDef", "behavior-definition": "findBehaviorDefinition", "function-module-owner": "findFunctionModule"};
 const simple = new Set(["getObject", "getFileByName", "findObjectForFile", "getFirstObject", "supplied", "locals", "lock", "ownershipSafety", "include-parent", "function-group-include", "cds-alias", "cds-mapping", ...Object.keys(methods)]);
 const scans = new Set(["function-module-owner", "function-group-include", "cds-alias", "badi-definition", "include-macro-context"]);
-export const supportedQuery = (q) => q.role === "artifact" && (q.scan ? scans : simple).has(q.kind)
+export const supportedQuery = (q) => q.role === "artifact" && (q.kind === "caught" ? q.policy === "selected-subclasses" && q.complete === true : (q.scan ? scans : simple).has(q.kind))
   && (!q.scan || q.kind === "include-macro-context" || q.queryArgs?.length > 0);
 export function querySpec(q) {
-  return Object.fromEntries(["role", "artifact", "phase", "kind", "args", "queryArgs", "policy", "scan", "target"]
+  return Object.fromEntries((q.kind === "caught" ? ["role", "kind", "args", "policy"] : ["role", "artifact", "phase", "kind", "args", "queryArgs", "policy", "scan", "target"])
     .filter((k) => Object.hasOwn(q, k)).map((k) => [k, q[k]]));
 }
 export const queryAnswer = (q) => Object.fromEntries(["result", "providers", "parameters", "descriptor", "names", "dynamic", "complete"]

@@ -1,4 +1,5 @@
 import {inputSnapshot} from "./frontend-inventory.mjs";
+import {currentCaughtAnswer} from "./frontend-hierarchy.mjs";
 // The frontend's explicit query contracts. Discovery indexes are compile-local;
 // consuming a named answer, including an empty answer, belongs to its reader.
 import {enumerateObjects, semanticQuery, withArtifact, withRole, recordingProvenance} from "./frontend-provenance.mjs";
@@ -59,6 +60,7 @@ const emptyProviders = Object.freeze([]);
 // These indexes were rebuilt from the current parsed registry/selection before
 // the class seam. Never answer from a persisted query's former providers.
 /** @param {import("./frontend-cache-types.ts").QueryProgram} program @param {import("./frontend-session-types.ts").Query} query @returns {import("./frontend-cache-types.ts").CurrentQueryAnswer | undefined} */ export function currentQueryAnswer(program, query) {
+  if (query.kind === "caught") return currentCaughtAnswer(program.caught, /** @type {string[]} */ (query.args));
   if (query.kind === "supplied") {
     const key = query.args.join("=>"), index = suppliedIndexes.get(program.reg);
     if (!index) throw new Error("supplied index unavailable");
