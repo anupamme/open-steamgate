@@ -49,10 +49,15 @@ function typescriptInClosure(entries) {
   return violations.sort();
 }
 
-test("osd CLI runtime import closure contains no TypeScript files", () => {
+// Scope: relative static imports and literal dynamic imports rooted at
+// bin/osd.mjs and the top-level tools/osd-*.mjs. Computed dispatch and
+// subprocess closures are NOT covered: `osd gen osabap.mjs`, `osd gen
+// gogen-unit.mjs`, `osd run` (spawns tools/gogen/osabap.mjs) and `osd unit
+// --go` (tools/gogen/unit.mjs) still load gogen's .ts and need Node >= 22.18.
+test("osd CLI static and literal-dynamic import closure contains no TypeScript files", () => {
   const violations = typescriptInClosure([
     new URL("../bin/osd.mjs", import.meta.url),
-    // Some CLI tool dispatch uses computed paths; cover every osd tool too.
+    // Computed tool dispatch is not followed; root every top-level osd tool instead.
     ...readdirSync(new URL("../tools/", import.meta.url))
       .filter(file => file.startsWith("osd-") && file.endsWith(".mjs"))
       .map(file => new URL(`../tools/${file}`, import.meta.url)),
