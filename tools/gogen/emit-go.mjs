@@ -164,11 +164,11 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   ctx.lrow = row;
   try {
     if (w.op === "initial" || w.op === "notinitial") {
-      const c = cond({c: "initial", x: w.fx}, ctx);
+      const c = cond({c: "initial", x: /** @type {import("./emit-go-types.ts").TypedExpr} */ (w.fx)}, ctx);
       return w.op === "initial" ? c : `!(${c})`;
     }
-    const lhs = w.fx ? expr(w.fx, ctx) : `${row}.${ident(w.name)}`;
-    return `${lhs} ${w.op === "=" ? "==" : w.op === "<>" ? "!=" : w.op} ${expr(w.value, ctx)}`;
+    const lhs = w.fx ? expr(w.fx, ctx) : `${row}.${ident(/** @type {string} */ (/** @type {Exclude<import("./emit-go-types.ts").Where, {op: "initial" | "notinitial"}>} */ (w).name))}`;
+    return `${lhs} ${w.op === "=" ? "==" : w.op === "<>" ? "!=" : w.op} ${expr(/** @type {Exclude<import("./emit-go-types.ts").Where, {op: "initial" | "notinitial"}>} */ (w).value, ctx)}`;
   } finally {
     ctx.lrow = saved;
   }
@@ -337,7 +337,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   NAMED = new Map();
   STRUCTDEFS = Array.isArray(program) ? structs : program.structs;
   DYNAMIC_DISPATCH = Array.isArray(program) ? [] : program.dynamicDispatch ?? []; CLASSES = new Map((Array.isArray(program) ? classes : program.classes).map((c) => [c.name, c]));
-  POLY = new Set([...CLASSES.values()].map((c) => c.super).filter(Boolean));
+  POLY = new Set(/** @type {string[]} */ ([...CLASSES.values()].map((c) => c.super).filter(Boolean)));
   movePair = (/** @type {import("./emit-go-types.ts").AnalyzeTableMoves} */ (analyzeTableMoves))(program, stable, goType);
   HELPER_IMPORTS.add("hostclass");
   EVENTS = Array.isArray(program) ? new Map() : (program.events ?? new Map());
@@ -601,9 +601,9 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     [td, "KIND"], [td, "TYPE_KIND"], [td, "LENGTH"], [td, "DECIMALS"], [td, "ABSOLUTE_NAME"], [td, "RELATIVE_NAME"], [td, "DDIC"]]);
   const missing = [td, ed, sd, tb].some((c) => !c || c.abstract) ? "the RTTI classes" : need.filter(([c, a]) => !attr(c, a)).map(([c, a]) => `${c.name}-${a}`).join(", ");
   if (missing) return [head, `\tpanic(abap.NotCompiled("CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA", ${JSON.stringify(`RTTI needs ${missing} compiled`)}))`, "}", ""];
-  const refRow = attr(/** @type {import("./emit-go-types.ts").Class} */ (sd), "MT_REFS").type.row.go;
-  const compRow = attr(/** @type {import("./emit-go-types.ts").Class} */ (sd), "COMPONENTS").type.row.go;
-  const dataRef = goType(attr(/** @type {import("./emit-go-types.ts").Class} */ (sd), "MT_REFS").type.row.k === "struct" ? STRUCTDEFS.get(refRow).fields.find((f) => f.name === "TYPE").type : null);
+  const refRow = (/** @type {{type: {row: import("./emit-go-types.ts").StructType}}} */ (attr(/** @type {import("./emit-go-types.ts").Class} */ (sd), "MT_REFS"))).type.row.go;
+  const compRow = (/** @type {{type: {row: import("./emit-go-types.ts").StructType}}} */ (attr(/** @type {import("./emit-go-types.ts").Class} */ (sd), "COMPONENTS"))).type.row.go;
+  const dataRef = goType((/** @type {{type: {row: import("./emit-go-types.ts").StructType}}} */ (attr(/** @type {import("./emit-go-types.ts").Class} */ (sd), "MT_REFS"))).type.row.k === "struct" ? (/** @type {import("./emit-go-types.ts").Field} */ ((/** @type {{fields: readonly import("./emit-go-types.ts").Field[]}} */ (STRUCTDEFS.get(refRow))).fields.find((f) => f.name === "TYPE"))).type : /** @type {import("./emit-go-types.ts").Type} */ (/** @type {unknown} */ (null)));
   /** @param {string} a @returns {string} */ const f = (a) => ident(a);
   return [
     // parity-wave1: the output lengths of the data elements the program's
@@ -1085,10 +1085,10 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
 }
 
 /** an IMPORTING argument: a composite by reference goes as a pointer, by VALUE as a clone */
-/** @param {import("./emit-go-types.ts").ImportingArgument} a @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function importingArg(a, ctx) {
-  if (a.byValue === undefined || !composite(a.type)) return expr(a.value, ctx);
-  if (!a.byValue) return addressable(a.value) ? `&${place(a.value, ctx)}` : `abap.Ptr(${expr(a.value, ctx)})`;
-  return copied(expr(a.value, ctx), a.value.type, a.value);
+/** @param {import("./emit-go-types.ts").Argument} a @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function importingArg(a, ctx) {
+  if (a.byValue === undefined || !composite(a.type)) return expr((/** @type {import("./emit-go-types.ts").TypedExpr} */ (a.value)), ctx);
+  if (!a.byValue) return addressable((/** @type {import("./emit-go-types.ts").TypedExpr} */ (a.value))) ? `&${place((/** @type {import("./emit-go-types.ts").TypedExpr} */ (a.value)), ctx)}` : `abap.Ptr(${expr((/** @type {import("./emit-go-types.ts").TypedExpr} */ (a.value)), ctx)})`;
+  return copied(expr((/** @type {import("./emit-go-types.ts").TypedExpr} */ (a.value)), ctx), (/** @type {import("./emit-go-types.ts").TypedExpr} */ (a.value)).type, (/** @type {import("./emit-go-types.ts").TypedExpr} */ (a.value)));
 }
 
 // A component of a temporary structure is readable but Go cannot take its
@@ -1117,8 +1117,8 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     case "field": return `${PLACES.has(p.base.e) || p.base.e === "const" ? place(p.base, ctx) : `(${expr(p.base, ctx)})`}.${ident(p.name)}`;
     case "dref_field": return `abap.DerefAs[${goType(p.struct)}](${expr(p.base, ctx)}, ${JSON.stringify(`->${p.name}`)}).${ident(p.name)}`;
     case "fs": return p.type.k === "data" ? ident(p.name) : p.type.k === "struct" ? `(*${ident(p.name)})` : `(*abap.CheckedRowPtr(${ident(p.name)}))`;
-    case "refattr": { const b = p.kernelRtti ? `abap.ObjectRttiRead(${expr(p.base, ctx)}, ${JSON.stringify(p.name)})` : (p.base.type.intf || (/** @type {import("./emit-go-types.ts").ExceptionClass} */ (exceptionClass))(CLASSES.get(p.base.type.name), CLASSES)) ? `abap.ExceptionRead(${expr(p.base, ctx)}, ${JSON.stringify(p.name)})` : expr(p.base, ctx); if (p.base.type.intf) return `(*${b}.${accessorName(p.name)}())`;
-      return POLY.has(p.base.type.name) && !p.base.type.intf ? `${b}.As_${typeName(p.base.type.name)}().${ident(p.name)}` : `${b}.${ident(p.name)}`; }
+    case "refattr": { const b = p.kernelRtti ? `abap.ObjectRttiRead(${expr(p.base, ctx)}, ${JSON.stringify(p.name)})` : ((/** @type {Extract<import("./emit-go-types.ts").Type, {k: "ref"}>} */ ((/** @type {import("./emit-go-types.ts").TypedExpr} */ (p.base)).type)).intf || (/** @type {import("./emit-go-types.ts").ExceptionClass} */ (exceptionClass))(CLASSES.get((/** @type {Extract<import("./emit-go-types.ts").Type, {k: "ref"}>} */ ((/** @type {import("./emit-go-types.ts").TypedExpr} */ (p.base)).type)).name), CLASSES)) ? `abap.ExceptionRead(${expr(p.base, ctx)}, ${JSON.stringify(p.name)})` : expr(p.base, ctx); if ((/** @type {Extract<import("./emit-go-types.ts").Type, {k: "ref"}>} */ ((/** @type {import("./emit-go-types.ts").TypedExpr} */ (p.base)).type)).intf) return `(*${b}.${accessorName(p.name)}())`;
+      return POLY.has((/** @type {Extract<import("./emit-go-types.ts").Type, {k: "ref"}>} */ ((/** @type {import("./emit-go-types.ts").TypedExpr} */ (p.base)).type)).name) && !(/** @type {Extract<import("./emit-go-types.ts").Type, {k: "ref"}>} */ ((/** @type {import("./emit-go-types.ts").TypedExpr} */ (p.base)).type)).intf ? `${b}.As_${typeName((/** @type {Extract<import("./emit-go-types.ts").Type, {k: "ref"}>} */ ((/** @type {import("./emit-go-types.ts").TypedExpr} */ (p.base)).type)).name)}().${ident(p.name)}` : `${b}.${ident(p.name)}`; }
     case "row": {
       const b = place(p.base, ctx);
       return rowValue(p.base.type, `${b}[abap.Idx(len(${b}), ${expr(p.index, ctx)})]`);
@@ -1378,10 +1378,10 @@ const LINES = !env("GOGEN_NOLINE");
 
         return [`${t}${place(st.target.base, ctx)} = hSubwrite.X(${expr(st.target.base, ctx)}, ${st.target.off ? expr(st.target.off, ctx) : "0"}, ${expr(st.target.len, ctx)}, ${expr(st.value, ctx)})`];
       }
-      if (ctx.builders?.has(st.target.name) && isAppend(st, st.target.name)) {
+      if (ctx.builders?.has((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).name) && isAppend(/** @type {import("./emit-go-types.ts").WalkNode} */ (/** @type {unknown} */ (st)), (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).name)) {
         /** @type {import("./emit-go-types.ts").Expr[]} */ const parts = [];
         for (let e = st.value; e.e === "concat"; e = e.l) parts.unshift(e.r);
-        return parts.map((x) => `${t}${ctx.builders.get(st.target.name)}.WriteString(${expr(x, ctx)})`);
+        return parts.map((x) => `${t}${ctx.builders.get((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).name)}.WriteString(${expr(x, ctx)})`);
       }
       return [...(st.target.type.k === "table" ? [`${t}abap.BumpTable(&${place(st.target, ctx)})`] : []), `${t}${place(st.target, ctx)} = ${st.moveTable ? expr(st.value, ctx) : copied(expr(st.value, ctx), st.value.type, st.value)}`];
     case "clear":
@@ -2408,7 +2408,7 @@ ${t}	}`));
       if (from === "f" && to === "int8") return `abap.F2I8(${x})`;
       break;
     case "c2s": return x;
-    case "table_rows": return `func() ${goType(e.to)} { var out ${goType(e.to)}; for _, ConvRow := range ${x} { out = append(out, ${rowStored(e.to, expr(e.row, ctx))}) }; return out }()`;
+    case "table_rows": return `func() ${goType(e.to)} { var out ${goType(e.to)}; for _, ConvRow := range ${x} { out = append(out, ${rowStored(e.to, expr(/** @type {import("./emit-go-types.ts").Expr} */ (e.row), ctx))}) }; return out }()`;
     case "s2c": return `abap.CFit(${x}, ${e.to.len})`;
     case "s2d": return `abap.S2D(${x})`;
     case "s2t": return `abap.S2T(${x})`;
