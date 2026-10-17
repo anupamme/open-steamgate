@@ -62,9 +62,9 @@ function observeParse(reg, args, async) {
   finish(); return result;
 }
 
-/** @param {import("@abaplint/core").IRegistry} reg @param {...unknown} args */
+/** @param {import("@abaplint/core").IRegistry} reg @param {...unknown} args @returns {import("@abaplint/core").IRegistry} */
 export function parseObserved(reg, ...args) { return observeParse(reg, args, false); }
-/** @param {import("@abaplint/core").IRegistry} reg @param {...unknown} args */
+/** @param {import("@abaplint/core").IRegistry} reg @param {...unknown} args @returns {Promise<import("@abaplint/core").IRegistry>} */
 export function parseObservedAsync(reg, ...args) { return observeParse(reg, args, true); }
 
 /** @param {import("./frontend-session-types.ts").Registry} reg @param {import("./frontend-session-types.ts").SessionInput} session @returns {import("./frontend-session-types.ts").Registry} */ export function freshRegistry(reg, session) {

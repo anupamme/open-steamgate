@@ -49,7 +49,7 @@ import {source, componentsOf, arith, sourceOperand, callMethodChain, excHolder,
   omittedArgument, omittedFactoryCall} from "./frontend-expressions-calls.mjs";
 /** @typedef {import("./frontend-types.ts").MethodSignature} ClassSignature */
 /** @typedef {typeof byteStatementHelpers} ByteStatementHelpers */ const byteStatementHelpers = {source, lvalue, convert, findResults};
-/** @type {WeakMap<import("@abaplint/core").IRegistry, Record<string, string>>} */ const cdsViewsByRegistry = new WeakMap();
+/** @type {WeakMap<import("./frontend-session-types.ts").Registry, Record<string, string>>} */ const cdsViewsByRegistry = new WeakMap();
 const HOST_REPLACED = new Set(["ZCL_OSD_ENQ_KERNEL"]);
 /** @typedef {{s: "loop_data", table: import("./frontend-types.ts").ValueExpr, fs: string, fsType?: import("./ir.ts").Type, text?: string, token: object, body?: import("./frontend-types.ts").FrontendStmt[]}} GenericLoopState */
 /** @typedef {{s: "loop", table: import("./frontend-types.ts").ValueExpr, into: import("./frontend-types.ts").ValueExpr | null, fs: string | null, where: import("./ir.ts").Where[] | null, from: import("./frontend-types.ts").ValueExpr | null, to: import("./frontend-types.ts").ValueExpr | null, rowType: import("./ir.ts").Type, key?: import("./ir.ts").ResolvedKey, dynamicKeys?: {value: import("./frontend-types.ts").ValueExpr, options: import("./ir.ts").ResolvedKey[]}, token: object, body?: import("./frontend-types.ts").FrontendStmt[]}} TableLoopState */
@@ -61,7 +61,7 @@ const HOST_REPLACED = new Set(["ZCL_OSD_ENQ_KERNEL"]);
  */
 // skip(path): a file not to load, for a layered build where a later folder
 // hides an object an earlier one holds (osg-build.mjs; ultra/packs)
-export const compileProgram = withProvenance(/** @param {{folders: string[], objects: string[], tolerant?: boolean, skip?: (path: string) => boolean, includeTests?: boolean | Set<string>, registry?: import("./frontend-session-types.ts").Registry, session?: Partial<import("./frontend-session-types.ts").CacheSession> | null, cacheDir?: string, provenance?: unknown}} options */ function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry, session, cacheDir}) {
+export const compileProgram = withProvenance(/** @param {import("./frontend-session-types.ts").CompileOptions} options */ function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry, session, cacheDir}) {
   const config = abaplint.Config.getDefault().get();
   config.syntax = {...config.syntax, version: "v758", errorNamespace: "."};
   // only the syntax check and parser errors are read below (parser_error is a
@@ -71,12 +71,12 @@ export const compileProgram = withProvenance(/** @param {{folders: string[], obj
   // Reset the ordinary module counter on each compile, as on main.
   FAE_N = 0;
   PERSIST_LOWERING = !!cacheDir;
-  /** @type {import("@abaplint/core").IRegistry} */ const reg = registry ?? new abaplint.Registry(new abaplint.Config(JSON.stringify(config)));
+  /** @type {import("./frontend-session-types.ts").Registry} */ const reg = registry ?? /** @type {import("./frontend-session-types.ts").Registry} */ (new abaplint.Registry(new abaplint.Config(JSON.stringify(config))));
   beginProvenanceCompile(reg);
   // Load every file for resolution; lower and report diagnostics for selected objects.
   /** @param {string} fn @returns {string} */ const objName = (fn) => fn.split("/").pop().split(".")[0].toLowerCase().replace(/#/g, "/");
   /** @type {string[]} */ let wanted = objects.map((o) => o.toLowerCase().replace(/#/g, "/"));
-  /** @type {string[]} */ const ddls = [];
+  /** @type {import("./frontend-cache-types.ts").CdsSource[]} */ const ddls = [];
   /** @param {string} dir @returns {void} */ const walk = (dir) => {
     for (const e of readdirSync(dir, {withFileTypes: true}).sort((x, y) => x.name.localeCompare(y.name))) {
       const path = join(dir, e.name);

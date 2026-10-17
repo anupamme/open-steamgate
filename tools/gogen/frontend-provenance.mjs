@@ -13,7 +13,7 @@ function loadRecorder() {
 }
 
 /** Disk builds record internally; expanded public reporting stays opt-in. */
-/** @param {(options: import('./frontend-session-types.ts').CompileOptions) => import('./frontend-session-types.ts').SessionProgram} compile @returns {(options: import('./frontend-session-types.ts').CompileOptions) => import('./frontend-session-types.ts').SessionProgram} */ export function withProvenance(compile) {
+/** @param {(options: import('./frontend-session-types.ts').CompileOptions) => import('./frontend-types.ts').FrontendProgram} compile @returns {(options: import('./frontend-session-types.ts').CompileOptions) => import('./frontend-types.ts').FrontendProgram} */ export function withProvenance(compile) {
   return (options) => {
     /** @type {boolean} */ const expose = options.provenance ?? (process.env.GOGEN_PROVENANCE === "1");
     const run = () => {
