@@ -370,7 +370,6 @@ export function objectCache(registry, root, dependencyCache = false) {
   return cache;
 }
 
-const current = new Set(["currentClass", "currentOwner", "currentTypes"]);
 /** @param {import("./frontend-session-types.ts").SessionInput} session @param {import("./frontend-session-types.ts").Registry} registry @returns {void} */
 export function prepareDiskSession(session, registry) {
   if (!session) return;
@@ -470,7 +469,7 @@ export const compileDiskClass = /** @param {import('./frontend-session-types.ts'
     const ir = recorded ? recorded.ir : lower(ctx, obj);
     if (recorded?.replay) session.classes.set(key, {file, structure: file.getStructure(), ir,
       replay: recorded.replay, supplied: suppliedKey(program, key),
-      current: Object.fromEntries([...current].map((k) => [k, program[k]]))});
+      current: {currentClass: program.currentClass, currentOwner: program.currentOwner, currentTypes: program.currentTypes}});
     return ir;
   });
   if (!session?.disk) return run();
