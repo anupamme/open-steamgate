@@ -64,16 +64,15 @@ export class CaughtIndex {
       }
     }
   });
-  /** @type {number | undefined} */ let epoch;
-  let complete = false;
+  const state = {/** @type {number | undefined} */ epoch: undefined, complete: false};
   /** @returns {boolean} */ const safe = () => {
     const trace = provenanceGraph(reg);
     if (!trace) return true;
-    if (trace.unknownVersion === epoch) return complete;
+    if (trace.unknownVersion === state.epoch) return state.complete;
     /** @param {{queries: Map<string, {role: string, kind: string}>} | undefined} entry @returns {boolean} */ const unknown = (entry) => [...entry?.queries.values() ?? []].some((q) => q.role === "artifact" && q.kind === "unknown-scan");
-    epoch = trace.unknownVersion;
-    complete = !unknown(trace.global) && ![...providers].some((owner) => unknown(trace.artifacts.get(owner)));
-    return complete;
+    state.epoch = trace.unknownVersion;
+    state.complete = !unknown(trace.global) && ![...providers].some((owner) => unknown(trace.artifacts.get(owner)));
+    return state.complete;
   };
   /** @type {Map<string, boolean>} */ const values = new Map();
   /** @param {readonly string[]} names @returns {boolean} */ const answer = (names) => names.some((name) => ancestors.has(name));
