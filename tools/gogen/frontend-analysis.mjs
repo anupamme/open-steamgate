@@ -1,7 +1,7 @@
 import {parseObserved} from "./frontend-inventory.mjs";
 // Source-only analyses, keyed by the immutable parsed/rearranged node.
 import {readText, listEntries, join} from "./host-io.ts";
-import {parseSamc} from "../osd-samc.ts";
+import {parseSamc} from "../osd-samc.mjs";
 
 // Match frontend.mjs: AST instanceof checks must use the transpiler's core.
 import {createRequire} from "node:module";

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import {execFileSync} from "node:child_process";
 import {readFileSync} from "node:fs";
-import {parseSamc} from "../tools/osd-samc.ts";
+import {parseSamc} from "../tools/osd-samc.mjs";
 import {parseSamc as hostParser, AmcBroker} from "../tools/osd-amc.mjs";
 import {parseSamc as parentParser} from "./fixtures/samc-parser-parent.mjs";
 

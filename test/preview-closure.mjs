@@ -118,17 +118,19 @@ describe("preview TypeScript boundary in webpack", function () {
     });
   });
 
-  it("strips both approved paths and keeps classic-worker module lowering", async () => {
+  it("bundles runtime JS and strips approved gogen types for classic workers", async () => {
     const {writeFileSync} = await import("node:fs");
     const entry = resolve(scratch, "entry.mjs");
-    writeFileSync(entry, `import {parseSamc} from "../../tools/osd-samc.ts";
-import {typeName} from "../../tools/gogen/go-symbols.ts";
+    writeFileSync(entry, `import "../../tools/gogen/ir.ts";
+import {parseSamc} from "../../tools/osd-samc.mjs";
+import {typeName} from "../../tools/gogen/go-symbols.mjs";
 self.result = [parseSamc(""), typeName("a")];`);
     const stats = await compile(entry);
     expect(stats.hasErrors(), stats.toString({errorDetails: true})).to.equal(false);
     const resources = [...stats.compilation.modules].map(module => module.resource).filter(Boolean);
-    expect(resources).to.include(resolve("tools/osd-samc.ts"));
-    expect(resources).to.include(resolve("tools/gogen/go-symbols.ts"));
+    expect(resources).to.include(resolve("tools/gogen/ir.ts"));
+    expect(resources).to.include(resolve("tools/osd-samc.mjs"));
+    expect(resources).to.include(resolve("tools/gogen/go-symbols.mjs"));
     const {runInNewContext} = await import("node:vm");
     const scope = {self: {}};
     runInNewContext(readFileSync(resolve(scratch, "bundle/worker.js"), "utf8"), scope);
@@ -151,7 +153,7 @@ self.result = [parseSamc(""), typeName("a")];`);
     const {includes} = (await import("node:module")).createRequire(import.meta.url)("../scripts/preview-typescript.cjs");
     const nested = resolve("tools/gogen/node_modules/pkg/index.ts");
     expect(includes.some(one => typeof one === "string" ? one === nested : one(nested))).to.equal(false);
-    expect(includes.some(one => typeof one === "string" ? one === resolve("tools/gogen/go-symbols.ts") : one(resolve("tools/gogen/go-symbols.ts")))).to.equal(true);
+    expect(includes.some(one => typeof one === "string" ? one === resolve("tools/gogen/ir.ts") : one(resolve("tools/gogen/ir.ts")))).to.equal(true);
   });
 
   for (const contents of ["export const value = 1;", "export const value: number = 1;"]) {

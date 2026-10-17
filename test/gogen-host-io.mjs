@@ -9,7 +9,7 @@ import * as host from "../tools/gogen/host-io.ts";
 import * as compat from "../tools/gogen/host-io-compat.mjs";
 import {isSourceIdentity, SOURCE} from "../tools/osd-source-identity.mjs";
 
-const roots = ["frontend.mjs", "emit-go.mjs", "emit-js.mjs", "symbols.ts", "go-symbols.ts"]
+const roots = ["frontend.mjs", "emit-go.mjs", "emit-js.mjs", "symbols.ts", "go-symbols.mjs"]
   .map((file) => `tools/gogen/${file}`);
 
 // Exact imports, not file-wide exemptions: a new builtin/API still fails.

@@ -24,6 +24,8 @@ on:
     paths:
       - 'tools/gogen/**'
       - 'tsconfig.gogen.json'
+      - 'tools/osd-samc.mjs'
+      - 'test/osd-no-ts-runtime.mjs'
       - 'test/fixtures/ir-pairs/**'
       - 'src/demo_data/**'
       - 'libs.lock.json'
@@ -47,6 +49,8 @@ on:
     paths:
       - 'tools/gogen/**'
       - 'tsconfig.gogen.json'
+      - 'tools/osd-samc.mjs'
+      - 'test/osd-no-ts-runtime.mjs'
       - 'test/fixtures/ir-pairs/**'
       - 'src/demo_data/**'
       - 'libs.lock.json'
