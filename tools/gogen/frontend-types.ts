@@ -73,7 +73,7 @@ export interface FrontendProgram extends Omit<Mutable<Program>, "classes" | "str
   localDefs?: Map<string, abaplint.IClassDefinition>; faeN?: number;
   tables?: FrontendTable[]; rtti?: RttiTable; cdsViews?: Record<string, string>;
   lockObjects?: Map<string, LockObject>; exceptionSupers?: Record<string, string>;
-  amcChannels?: readonly import("./emit-go-types.ts").AmcChannel[]; ownershipSafety?: OwnershipSafetyMap;
+  amcChannels?: ReturnType<typeof import("../osd-samc.mjs").parseSamc>; ownershipSafety?: OwnershipSafetyMap;
 }
 export interface CompilationContext { reg: Registry; program: FrontendProgram }
 export interface NativeMe { fn: string; params: [string, "importing" | "exporting", "string" | "xstring" | "i", boolean?][] }
