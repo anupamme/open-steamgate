@@ -1,3 +1,4 @@
+import {createGoTestDir} from "./go-test-module.mjs";
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {spawnSync} from "node:child_process";
@@ -15,7 +16,7 @@ const core = libraryPath(home, "open-abap-core");
 
 test("host-replaced kernel hooks preserve ABAP values and exceptions", () => {
   const sourceDir = mkdtempSync(join(tmpdir(), "gogen-hostclass-"));
-  const goDir = mkdtempSync(join(here, "go", "cmd", "gogen-hostclass-test-"));
+  const {dir: goDir, goRoot} = createGoTestDir("gogen-hostclass-test-");
   try {
     for (const name of ["zcl_osd_enq_kernel.clas.abap", "zcx_osd_adt.clas.abap"]) {
       writeFileSync(join(sourceDir, name), readFileSync(join(here, "../../src/adt", name)));
@@ -153,11 +154,11 @@ func TestHooks(t *testing.T) {
  if plain == nil { t.Fatal("ordinary host error was swallowed") }
 }
 `);
-    const run = spawnSync("go", ["test", "-vet=off", `./cmd/${basename(goDir)}`], {cwd: join(here, "go"), encoding: "utf8", timeout: 120000, env: {...process.env, GOFLAGS: "-buildvcs=false", GOCACHE: process.env.GOCACHE ?? join(home, ".local/hostcls/go-cache")}});
+    const run = spawnSync("go", ["test", "-vet=off", `./cmd/${basename(goDir)}`], {cwd: goRoot, encoding: "utf8", timeout: 120000, env: {...process.env, GOFLAGS: "-buildvcs=false", GOCACHE: process.env.GOCACHE ?? join(home, ".local/hostcls/go-cache")}});
     assert.equal(run.status, 0, run.stderr || run.stdout);
   } finally {
     rmSync(sourceDir, {recursive: true, force: true});
-    rmSync(goDir, {recursive: true, force: true});
+    rmSync(goRoot, {recursive: true, force: true});
   }
 });
 
@@ -175,7 +176,7 @@ test("host-replaced signatures are refused with the offending parameter", () => 
 
 test("host Raise glue only sees its package and imported layers", () => {
   const sourceDir = mkdtempSync(join(tmpdir(), "gogen-hostclass-layers-"));
-  const goDir = mkdtempSync(join(here, "go", "cmd", "gogen-hostclass-layers-"));
+  const {dir: goDir, goRoot} = createGoTestDir("gogen-hostclass-layers-");
   try {
     for (const name of ["zcl_osd_enq_kernel.clas.abap", "zcx_osd_adt.clas.abap"]) {
       writeFileSync(join(sourceDir, name), readFileSync(join(here, "../../src/adt", name)));
@@ -204,10 +205,10 @@ ENDCLASS.
       importMarkers: ["HostCoreLayer"]});
     assert.doesNotMatch(upperCode, /func hostRaise\(/);
     writeFileSync(join(goDir, "app", "zz_generated.go"), upperCode);
-    const run = spawnSync("go", ["test", `./cmd/${basename(goDir)}/...`], {cwd: join(here, "go"), encoding: "utf8", timeout: 120000});
+    const run = spawnSync("go", ["test", `./cmd/${basename(goDir)}/...`], {cwd: goRoot, encoding: "utf8", timeout: 120000});
     assert.equal(run.status, 0, run.stderr + run.stdout);
   } finally {
-    rmSync(sourceDir, {recursive: true, force: true}); rmSync(goDir, {recursive: true, force: true});
+    rmSync(sourceDir, {recursive: true, force: true}); rmSync(goRoot, {recursive: true, force: true});
   }
 });
 

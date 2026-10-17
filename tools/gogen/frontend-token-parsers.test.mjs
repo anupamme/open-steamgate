@@ -1,3 +1,4 @@
+import {createGoTestDir} from "./go-test-module.mjs";
 import {parseObserved} from "./frontend-inventory.mjs";
 import {test} from "node:test";
 import assert from "node:assert/strict";
@@ -13,7 +14,6 @@ import {emitGo} from "./emit-go.mjs";
 import {emitJs} from "./emit-js.mjs";
 const require = createRequire(import.meta.url);
 const core = createRequire(require.resolve("@abaplint/transpiler/package.json"))("@abaplint/core");
-const goRoot = new URL("./go/", import.meta.url).pathname;
 function compile(body, extra = {}, inspect = () => {}) {
   const dir = mkdtempSync(join(tmpdir(), "gogen-tokens-"));
   try {
@@ -33,7 +33,7 @@ function clean(p) {
 }
 async function both(p, expected) {
   clean(p);
-  const dir = mkdtempSync(join(goRoot, "cmd", "token-parsers-"));
+  const {dir, goRoot} = createGoTestDir("token-parsers-");
   try {
     const js = join(dir, "generated.mjs");
     writeFileSync(js, emitJs(p, new URL("./js/abap.mjs", import.meta.url).href));
@@ -43,7 +43,7 @@ async function both(p, expected) {
     writeFileSync(join(dir, "generated_test.go"), `package main\nimport ("testing"; "osg/gogen/abap")\nfunc TestTokens(t *testing.T) { if got := ZCL_TOKENS_RUN(&abap.Session{}); got != ${expected} { t.Fatalf("got %d", got) } }\n`);
     const run = spawnSync("go", ["test", `./cmd/${basename(dir)}`], {cwd: goRoot, encoding: "utf8", timeout: 120000});
     assert.equal(run.status, 0, run.stdout + run.stderr);
-  } finally { rmSync(dir, {recursive: true, force: true}); }
+  } finally { rmSync(goRoot, {recursive: true, force: true}); }
 }
 function parsedBody(source) {
   const reg = new core.Registry();

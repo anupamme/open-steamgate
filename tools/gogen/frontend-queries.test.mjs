@@ -1,3 +1,4 @@
+import {createGoTestDir} from "./go-test-module.mjs";
 import {parseObserved} from "./frontend-inventory.mjs";
 import {execFileSync} from "node:child_process";
 import {mkdtempSync, rmSync, writeFileSync} from "node:fs";
@@ -393,7 +394,7 @@ test('superclass native bodies preserve descriptor guards, selection, names and 
       return {id: c.id, parent: p.absolute_name, subrc: s.sy.subrc};
     } catch (e) { return {id: c.id, error: String(e)}; }
   });
-  const dir = mkdtempSync(join(process.cwd(), 'tools/gogen/go/rtti-probe-'));
+  const {dir, goRoot} = createGoTestDir("rtti-probe-");
   let goRows;
   try {
     writeFileSync(join(dir, 'main.go'), `package main
@@ -416,7 +417,7 @@ row["parent"] = p.absolute_name; row["subrc"] = s.Sy.Subrc
 json.NewEncoder(os.Stdout).Encode(rows)
 }`);
     goRows = JSON.parse(execFileSync('go', ['run', '.'], {cwd: dir, encoding: 'utf8'}));
-  } finally { rmSync(dir, {recursive: true, force: true}); }
+  } finally { rmSync(goRoot, {recursive: true, force: true}); }
   // Collect all mismatches, so a pre-fix run demonstrates every defect.
   const mismatches = [];
   for (const [host, rows] of [['Go', goRows], ['JS', jsRows]]) for (const c of superCases) {
@@ -441,7 +442,7 @@ test('JS superclass inventory is emitted once at module scope in sorted order', 
 
 test('Go superclass native body compiles with either RTTI prerequisite omitted', async () => {
   const {superClassGo} = await import('./emit-exception.ts');
-  const dir = mkdtempSync(join(process.cwd(), 'tools/gogen/go/rtti-missing-'));
+  const {dir, goRoot} = createGoTestDir("rtti-missing-");
   try {
     for (const missing of ['CL_ABAP_TYPEDESCR', 'CL_ABAP_CLASSDESCR']) {
       const program = superProgram(rttiPairs, ['CL_ABAP_TYPEDESCR', 'CL_ABAP_CLASSDESCR'].filter(n => n !== missing));
@@ -455,7 +456,7 @@ func main() { defer func() { fmt.Print(recover()) }(); Native_GET_SUPER_CLASS_TY
       const out = execFileSync('go', ['run', '.'], {cwd: dir, encoding: 'utf8'});
       assert.ok(out.includes('NOT_COMPILED'), out);
     }
-  } finally { rmSync(dir, {recursive: true, force: true}); }
+  } finally { rmSync(goRoot, {recursive: true, force: true}); }
 });
 
 test("dynamic static RECEIVING lowers its named target; IMPORTING remains refused", () => {
