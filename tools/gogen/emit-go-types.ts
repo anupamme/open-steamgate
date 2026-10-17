@@ -118,6 +118,17 @@ export interface Method extends Omit<IR.Method, 'locals' | 'body'> {
   readonly body?: readonly Stmt[];
   readonly reason?: string;
 }
+// Emitted method bodies always carry their declaration and statement arrays.
+export interface LoweredMethod extends Method {
+  readonly locals: readonly Local[];
+  readonly body: readonly Stmt[];
+}
+// Omitted calls inspect only the result type, never a returning field name.
+export interface FactorySignature {
+  readonly name: string;
+  readonly params: readonly IR.Param[];
+  readonly returning?: {readonly type: IR.Type} | null;
+}
 export interface UnsupportedMethod {
   readonly name: string;
   readonly unsupported: string;

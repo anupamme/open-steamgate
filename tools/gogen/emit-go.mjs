@@ -34,7 +34,7 @@ const GO_RESERVED = new Set(("break default func interface select case defer go 
   + "uint32 uint64 uintptr true false nil iota me s math abap").split(" "));
 
 /** @type {boolean} */ let exportedFields = false, /** @type {import("./emit-go-types.ts").Ownership | undefined} */ OWNERSHIP, /** @type {import("./emit-go-types.ts").SymbolCollector | null | undefined} */ SYMBOLS;
-/** @param {import("./emit-go-types.ts").Field} v @returns {string} */ const ownedType = (v) => OWNERSHIP.declarations.has(v) ? (HELPER_IMPORTS.add("xbuf"), (v.type.k === "x" ? `[${v.type.len}]byte` : "hXbuf.Buffer")) : goType(v.type);
+/** @param {import("./emit-go-types.ts").Field | import("./emit-go-types.ts").SupportedAttribute} v @returns {string} */ const ownedType = (v) => OWNERSHIP.declarations.has(v) ? (HELPER_IMPORTS.add("xbuf"), (v.type.k === "x" ? `[${v.type.len}]byte` : "hXbuf.Buffer")) : goType(v.type);
 /** @param {string} name @returns {string} */ export const ident = (name) => {
   // A single leading underscore is reserved for compiler-only supplied flags.
   if (name.startsWith("\0")) return `_sup_${ident(name.slice(1))}`;
@@ -150,7 +150,7 @@ const GO_RESERVED = new Set(("break default func interface select case defer go 
   if (t?.k === "struct") return (STRUCTDEFS.get(t.go)?.fields ?? []).some((f) => needsCopy(f.type));
   return false;
 }
-/** @param {import("./emit-go-types.ts").Type} t @returns {string} */ function cloneName(t) {
+/** @param {import("./emit-go-types.ts").TableType | import("./emit-go-types.ts").StructType} t @returns {string} */ function cloneName(t) {
   const key = goType(t);
   if (!CLONES.has(key)) CLONES.set(key, {name: `clone_${CLONES.size}`, type: t});
   return CLONES.get(key).name;
@@ -736,7 +736,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
  * program did not compile dumps instead of passing for an unknown one.
  */
 /** @param {import("./emit-go-types.ts").ProgramInput} program @param {readonly import("./emit-go-types.ts").Class[]} classes @returns {string[]} */ function staticRegistry(program, classes) {
-  const wanted = program.dynStatics ?? new Set();
+  /** @type {Set<string>} */ const wanted = program.dynStatics ?? new Set();
   if (wanted.size === 0) return [];
   const out = ["func init() {", `\tabap.KnownClasses(${goStrings(classes.map((c) => c.name))}, ${goStrings([...(program.rtti?.known ?? [])].filter((n) => !n.includes("=>")))})`];
   for (const {key, cls, m, defaults} of dynamicAdapters(program)) {
@@ -941,7 +941,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     "\treturn func(receiver any, m amc.Message) {", "\t\tswitch m.Type {", ...cases,
     "\t\tdefault:", "\t\t\tpanic(abap.NotCompiled(\"AMC delivery\", \"no receiver for a \"+m.Type+\" message in this program\"))", "\t\t}", "\t}", "}", ""];
 }
-/** @param {import("./emit-go-types.ts").Class} cls @param {import("./emit-go-types.ts").Method} m @returns {string[]} */ function method(cls, m) {
+/** @param {import("./emit-go-types.ts").Class} cls @param {import("./emit-go-types.ts").LoweredMethod} m @returns {string[]} */ function method(cls, m) {
   SYMBOLS?.(cls, m, m.static ? funcName(cls.name, m.name) : typeName(m.name), m.static ? null : typeName(cls.name));
   const lines = [...(LINES && m.pos ? [`//line ${m.pos.file}:${m.pos.row}`] : []), `${signature(cls, m)} {`, "\t_ = s"];
   if (m.static && m.name !== "CLASS_CONSTRUCTOR" && chainCctor(cls)) lines.push(`\tEnsure_${typeName(cls.name)}(s)`);
@@ -956,7 +956,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   // 00 bytes, d, t, n, p) starts at the type's initial value, as the JS
   // emitter's locals do; before (ultra/packs, ZCL_GOGEN_T_BYTECAT) an x never
   // assigned read as zero bytes long
-  const sunkLocals = (/** @type {import("./emit-go-types.ts").SinkLocals} */ (sinkLocals))(m);
+  const sunkLocals = ((sinkLocals))(m);
   const localIndex = lines.length;
   // the RETURNING parameter starts at its initial value too (the JS emitter's
   // let r = zero(t)); Go's named result starts at Go's zero value
@@ -1035,7 +1035,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     for (const method of cls.methods) {
       if (!(program.exceptionSupers ?? {})[cls.name] || !method.static || method.returning?.type.k !== "ref"
         || !method.params.every((p) => p.suppliedOf || p.optional || p.default !== undefined)) continue;
-      cases.push([`${cls.name}=>${method.name}`, expr((/** @type {import("./emit-go-types.ts").OmittedFactoryCall} */ (omittedFactoryCall))(program, cls, method), {cls})]);
+      cases.push([`${cls.name}=>${method.name}`, expr(((omittedFactoryCall))(program, cls, method), {cls})]);
     }
   }
   const lines = ["// hostRaise turns a host's factory request into an ABAP exception.",
@@ -1192,7 +1192,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   return `func(a, b int) int {\n\t${parts.join("\n\t")}\n\treturn 0\n}`;
 }
 
-/** @param {import("./emit-go-types.ts").KeyLoop} st @param {import("./emit-go-types.ts").MethodContext} ctx @param {string} t @param {number} d @returns {string[]} */ function keyLoop(st, ctx, t, d) {
+/** @param {Extract<import("./emit-go-types.ts").Stmt, {s: "loop"}>} st @param {import("./emit-go-types.ts").MethodContext} ctx @param {string} t @param {number} d @returns {string[]} */ function keyLoop(st, ctx, t, d) {
   const n = ctx.loop++;
   const tb = expr(st.table, ctx);
   const i = `ord${n}[k${n}]`;
@@ -1365,7 +1365,7 @@ const LINES = !env("GOGEN_NOLINE");
 
 /** @param {import("./emit-go-types.ts").Stmt} st @param {import("./emit-go-types.ts").MethodContext} ctx @param {number} d @returns {string[]} */ function stmtLines(st, ctx, d) {
   const t = tab(d);
-  const owned = (/** @type {import("./emit-go-types.ts").OwnedStatement} */ (ownedStatement))(st, ctx, t, {ownership: OWNERSHIP, expr, place, rowValue, helper: helperFn});
+  const owned = ((ownedStatement))(st, ctx, t, {ownership: OWNERSHIP, expr, place, rowValue, helper: helperFn});
   if (owned) return owned;
   switch (st.s) {
     case "assign":
@@ -2214,7 +2214,7 @@ ${t}	}`));
 /** @type {ReadonlyMap<string, string>} */ const FN_F = new Map([["SIN", "abap.Sin"], ["COS", "abap.Cos"], ["TAN", "math.Tan"], ["SQRT", "abap.SqrtF"], ["EXP", "math.Exp"], ["LOG", "abap.LogF"], ["LOG10", "math.Log10"]]);
 
 /** @param {import("./emit-go-types.ts").Expr} e @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function expr(e, ctx) {
-  const owned = (/** @type {import("./emit-go-types.ts").OwnedExpression} */ (ownedExpression))(e, ctx, {ownership: OWNERSHIP, expr, place, helper: helperFn});
+  const owned = ((ownedExpression))(e, ctx, {ownership: OWNERSHIP, expr, place, helper: helperFn});
   if (owned !== null) return owned;
   switch (e.e) {
     case "static": return place(e, ctx);
