@@ -128,6 +128,12 @@ export interface CacheSession {
   disk?: CacheDisk;
 }
 export type SessionInput = Partial<CacheSession> | null | undefined;
+// The three disk-cache entry points compileProgram holds when cacheDir is set.
+export interface DiskFrontend {
+  cacheSession(session: SessionInput, registry: Registry, cacheDir: string | undefined): SessionInput;
+  prepareDiskSession(session: SessionInput, registry: Registry): void;
+  compileDiskClass(ctx: LoweringContext, obj: ClassObject, lower: ClassLowering, session: CacheSession | null | undefined): ClassIR;
+}
 export interface CompileOptions {
   folders: string[];
   objects: string[];
