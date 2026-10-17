@@ -175,7 +175,7 @@ Format adapted from `larshp/hithub` (MIT).
 - Minimal ABAP reproducer: `REPORT zprobe. ULINE. WRITE /10 'b'.`
 - Isolation: `converter/src/passes/lower-statements.mjs:1760-1764` strips `/`
   from a WRITE immediately after ULINE, so this becomes `WRITE 10 'b'.`
-  The generated writer no longer receives the explicit line positioning.
+  The generated writer no longer receives the explicit line positioning. This is redundant and was not observed to break output: `ULINE. WRITE /10 'a'.` still prints `a` at column 10 of the next line, because the writer's cursor model opens it. It matters only if that cursor model changes.
 - Expected SAP behaviour: preserve `/10` positioning; **unmeasured; measure on A4H**.
 - Actual behaviour: the slash removal is redundant with the writer's cursor
   model and wrong for explicit positioning. The adapter removes only the
