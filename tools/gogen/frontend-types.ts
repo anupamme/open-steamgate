@@ -1,5 +1,6 @@
 // Mutable construction state for frontend.mjs; the public IR stays in ir.ts.
 import type * as abaplint from "@abaplint/core";
+import type {Registry} from "./frontend-session-types.ts";
 import type {Attribute, Catch, Class, DatabaseTable, Diagnostic, Event, Expr, Method, Param, Program, SqlPredicate, Stmt, Type, TypedExpr, WriteType} from "./ir.ts";
 
 export type Mutable<T> = {-readonly [K in keyof T]: T[K]};
@@ -56,6 +57,7 @@ export interface FrontendClass extends Omit<Mutable<Class>, "methods" | "attribu
   ctorBroken?: string;
 }
 export interface FrontendProgram extends Omit<Mutable<Program>, "classes" | "structs" | "sigs" | "skipped" | "partial" | "frontendCounts" | "tables" | "consts" | "intfOwnAttrs" | "interfaceAttrs" | "exceptionSupers"> {
+  reg: Registry;
   classes: FrontendClass[]; structs: Map<string, StructType>; sigs: Map<string, MethodSignature>;
   anonStructs: Map<abaplint.AbstractType, string>; badStructs: Map<string, string>; ddicOutputLen: Map<string, number>;
   dynamicDispatch?: {key: string; owner: string; method: string; defaults: {name: string; value: Expr}[]}[];
@@ -69,7 +71,7 @@ export interface FrontendProgram extends Omit<Mutable<Program>, "classes" | "str
   lockObjects?: Map<string, LockObject>; exceptionSupers?: Record<string, string>;
   amcChannels?: readonly import("./emit-go-types.ts").AmcChannel[]; ownershipSafety?: OwnershipSafetyMap;
 }
-export interface CompilationContext { reg: abaplint.IRegistry; program: FrontendProgram }
+export interface CompilationContext { reg: Registry; program: FrontendProgram }
 export interface NativeMe { fn: string; params: [string, "importing" | "exporting", "string" | "xstring" | "i", boolean?][] }
 export interface NativeArgument { ref: boolean; value: ValueExpr }
 export interface KernelSpec { fn?: string; args?: string[]; loop?: string; binds?: string[]; end?: boolean; bound?: string; nop?: boolean }

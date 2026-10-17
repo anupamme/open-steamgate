@@ -129,6 +129,11 @@ export interface CacheSession {
 }
 export type SessionInput = Partial<CacheSession> | null | undefined;
 export interface CompileOptions {
+  folders: string[];
+  objects: string[];
+  tolerant?: boolean;
+  skip?: (path: string) => boolean;
+  includeTests?: boolean | Set<string>;
   [key: string]: unknown;
   provenance?: boolean;
   cacheDir?: string;
