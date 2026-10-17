@@ -24,9 +24,9 @@ without making every scheduled object a dependency of that class.
 
 A runner content certificate selects whether to record dependency metadata.
 An unchanged invocation uses the global content guard without repeating the
-observer. A changed invocation records again and can consult validated v3
-entries. The certificate hashes raw input bytes, logical relative filenames,
-layer order and tool content; it contains no filesystem timestamps or build-root
+observer. An eligible existing-class edit uses scoped recording and can consult
+validated v3 entries; other changes restore full recording. The certificate
+hashes raw input bytes, logical relative filenames, layer order and tool content; it contains no filesystem timestamps or build-root
 paths. It is a performance hint, never authority to reuse IR. A stale or corrupt
 certificate cannot bypass the normal global key or replay validation.
 Validated dependency hits are promoted atomically into the current global
@@ -112,7 +112,205 @@ The matrix includes closure scheduling, guarded round reuse, both reverse-edge
 fault detectors, and real runner timing/round checks. The host boundary passes all four
 tests; TypeScript and the 153-budget changed-file size gate also pass.
 
-### Full-shard proof for step 4b.2
+## Scoped recording (step 4b.2b)
+
+The first edited invocation previously left the observer active throughout all
+six frontend rounds. Reusing 3,048 classes still paid for provenance checks on
+every preparation, syntax and RTTI registry read. The row-recording subcounter
+excluded most getter/edge/gap checks, so its small value did not measure this
+cost. Unchanged runner invocations already bypassed the observer completely.
+
+The cache now publishes a checksummed `recording.plan` containing the effective
+ordered owner/file hashes, config/CDS identity, tool identity, provider rows and
+redundant forward/reverse provider edges. This is a recording plan, not authority
+to reuse IR. Certificate validation, dependency keys and atomic ordered replay
+remain the authorities for hits. A source edit seeds the affected providers;
+their reverse closure and any provider with potentially changed or uncovered
+query answers must refresh. Unchanged, covered provider observations can be
+retained while the observer is idle. Complete ABAP syntax and successful
+recorded DDIC construction are required before trusting a provider; stateless
+DDIC getters need no fictitious cached `parsedType` field.
+
+The program-level observations that remain necessary are:
+
+| Observation | Recording scope and reason |
+| --- | --- |
+| Parser/macro expansion, global-definition construction, syntax/type resolution | Affected or uncovered providers and builds they invoke. Lowering may consume definitions, scopes, expanded statements or DDIC types that were built earlier; recording only the lowering lookups cannot recover these dependencies. |
+| Supplied-signature preparation | Affected providers' declaration-owner lookups. The complete current supplied index is still rebuilt without observing unrelated providers. Its named contribution answers are recorded when a missing class consumes them, and previous answers are checked by certificate validation. |
+| Local-definition discovery | Each selected discovery frame. Its answer depends on selection and test inclusion as well as source bytes, so it must refresh even without an owner edit. Provider syntax observations survive retained closure rounds. |
+| Ownership safety | Affected providers' expanded-statement answer. This can change with macros and belongs in their refreshed provider metadata. Unchanged answers are retained under the provider proof. |
+| Actual class lowering | Every miss, including conservative replay refusals, opens a complete lowering frame. All nested provider and named-answer reads are observed. Hits open no lowering frame and merge no old lowering transcript. |
+
+Selection/closure discovery, frontend preparation for other owners, certificate
+query evaluation, replay, RTTI and final-output passes run with the observer
+idle. The existing host adapters retain their synchronous invocation lifetime;
+idle registry reads bypass their observation work. No compiler-module
+initialization hooks or new builtin imports are introduced. Full graph/key/index
+publication still runs for newly recorded lowerings and retains validated
+provider closure rows. The recording plan is atomically replaced after a
+successful compile, preserving new provider edges for later edits and reverts.
+
+Inventory additions/removals, owner roles, file order, non-class edits,
+config/CDS/tool changes, missing/corrupt plans and unexplained global artifact
+observations restore full recording. A supplied registry that changes its
+input scope after its parse boundary gets an explicit unknown marker and
+cannot publish a complete dependency entry. Unknown provider observations and
+failed/unobserved construction cannot become trusted through a plan.
+The published scope must match the recorder's last observed inventory/config;
+inputs synthesized after that boundary make the plan full-only. Discarding a
+retained build's provider rows leaves an explicit incomplete marker.
+
+The mutation oracle now classifies its emission projections as final output
+and its independent borrowed-definition replay control as scheduling. Its
+production dependency mode initializes the plan before the supplied registry's
+parse and reports `scopedRecording`, so a successful oracle cannot silently
+exercise only full recording. The real-library smoke entered scoped mode in
+both line modes with byte-identical cold output. Focused tests also cover a
+newly introduced provider edge followed by an edit of that provider and a
+revert, retained closure-round syntax, stateless DDIC typing, corrupt plans and
+both reverse-edge negative controls.
+
+The serial proof accepts `--baseline <source-copy>`. It primes an independent
+cache for that copy, then runs baseline warm immediately before candidate warm.
+The proof serializes its own large processes; other sessions may still run
+concurrently and must be reported with the timings. Its report includes
+recording scopes, per-round invalidations, a measured edited-disabled comparison, the 450-second
+planning gate and the measured baseline warm comparison. Baseline source copies
+can be made with `git archive`; no shared worktree or installed input is edited.
+
+The matched warm comparison on implementation `163c44dd` measured `e718aa49`
+at 393.2 s (317.3 s frontend), immediately followed by this branch at 364.5 s
+(298.9 s frontend): 7.3% faster in total. The candidate's graph-loading,
+certificate-validation and observation counters are all zero in the warm run.
+The historical 346.2-versus-390.0 s comparison did not reproduce; the baseline
+itself now takes 393.2 s. Those historical absolute times confounded machine/run
+variation with code changes, and certificate-index work cannot explain the warm
+difference because the warm path does none. This pair does not isolate the
+individual causes of historical machine/run variation.
+
+Both warm runs reuse 3,048 of 3,055 classes in the final round. Their Go and
+database artifacts are byte-identical across versions. The symbol maps are also
+identical except for the build stamp: the Git archive reports `unknown`, while
+the checkout reports the implementation commit. All within-version oracle
+comparisons retain the stamp and require byte identity for `symbols.json` too.
+
+The unchanged-input scoped rounds refresh 14 provider ledgers: eleven domains
+without observed type construction, the round-dependent local discovery owner,
+and its two reverse-dependent core providers. The other 3,979 provider ledgers
+stay retained. These are conservative metadata refreshes, not fourteen class
+cache misses.
+
+### Resumed full-shard measurements (step 4b.2b)
+
+Measured on 2026-10-17 at implementation `163c44dd`, with installed
+`zlnt-system` v0.5.2, copied inputs, six closure rounds, a 24 GiB Node heap,
+and a separate 70 GiB / zero-swap systemd scope for every large child.
+Go compilation was skipped. Each total is the child’s `total` phase.
+
+The six completed pre-reset cases were retained. The interrupted edited
+attempt was discarded: it had already replaced the recording plan, published
+3,077 cache payloads and changed four dependency candidate indexes. The plan
+checksum passed, but the pre-edit state could not be reconstructed reliably.
+One fresh cold-enabled recovery rebuilt that state before edited-enabled and
+edited-disabled ran back to back in separate processes. The recovery artifacts
+match the original cold-enabled artifacts byte for byte. No completed case was
+rerun as a replacement measurement.
+
+**Concurrent-load caveat:** These are shared-host timings. The pre-reset cases
+have incomplete concurrent-load history; the abandoned partial edit is not a
+measurement. Before recovery, uptime was 16 minutes, load was 2.99 / 2.15 / 1.54,
+106 GiB memory was available and swap use was zero. Other sessions were running
+abapiti step4 frontend/self-host jobs (including Go compilation), and HANA
+services were active. Light validation overlapped only recovery and finished
+before the edited pair. The resumed timings below also carry a concurrent-load
+caveat; the load snapshots are in the local
+evidence. The pair is observational and does not isolate the effect of load.
+
+The 30-second load samples during the edited pair show:
+
+| Run | One-minute load range | Minimum available memory (GiB) |
+| --- | ---: | ---: |
+| edited-enabled | 3.74–10.70 | 91.5 |
+| edited-disabled | 4.06–9.06 | 89.6 |
+
+| Run | Cache | Frontend (s) | Emission + gofmt (s) | Total (s) |
+| --- | --- | ---: | ---: | ---: |
+| Cold | on | 1,227.9 | 63.3 | 1,293.3 |
+| Baseline `e718aa49` cold | on | 1,578.6 | 60.6 | 1,641.3 |
+| Baseline `e718aa49` warm | on | 317.3 | 72.5 | 393.2 |
+| Warm | on | 298.9 | 63.1 | 364.5 |
+| Cold | off | 524.6 | 54.7 | 581.4 |
+| Warm | off | 507.1 | 57.8 | 567.1 |
+| Recovery cold | on | 1,246.1 | 64.0 | 1,313.2 |
+| Edited | on | 566.5 | 104.0 | 672.6 |
+| Edited | off | 541.6 | 60.8 | 604.6 |
+
+Edited-enabled does not beat edited-disabled: 672.6 s versus 604.6 s (11.3% slower).
+The 450 s planning gate is missed. Enabled/disabled emission is 83.836 /
+39.488 s; gofmt is 20.205 / 21.318 s. The frontend difference is 24.844 s.
+The larger emission difference is measured under the changing load above;
+this pair cannot attribute it to a code change.
+
+`edited-enabled` reports `dependencyRecording=true`, 9 lowered and 3,046 reused
+in its final round. `edited-disabled` reports `dependencyRecording=false`,
+3,055 lowered and 0 reused in its final round.
+
+Edited-enabled per-round `OSABAP_TIMING` counters (seconds):
+
+| Round | Graph loading | Certificate validation | Observation rows | Replay | Finalization | Lowered / reused | Refresh / retained providers |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 25.677 | 20.544 | 0.082 | 5.989 | 49.727 | 13 / 2997 | 17 / 3962 |
+| 2 | 7.218 | 20.948 | 0.088 | 1.891 | 15.839 | 12 / 3009 | 14 / 3979 |
+| 3 | 8.880 | 0.775 | 0.079 | 2.125 | 1.380 | 25 / 3012 | 14 / 3979 |
+| 4 | 6.794 | 0.177 | 0.063 | 1.937 | 1.342 | 21 / 3030 | 14 / 3979 |
+| 5 | 7.280 | 0.115 | 0.062 | 1.827 | 1.451 | 10 / 3044 | 14 / 3979 |
+| 6 | 8.037 | 0.046 | 0.064 | 2.162 | 1.204 | 9 / 3046 | 14 / 3979 |
+
+These counters overlap and do not partition frontend time. Edited-disabled
+has zero for all five counters in every round. Dependency recording remains
+enabled throughout the edited-enabled invocation; scoped idle regions account
+for its reduced observation work, rather than disabling dependency validation.
+
+The source edit is `CLAS ZCL_LNT_ADD_MODULE`, changing the existing test literal
+from `add 2` to `add 3`. Round 1 refreshes that provider and its affected
+`ZCL_LNT_P_STATEMENTS_DEL` / `ZCL_LNT_P_STATEMENTS_FAC` providers, together with
+the conservative refresh set. Later rounds refresh fourteen providers: eleven
+domains without observed type construction, the local discovery owner
+`CL_ABAP_UNIT_ASSERT`, and `CL_ABAP_TESTDOUBLE` / `CL_AUNIT_AUTHORITY_CHECK`.
+Other proven provider rows remain retained. Parser/macro, syntax/type, supplied
+declaration, local-discovery and ownership observations remain recorded in
+affected/selected frames; every actual lowering miss records a complete frame.
+Hits still pass ordered replay and do not import old lowering transcripts.
+
+This resumed edit follows one cold prime, without an extra unchanged warm
+pass. Across all closure rounds it lowers 47 distinct classes; three lowering
+decisions explicitly cite the edited owner as their dependency invalidation.
+Other misses cite absent candidates, replay refusals or supplied-query changes.
+They remain fully recorded and are not all source dependency invalidations.
+
+Edited warm and edited cache-disabled cold are byte-identical for all four
+artifacts: `zz_app.go`, `zz_generated.go`, `zz_db.json`, and `symbols.json`.
+Only `zz_generated.go` differs from the unedited output.
+
+| Artifact | Edited SHA-256 (both runs) |
+| --- | --- |
+| `symbols.json` | `123e899453e3d8cd2984fe8104150ce8ddf8dabe0a4b11f484e833e59cfc2fd8` |
+| `zz_app.go` | `0f9c674325764e70e1ab344d955df38c6cfa09223864655c95d853af72d5b74c` |
+| `zz_db.json` | `96f34c8d2780b008a708b9f1de6e7c5edaed9fe7aed5a15b04768b252b2d37f8` |
+| `zz_generated.go` | `5d035242edf8115d0b53b3e6de9efadd7fcf587d31e340ae9bc2d9b7d6576425` |
+
+Edited manifest SHA-256: `ee31d4a1e69d630f148899245afb252b063e4f62be17a78359833532136454a5`.
+
+Light validation on this implementation passed 266 focused cache/runner tests
+(no failures or skips), all four host-I/O tests, TypeScript, and all 153
+changed-file size budgets. The explicit changed-path leak scan also passed.
+
+Machine-local evidence: `/mnt/ssd-510/osg/stoker/tmp/c4b2b-scoped-proof/report.json`,
+per-case logs/diagnostics/build roots beside it, and
+`/mnt/ssd-510/osg/stoker/tmp/c4b2b-resume-load.ndjson`. Interrupted evidence has
+`.interrupted` suffixes; the six-case report is `report.before-resume.json`.
+
+### Full-shard proof for step 4b.2 (historical)
 
 Measured on 2026-10-17 from the implementation based on `e718aa49`, with
 installed `zlnt-system` v0.5.2 and tool identity `b723301a419c`. All six cases
