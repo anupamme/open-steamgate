@@ -89,7 +89,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
         // Later rounds can select any loaded object. Normalize once before
         // parsing so newly selected app classes match a fresh final registry.
         reg.addFile(new abaplint.MemoryFile(e.name,
-          auditedBookkeeping("input-normalization", () => normalizeSource(source, e.name, abaplint))));
+          auditedBookkeeping("input-normalization", () => normalizeSource(source, e.name, {Registry: abaplint.Registry, MemoryFile: abaplint.MemoryFile}))));
       }
       // a CDS view's source: its SQL view name, for the table registry
       else if (/\.ddls\.asddls$/i.test(e.name)) ddls.push({filename: e.name, source: readFileSync(path, "utf8")});
@@ -139,9 +139,9 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   // Eager collections keep first writes inside the replay proxies. Anonymous
   // type identities use a Map so their ordered effects can be replayed too;
   // these keys already belong to the registry retained for this compilation.
-  /** @type {import("./frontend-types.ts").FrontendProgram} */ const program = {anonStructs: new Map(), badStructs: new Map(), ddicOutputLen: new Map(),
+  /** @type {import("./frontend-types.ts").FrontendProgram} */ const program = /** @type {import("./frontend-types.ts").FrontendProgram} */ (/** @type {unknown} */ ({anonStructs: new Map(), badStructs: new Map(), ddicOutputLen: new Map(),
     excAttrs: new Set(), dynStatics: new Set(), intfOwnAttrs: new Map(), interfaceAttrs: new Map(), structs: new Map(), consts: new Map(), classes: [], skipped: [], missing: new Set(), wanted: new Set(wanted.map(upper)),
-    diagnostics, frontendCounts: {lowered: 0, reused: 0, loweredClasses: [], reusedClasses: []}, interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: [], events: new Map()};
+    diagnostics, frontendCounts: {lowered: 0, reused: 0, loweredClasses: [], reusedClasses: []}, interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: [], events: new Map()}));
   if (PERSIST_LOWERING) Object.assign(program, {faeN: 0, localDefs: new Map()});
   if (PERSIST_LOWERING) PROGRAM = program;
   program.supplied = suppliedIndex(reg, program.wanted, abaplint, suppliedMethods, declaringClass);
@@ -172,7 +172,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
       (PERSIST_LOWERING ? program.localDefs : LOCAL_DEFS).set(l.name, l.def);
       localDefs.push(l);
     }
-    return {names: [...program.localInterfaces.keys(), ...program.locals.values()].filter((k) => k.startsWith(`${upper(obj.getName())}|`) || k.startsWith(`${upper(obj.getName())}:`)), value: undefined}; });
+    return {names: [.../** @type {NonNullable<import("./frontend-types.ts").FrontendProgram["localInterfaces"]>} */ (program.localInterfaces).keys(), .../** @type {Map<string, string>} */ (program.locals).values()].filter((k) => k.startsWith(`${upper(obj.getName())}|`) || k.startsWith(`${upper(obj.getName())}:`)), value: undefined}; });
   }
   // parity-wave1: the function groups named are compiled too, one pseudo
   // class FUGR:<group> per group with a static method per module; their
@@ -218,7 +218,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
         append(sigs, Array.from(Array.isArray(all) ? all : all.getAll()).map((m) => methodSignature(ictx, i, `${i}~${upper(m.getName())}`)));
       }
       // a CLASS-METHODS of an interface is the class's function, not a method of the reference
-      program.interfaceMethods.set(name, sigs.filter((x) => !x.unsupported && !x.static));
+      /** @type {Map<string, readonly import("./ir.ts").Method[]>} */ (program.interfaceMethods).set(name, /** @type {import("./ir.ts").Method[]} */ (/** @type {unknown} */ (sigs.filter((x) => !x.unsupported && !/** @type {import("./frontend-types.ts").Signature} */ (x).static))));
       interfaceAttributes(program, name);
     }
     pending = [...program.interfaces].filter((n) => !program.interfaceMethods.has(n));
@@ -1070,12 +1070,12 @@ function compiledFunctionCall(node, ctx, text, name) {
     const written = upper(node.findFirstExpression(Expressions.MethodName).concatTokens());
     const name = redefinedAlias.get(written) ?? written;
     const candidate = signatures.get(name);
-    const skip = (why) => {
+    /** @param {string} why */ const skip = (why) => {
       program.skipped.push(`${className}=>${name}: ${why}`);
       // a method with a typed signature still exists as a stub that raises
       // when called, so its callers compile; only an untyped signature
       // cannot be called at all
-      if (typed.has(name)) cls.stubs.push({...typed.get(name), reason: why, pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
+      if (typed.has(name)) /** @type {NonNullable<typeof cls.stubs>} */ (cls.stubs).push({.../** @type {import("./frontend-types.ts").Signature} */ (typed.get(name)), reason: why, pos: {file: /** @type {string} */ (/** @type {NonNullable<typeof file>} */ (file).getFilename().split("/").pop()), row: node.getFirstToken().getStart().getRow()}});
       else signatures.set(name, {name, unsupported: why});
     };
     if (candidate === undefined) { skip("no signature"); continue; }
@@ -1456,53 +1456,53 @@ function compiledFunctionCall(node, ctx, text, name) {
 };
 
 /** @param {import("@abaplint/core").Nodes.StructureNode} node @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").FrontendStmt} */ function structure(node, ctx) {
-  if (isStruct(node, Structures.Types)) return {s: "nop"};
-  if (isStruct(node, Structures.Data)) {
+  if (/** @type {(node: import("@abaplint/core").Nodes.StructureNode, cls: import("./frontend-types.ts").NodeClass) => boolean} */ (isStruct)(node, Structures.Types)) return {s: "nop"};
+  if (/** @type {(node: import("@abaplint/core").Nodes.StructureNode, cls: import("./frontend-types.ts").NodeClass) => boolean} */ (isStruct)(node, Structures.Data)) {
     if (/\bVALUE\b/i.test(node.concatTokens())) throw new Unsupported(`DATA BEGIN OF with VALUE: ${node.concatTokens().slice(0, 60)}`);
     return {s: "nop"};
   }
-  if (isStruct(node, Structures.Constants)) { append(ctx.inits, ctx.localConstantFields?.get(node) ?? []); return {s: "nop"}; }
-  if (isStruct(node, Structures.Try)) return tryBlock(node, ctx);
-  if (isStruct(node, Structures.If)) {
-    const branches = [{cond: cond(node.findDirectStatement(Statements.If).findDirectExpression(Expressions.Cond), ctx), body: bodyOf(node, ctx)}];
+  if (/** @type {(node: import("@abaplint/core").Nodes.StructureNode, cls: import("./frontend-types.ts").NodeClass) => boolean} */ (isStruct)(node, Structures.Constants)) { append(ctx.inits, ctx.localConstantFields?.get(node) ?? []); return {s: "nop"}; }
+  if (/** @type {(node: import("@abaplint/core").Nodes.StructureNode, cls: import("./frontend-types.ts").NodeClass) => boolean} */ (isStruct)(node, Structures.Try)) return tryBlock(node, ctx);
+  if (/** @type {(node: import("@abaplint/core").Nodes.StructureNode, cls: import("./frontend-types.ts").NodeClass) => boolean} */ (isStruct)(node, Structures.If)) {
+    const branches = [{cond: cond(/** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (/** @type {import("@abaplint/core").Nodes.StatementNode} */ (node.findDirectStatement(Statements.If)).findDirectExpression(Expressions.Cond)), ctx), body: bodyOf(node, ctx)}];
     for (const e of node.findDirectStructures(Structures.ElseIf)) {
-      branches.push({cond: cond(e.findDirectStatement(Statements.ElseIf).findDirectExpression(Expressions.Cond), ctx), body: bodyOf(e, ctx)});
+      branches.push({cond: cond(/** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (/** @type {import("@abaplint/core").Nodes.StatementNode} */ (e.findDirectStatement(Statements.ElseIf)).findDirectExpression(Expressions.Cond)), ctx), body: bodyOf(e, ctx)});
     }
     const els = node.findDirectStructure(Structures.Else);
     return {s: "if", branches, else: els === undefined ? null : bodyOf(els, ctx)};
   }
-  if (isStruct(node, Structures.Case)) {
-    const subjectNode = node.findDirectStatement(Statements.Case).findDirectExpression(Expressions.Source);
-    const subject = source(subjectNode, ctx);
+  if (/** @type {(node: import("@abaplint/core").Nodes.StructureNode, cls: import("./frontend-types.ts").NodeClass) => boolean} */ (isStruct)(node, Structures.Case)) {
+    const subjectNode = /** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (/** @type {import("@abaplint/core").Nodes.StatementNode} */ (node.findDirectStatement(Statements.Case)).findDirectExpression(Expressions.Source));
+    const subject = source(/** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (subjectNode), ctx);
     const tmp = `case${ctx.temps++}`;
     const branches = [];
     let others = null;
     for (const w of node.findDirectStructures(Structures.When)) {
-      /** @type {import("@abaplint/core").Nodes.StatementNode | undefined} */ const st = w.findDirectStatement(Statements.When) ?? w.findDirectStatement(Statements.WhenOthers);
+      /** @type {import("@abaplint/core").Nodes.StatementNode} */ const st = /** @type {import("@abaplint/core").Nodes.StatementNode} */ (w.findDirectStatement(Statements.When) ?? w.findDirectStatement(Statements.WhenOthers));
       if (st.get() instanceof Statements.WhenOthers) { others = bodyOf(w, ctx); continue; }
       // WHEN a OR b OR c: the alternatives after the first sit in Or nodes
       // (only the first was read until 2026-09-23, silently)
       const alts = [...st.findDirectExpressions(Expressions.Source), ...st.findDirectExpressions(Expressions.Or).map((o) => o.findDirectExpression(Expressions.Source))];
       const expected = 1 + st.findDirectExpressions(Expressions.Or).length;
       if (alts.length !== expected || alts.some((x) => !x) || st.getChildren().filter((c) => !isTok(c)).length !== expected) throw new Unsupported(`WHEN form: ${st.concatTokens()}`);
-      const values = alts.map((s) => source(s, ctx));
+      const values = alts.map((s) => source(/** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (s), ctx));
       const conds = values.map((v) => compareValues("=", {e: "temp", name: tmp, type: subject.type}, v, ctx));
       branches.push({cond: conds.reduce((l, r) => ({c: "or", l, r})), body: bodyOf(w, ctx)});
     }
     return {s: "case", temp: tmp, subject, branches, else: others};
   }
-  if (isStruct(node, Structures.Do)) {
-    const st = node.findDirectStatement(Statements.Do);
+  if (/** @type {(node: import("@abaplint/core").Nodes.StructureNode, cls: import("./frontend-types.ts").NodeClass) => boolean} */ (isStruct)(node, Structures.Do)) {
+    const st = /** @type {import("@abaplint/core").Nodes.StatementNode} */ (node.findDirectStatement(Statements.Do));
     if (/\bVARYING\b/i.test(st.concatTokens())) throw new Unsupported("DO ... VARYING");
     const times = st.findDirectExpression(Expressions.Source);
     return {s: "do", times: times === undefined ? null : convert(source(times, ctx, I), I), body: bodyOf(node, ctx)};
   }
-  if (isStruct(node, Structures.While)) {
-    return {s: "while", cond: cond(node.findDirectStatement(Statements.While).findDirectExpression(Expressions.Cond), ctx), body: bodyOf(node, ctx)};
+  if (/** @type {(node: import("@abaplint/core").Nodes.StructureNode, cls: import("./frontend-types.ts").NodeClass) => boolean} */ (isStruct)(node, Structures.While)) {
+    return {s: "while", cond: cond(/** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (/** @type {import("@abaplint/core").Nodes.StatementNode} */ (node.findDirectStatement(Statements.While)).findDirectExpression(Expressions.Cond)), ctx), body: bodyOf(node, ctx)};
   }
-  if (isStruct(node, Structures.Select)) return selectLoop(node, ctx);
-  if (isStruct(node, Structures.Loop)) {
-    const st = node.findDirectStatement(Statements.Loop);
+  if (/** @type {(node: import("@abaplint/core").Nodes.StructureNode, cls: import("./frontend-types.ts").NodeClass) => boolean} */ (isStruct)(node, Structures.Select)) return selectLoop(node, ctx);
+  if (/** @type {(node: import("@abaplint/core").Nodes.StructureNode, cls: import("./frontend-types.ts").NodeClass) => boolean} */ (isStruct)(node, Structures.Loop)) {
+    const st = /** @type {import("@abaplint/core").Nodes.StatementNode} */ (node.findDirectStatement(Statements.Loop));
     const text = st.concatTokens();
     // USING KEY <sorted secondary key> (ultra/json): the key's order, see secondaryKey
     const using = /\bUSING\s+KEY\s+([\w~]+)/i.exec(text);
@@ -3616,7 +3616,7 @@ function localInterfaceConstant(id, attr, local, reg) {
         }
       }
     }
-    const args = sig.map((p) => {
+    /** @type {import("./ir.ts").Argument[]} */ const args = sig.map(/** @returns {import("./ir.ts").Argument} */ (p) => {
       if (p.suppliedOf) return {dir: "importing", byValue: true, type: p.type, value: {e: "chars", value: given.has(p.suppliedOf) ? "X" : "", type: p.type}};
       const src = given.get(p.name);
       if (src === undefined) {

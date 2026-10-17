@@ -85,7 +85,7 @@ export type Expr = ExprMetadata & (
   | { readonly e: 'substr'; readonly x: Expr; readonly off: Expr | null; readonly len: Expr | null; readonly base: Type; readonly type: Type }
   | { readonly e: 'table_map'; readonly from: Expr | null; readonly row: Expr; readonly value: Expr; readonly type: Type }
   | { readonly e: 'struct'; readonly fields: readonly { readonly name: string; readonly value: Expr }[]; readonly type: Type }
-  | { readonly e: 'cond'; readonly branches: readonly { readonly cond: Condition; readonly value: Expr }[]; readonly else: Expr; readonly type: Type }
+  | { readonly e: 'cond'; readonly branches: readonly { readonly cond: Condition; readonly value: Expr }[]; readonly else: Expr | null; readonly type: Type }
   | { readonly e: 'fae_row'; readonly n: number; readonly type: Type }
   | { readonly e: 'strlist'; readonly values: readonly string[] }
   | { readonly e: 'ev_sender'; readonly type: Type }

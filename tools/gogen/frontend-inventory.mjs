@@ -49,7 +49,7 @@ const artifactFields = ["syntaxResult", "parsedType", "def", "definition", "pars
 // that go through these helpers count: a registry a caller parsed some other way
 // (reg.parse(), or core's own parse inside findIssues) reaches freshRegistry
 // unobserved and is rebuilt, which is correct but costs a full parse.
-/** @param {import("./frontend-session-types.ts").Registry} reg @param {[] | [unknown]} args @param {boolean} async */
+/** @param {import("./frontend-session-types.ts").Registry} reg @param {unknown[]} args @param {boolean} async */
 function observeParse(reg, args, async) {
   const before = inputSnapshot(reg, true), previous = parsed.get(reg);
   // The first observed parse cannot vouch for artifacts built before observation.
@@ -57,15 +57,15 @@ function observeParse(reg, args, async) {
   const finish = () => {
     if (!untrusted && (!previous || previous.signature === before.signature && previous.configObject === before.configObject)) parsed.set(reg, inputSnapshot(reg, true));
   };
-  const result = async ? reg.parseAsync(...args) : reg.parse(...args);
-  if (result?.then) return result.then((value) => { finish(); return value; });
+  const result = async ? /** @type {{parse(...args: unknown[]): import("@abaplint/core").IRegistry; parseAsync(...args: unknown[]): Promise<import("@abaplint/core").IRegistry>}} */ (reg).parseAsync(...args) : /** @type {{parse(...args: unknown[]): import("@abaplint/core").IRegistry; parseAsync(...args: unknown[]): Promise<import("@abaplint/core").IRegistry>}} */ (reg).parse(...args);
+  if (/** @type {Promise<import("@abaplint/core").IRegistry>} */ (result)?.then) return /** @type {Promise<import("@abaplint/core").IRegistry>} */ (result).then((value) => { finish(); return value; });
   finish(); return result;
 }
 
-/** @param {import("@abaplint/core").IRegistry} reg @param {[] | [unknown]} args @returns {import("@abaplint/core").IRegistry} */
-export function parseObserved(reg, ...args) { return observeParse(reg, args, false); }
-/** @param {import("@abaplint/core").IRegistry} reg @param {[] | [unknown]} args @returns {Promise<import("@abaplint/core").IRegistry>} */
-export function parseObservedAsync(reg, ...args) { return observeParse(reg, args, true); }
+/** @param {import("@abaplint/core").IRegistry} reg @param {unknown[]} args @returns {import("@abaplint/core").IRegistry} */
+export function parseObserved(reg, ...args) { return /** @type {import("@abaplint/core").IRegistry} */ (observeParse(/** @type {import("./frontend-session-types.ts").Registry} */ (reg), args, false)); }
+/** @param {import("@abaplint/core").IRegistry} reg @param {unknown[]} args @returns {Promise<import("@abaplint/core").IRegistry>} */
+export function parseObservedAsync(reg, ...args) { return /** @type {Promise<import("@abaplint/core").IRegistry>} */ (observeParse(/** @type {import("./frontend-session-types.ts").Registry} */ (reg), args, true)); }
 
 /** @param {import("./frontend-session-types.ts").Registry} reg @param {import("./frontend-session-types.ts").SessionInput} session @returns {import("./frontend-session-types.ts").Registry} */ export function freshRegistry(reg, session) {
   const inputs = inputSnapshot(reg, true), previous = parsed.get(reg);
