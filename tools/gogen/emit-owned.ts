@@ -1,5 +1,7 @@
-import type {Expr, Stmt, Type, ConcatBytesParts, ConcatBytesTable} from './ir.ts';
+import type {Expr, Stmt, Type} from './emit-go-types.ts';
 interface FixedBytePlace { readonly type: Extract<Type, {k: 'x'}> }
+type ConcatBytesParts = Extract<Stmt, {s: 'concat_bytes'; parts: readonly Expr[]}>;
+type ConcatBytesTable = Extract<Stmt, {s: 'concat_bytes'; table: Expr}>;
 import type {OwnedPlace, OwnershipContext, OwnedExpressionRenderers, OwnedRenderers, ByteRenderers} from './emit-ownership.ts';
 import {someExpression} from './ir-children.ts';
 import {packedChecksum} from "./emit-packedint.ts";

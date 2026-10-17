@@ -1,6 +1,5 @@
 import {isDeepStrictEqual} from "node:util";
-import type {ProgramInput, FunctionModule, Class, ClassName, Context, MovePair, TypeProbe} from "./emit-go-types.ts";
-import type {Method, Expr, Stmt, Type} from "./ir.ts";
+import type {ProgramInput, FunctionModule, Class, ClassName, Method, Expr, Stmt, Context, MovePair, Type, TypeProbe} from "./emit-go-types.ts";
 import {irChildren, isExpr, isStmt} from "./ir-children.ts";
 import type {IRNode, IRValue} from "./ir-children.ts";
 

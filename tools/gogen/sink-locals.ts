@@ -1,5 +1,4 @@
-import type {Method, Local, Stmt} from './ir.ts';
-import type {SunkLocals} from './emit-go-types.ts';
+import type {Method, Local, Stmt, SunkLocals} from './emit-go-types.ts';
 import {children as propertyChildren, entries} from './ir-children.ts';
 import type {IRNode, IRValue} from './ir-children.ts';
 
