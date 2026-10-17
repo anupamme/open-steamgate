@@ -163,6 +163,26 @@ earlier single-pass runner and is not a control for these measurements.
 | Edited cold, cache disabled | 503.4 | 56.3 | 0 (skipped) | 561.9 |
 | Edited warm, cache enabled | 834.6 | 63.2 | 0 (skipped) | 900.1 |
 
+The same proof was repeated on the final branch (after the review fixes:
+shared typed guard keys, typed guard values, fail-closed unowned artifact reads,
+tracked-and-untracked tool identity), rebased on `46fd4738`:
+
+| Run | Frontend (s) | Emit/gofmt (s) | Go build (s) | Total (s) |
+| --- | ---: | ---: | ---: | ---: |
+| Cold, cache disabled | 497.4 | 56.8 | 0 (skipped) | 556.3 |
+| Cold, cache enabled | 1,506.7 | 57.5 | 0 (skipped) | 1,566.3 |
+| Unchanged warm, cache disabled | 484.4 | 54.4 | 0 (skipped) | 541.1 |
+| Unchanged warm, cache enabled | 279.7 | 64.5 | 0 (skipped) | 346.2 |
+| Edited cold, cache disabled | 501.7 | 58.4 | 0 (skipped) | 562.3 |
+| Edited warm, cache enabled | 900.8 | 62.0 | 0 (skipped) | 965.1 |
+
+Unchanged warm reused 3,048 of 3,055 classes in the final round; all four
+artifact comparisons were byte-identical, and no `unowned-artifact-read`
+refusal occurred in any run. Typed guard values cost about 60 s of the warm
+run against the earlier measurement. The edited run is still slower than the
+cache-off control; making it faster is the next step (certificate fast path,
+then a certified previous selection, then emission caching).
+
 The unchanged warm invocation re-lowered eight distinct classes out of 3,055:
 **99.74% reuse** across the complete invocation. Every round exceeded 99%; the
 lowest was the initial round, 3,002/3,010 (99.73%). Its final round reused
