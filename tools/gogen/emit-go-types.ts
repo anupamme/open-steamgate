@@ -33,11 +33,18 @@ export type Expr = RuntimeFields<Exclude<IR.Expr, {e: 'call' | 'int' | 'struct' 
 export interface LockField extends Pick<IR.TableColumn, 'name' | 'kind'> { readonly length: number }
 export interface NativeArgument { readonly value: Expr; readonly ref?: boolean }
 export interface ArithmeticBranchProbe { readonly e?: string; readonly reason?: string }
+// IR.TypedExpr retains raw IR children; use the emitter's recursive operands.
+export interface TypedNumberExpr { readonly e: 'int' | 'float'; readonly value: number; readonly type: IR.Type }
+export interface TypedFlagExpr { readonly e: 'flag'; readonly value: boolean; readonly type: IR.Type; readonly conv?: boolean; readonly fromP?: Extract<IR.Type, {k: 'p'}> }
+export interface TypedStringListExpr { readonly e: 'strlist'; readonly values: readonly string[]; readonly type: IR.Type; readonly conv?: boolean; readonly fromP?: Extract<IR.Type, {k: 'p'}> }
+export type TypedExpr = Exclude<Expr, {e: 'int' | 'float' | 'flag' | 'strlist'}> | TypedNumberExpr | TypedFlagExpr | TypedStringListExpr;
+export interface InitialCondition { readonly c: 'initial'; readonly x: TypedExpr }
+export interface ConcatBytesTable { readonly s: 'concat_bytes'; readonly target: Expr; readonly table: TypedExpr; readonly row: Expr }
 export interface AssignmentStmt { readonly s: 'assign' | 'set_data'; readonly target: Expr; readonly value: Expr }
 type StatementFields<T> = T extends {s: 'assign' | 'set_data'} ? AssignmentStmt : T extends {s: 'native'} ? Omit<T, 'args'> & {readonly args?: readonly NativeArgument[]}
   : T extends {s: 'kernel_loop'} ? Omit<T, 'args' | 'pos'> & {readonly args: readonly NativeArgument[]; readonly pos?: IR.Position}
   : T extends {s: 'call_enq'} ? Omit<T, 'fields'> & {readonly fields?: readonly LockField[]}
-  : T extends {s: 'concat_bytes'; table: Expr} ? Omit<T, 'table'> & {readonly table: Expr & {readonly type: IR.Type}}
+  : T extends {s: 'concat_bytes'; table: Expr} ? ConcatBytesTable
   : T extends {s: 'concat'} ? Omit<T, 'sep'> & {readonly sep: Expr | null}
   : T extends {s: 'select_dyn'} ? Omit<T, 'fields' | 'where'> & {readonly fields: Expr | null; readonly where: Expr | null}
   : T extends {s: 'stub'} ? Omit<T, 'pos'> & {readonly pos?: IR.Position}
@@ -52,7 +59,7 @@ type StatementFields<T> = T extends {s: 'assign' | 'set_data'} ? AssignmentStmt 
 export type Stmt = StatementFields<RuntimeFields<IR.Stmt>> & {readonly pos?: IR.Position; readonly moveTable?: boolean};
 export type Condition = RuntimeFields<Exclude<IR.Condition, {c: 'cmp' | 'initial'}>>
   | (RuntimeFields<Omit<Extract<IR.Condition, {c: 'cmp'}>, 'type'>> & {readonly type?: IR.Type})
-  | (RuntimeFields<Omit<Extract<IR.Condition, {c: 'initial'}>, 'x'>> & {readonly x: Expr & {readonly type: IR.Type}});
+  | InitialCondition;
 export type Argument = RuntimeFields<IR.Argument>;
 export interface ImportingArgument { readonly value: Expr; readonly type?: IR.Type; readonly byValue?: boolean }
 export interface EventArgument { readonly name: string; readonly value: Expr }
@@ -228,12 +235,12 @@ export interface Ownership {
   unescaped(p: Expr | null | undefined, ctx: Context): boolean | undefined;
   width(p: Expr | null | undefined, ctx: Context): number | undefined;
   fixed(p: Expr | null | undefined, ctx: Context): number;
-  has(p: Expr | import("./emit-ownership.ts").AttributeProbe | null | undefined, ctx: Context): p is Extract<Expr, {e: "var" | "attr" | "static"}>;
+  has(p: Expr | import("./emit-ownership.ts").AttributeProbe | null | undefined, ctx: Context): boolean | undefined;
 }
 export type RenderExpr = (e: Expr, ctx: Context) => string;
 export type RenderType = (t: IR.Type) => string;
 export type RenderName = (name: string) => string;
-export type MovePair = (st: Stmt, next: Stmt | undefined, ctx: Context, previous: Stmt | undefined) => st is Extract<Stmt, {s: 'assign' | 'set_data'}>;
+export type MovePair = (st: Stmt, next: Stmt | undefined, ctx: Context, previous: Stmt | undefined) => boolean;
 export type AnalyzeTableMoves = (program: ProgramInput, stable: (t: TypeProbe) => boolean | undefined, goType: RenderType) => MovePair;
 export type ConstructorFactories = Map<string, {readonly canOmit: boolean; readonly args: readonly Argument[]}>;
 export type AnalyzeOwnership = (program: ProgramInput) => Ownership;
