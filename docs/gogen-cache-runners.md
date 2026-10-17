@@ -15,6 +15,12 @@ changed named query answers, corrupt entries and nonportable payloads fall back
 to lowering. No lexical source-word dependency approximation replaces those
 checks. `GOGEN_PROVENANCE=1` additionally exposes provenance reporting.
 
+`frontend-provenance-metadata.mjs` no longer emits scheduling rows as dependency
+edges. Selection and other program-derived indexes are rebuilt for each program;
+their reads during lowering are guarded by the ordered program-state transcript.
+Replay therefore rejects a changed index answer that affects a cached class
+without making every scheduled object a dependency of that class.
+
 A runner content certificate selects whether to record dependency metadata.
 An unchanged invocation uses the global content guard without repeating the
 observer. A changed invocation records again and can consult validated v3

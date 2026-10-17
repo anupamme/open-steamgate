@@ -60,13 +60,15 @@ export function dynamicStaticCall(node, ctx, {sourceOperand, source, convert, lv
  */
 export function prepareDynamicStatics(program, {defaultValue, aliasTarget}) {
   program.dynamicDispatch = [];
-  const classes = new Map(program.classes.map((cls) => [cls.name, cls]));
-  const statics = new Map(program.classes.map((cls) => {
+  const classes = new Map(), statics = new Map();
+  for (const cls of program.classes) {
+    if (classes.has(cls.name)) continue;
+    classes.set(cls.name, cls);
     const methods = new Map();
     for (const method of [...cls.methods, ...cls.stubs])
       if (method.static && !methods.has(method.name)) methods.set(method.name, method);
-    return [cls.name, methods];
-  }));
+    statics.set(cls.name, methods);
+  }
   for (const cls of program.classes) for (const method of program.dynStatics) {
     const name = aliasTarget(program.reg, cls.name, method) ?? method;
     let owner = cls.name;

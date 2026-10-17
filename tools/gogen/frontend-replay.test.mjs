@@ -4,6 +4,33 @@ import {readFileSync, readdirSync} from "node:fs";
 import {recordLowering, replayLowering} from "./frontend-replay.mjs";
 
 const program = () => ({wanted: new Set(["BASE"]), sigs: new Map(), skipped: [], currentClass: undefined});
+test("guard compaction preserves distinct primitive lookup arguments", () => {
+  const keys = [null, undefined, NaN, Infinity, -Infinity, 0, false, true, "null", "undefined", "NaN", "Infinity", "-Infinity", "0", "false", "true", ""];
+  for (const first of keys) for (const second of keys) {
+    if (Object.is(first, second)) continue;
+    const recorded = recordLowering({reg: null, m: new Map([[first, "A"], [second, "A"]])},
+      (p) => [p.m.get(first), p.m.get(second), p.m.get(first), p.m.get(second)].join(","));
+    assert.equal(recorded.ir, "A,A,A,A");
+    assert.ok(recorded.replay);
+    assert.equal(recorded.replay.ops.length, 2, `${String(first)} / ${String(second)}`);
+    assert.equal(replayLowering({reg: null, m: new Map([[first, "A"], [second, "A"]])}, recorded.replay), true);
+    assert.equal(replayLowering({reg: null, m: new Map([[first, "A"], [second, "B"]])}, recorded.replay), false);
+  }
+});
+
+test("guard compaction preserves signed zero for collections that distinguish it", () => {
+  class SignedMap extends Map {
+    get(key) { return super.get(Object.is(key, -0) ? "-0" : key); }
+  }
+  const recorded = recordLowering({m: new SignedMap([[0, "A"], ["-0", "A"]])},
+    (p) => [p.m.get(0), p.m.get(-0)].join(","));
+  assert.equal(recorded.ir, "A,A");
+  assert.ok(recorded.replay);
+  assert.equal(recorded.replay.ops.length, 2);
+  assert.equal(replayLowering({m: new SignedMap([[0, "A"], ["-0", "A"]])}, recorded.replay), true);
+  assert.equal(replayLowering({m: new SignedMap([[0, "A"], ["-0", "B"]])}, recorded.replay), false);
+});
+
 test("a shallow program trial isolates replay's ordered collection and scalar effects", () => {
   const recorded = recordLowering(program(), (p) => {
     p.sigs.set("NEW", {type: "i"});

@@ -1,6 +1,28 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 
+test("dynamic static indexes preserve the first class and its inherited implementation", async () => {
+  const {prepareDynamicStatics} = await import("./frontend-dynamic-call.mjs");
+  const {dynamicAdapters} = await import("./emit-dynamic-call.mjs");
+  const method = (value) => ({name: "RUN", static: true, params: [{name: "P", default: value}]});
+  const first = {name: "BASE", super: null, methods: [method("first")], stubs: [method("stub")]};
+  const later = {name: "BASE", super: null, methods: [method("later")], stubs: []};
+  const child = {name: "CHILD", super: "BASE", methods: [], stubs: []};
+  const shadow = {name: "CHILD", super: "OTHER", methods: [], stubs: []};
+  const other = {name: "OTHER", super: null, methods: [method("other")], stubs: []};
+  const program = {classes: [first, later, child, shadow, other], dynStatics: new Set(["RUN"])};
+  prepareDynamicStatics(program, {defaultValue: (p) => p.default, aliasTarget: () => undefined});
+  assert.deepEqual(program.dynamicDispatch.map(({key, owner, defaults}) => [key, owner, defaults]), [
+    ["BASE=>RUN", "BASE", [{name: "P", value: "first"}]],
+    ["BASE=>RUN", "BASE", [{name: "P", value: "first"}]],
+    ["CHILD=>RUN", "BASE", [{name: "P", value: "first"}]],
+    ["CHILD=>RUN", "BASE", [{name: "P", value: "first"}]],
+    ["OTHER=>RUN", "OTHER", [{name: "P", value: "other"}]],
+  ]);
+  assert.deepEqual(dynamicAdapters(program).map(({m}) => m.params[0].default),
+    ["first", "first", "first", "first", "other"]);
+});
+
 test("dynamic dispatch refuses absent exception classes; CX_ROOT cannot catch a refusal", async () => {
   const abap = await import("./js/abap.mjs?dynamic-call-closure");
   abap.knownClasses(["Z_DYN_TEST"], []);

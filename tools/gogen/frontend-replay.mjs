@@ -75,7 +75,9 @@ export function recordLowering(program, lower) {
     if (op.kind === "assign" || op.kind === "effect") seen.delete(op.key);
     else if ((op.args ?? []).every((a) => a === null || ["undefined", "string", "number", "boolean"].includes(typeof a))) {
       if (!seen.has(op.key)) seen.set(op.key, new Map());
-      const reads = seen.get(op.key), id = JSON.stringify([op.kind, op.method, op.args]);
+      // JSON alone aliases undefined/nonfinite numbers with null, and -0 with 0.
+      const args = op.args?.map((a) => [typeof a, Object.is(a, -0) ? "-0" : String(a)]);
+      const reads = seen.get(op.key), id = JSON.stringify([op.kind, op.method, args]);
       if (!reads.has(id)) reads.set(id, new Set());
       if (reads.get(id).has(op.value)) return;
       reads.get(id).add(op.value);
