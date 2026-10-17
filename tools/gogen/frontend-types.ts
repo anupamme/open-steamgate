@@ -1,7 +1,7 @@
 // Mutable construction state for frontend.mjs; the public IR stays in ir.ts.
 import type * as abaplint from "@abaplint/core";
 import type {Registry} from "./frontend-session-types.ts";
-import type {Attribute, Catch, Class, DatabaseTable, Diagnostic, Event, Expr, Method, Param, Program, SqlPredicate, Stmt, Type, TypedExpr, WriteType} from "./ir.ts";
+import type {Attribute, Catch, Class, DatabaseTable, Diagnostic, Event, Expr, FunctionModule, Method, Param, Program, SqlPredicate, Stmt, Type, TypedExpr, WriteType} from "./ir.ts";
 
 export type Mutable<T> = {-readonly [K in keyof T]: T[K]};
 export type StructType = Mutable<Extract<Type, {k: "struct"}>>;
@@ -60,6 +60,7 @@ export interface FrontendProgram extends Omit<Mutable<Program>, "classes" | "str
   reg: Registry;
   locals?: Map<string, string>;
   localInterfaces?: Map<string, {def: abaplint.IInterfaceDefinition; source: string}>;
+  supplied: Map<string, Set<string>>; functionModules: Map<string, FunctionModule>;
   classes: FrontendClass[]; structs: Map<string, StructType>; sigs: Map<string, MethodSignature>;
   anonStructs: Map<abaplint.AbstractType, string>; badStructs: Map<string, string>; ddicOutputLen: Map<string, number>;
   dynamicDispatch?: {key: string; owner: string; method: string; defaults: {name: string; value: Expr}[]}[];
