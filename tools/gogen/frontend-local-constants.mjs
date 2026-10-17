@@ -50,7 +50,7 @@ export function hoistLocalConstants(body, ctx, h) {
     const src = val?.getChildren().find((c) => !isTok(c));
     return src && isExpr(src, Expressions.Constant);
   };
-  /** @param {string} name @param {import("./ir.ts").Type} type @param {Pick<import("./frontend-types.ts").FrontendConstant, "value" | "init" | "fieldInits">} init */
+  /** @param {string} name @param {import("./ir.ts").Type} type @param {{value?: string | Record<string, string | undefined>, init?: import("./frontend-types.ts").ConstantInitializer, fieldInits?: Record<string, import("./frontend-types.ts").ConstantInitializer | undefined>}} init */
   const add = (name, type, init) => {
     // Keep the class prefix: layered builds and frontend caches use it.
     const go = `${owner}_${segment(name)}`;
