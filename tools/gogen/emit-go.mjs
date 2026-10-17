@@ -150,9 +150,9 @@ const GO_RESERVED = new Set(("break default func interface select case defer go 
   if (t?.k === "struct") return (STRUCTDEFS.get(t.go)?.fields ?? []).some((f) => needsCopy(f.type));
   return false;
 }
-/** @param {import("./emit-go-types.ts").TableType | import("./emit-go-types.ts").StructType} t @returns {string} */ function cloneName(t) {
+/** @param {import("./emit-go-types.ts").Type} t @returns {string} */ function cloneName(t) {
   const key = goType(t);
-  if (!CLONES.has(key)) CLONES.set(key, {name: `clone_${CLONES.size}`, type: t});
+  if (!CLONES.has(key)) CLONES.set(key, {name: `clone_${CLONES.size}`, type: /** @type {import("./emit-go-types.ts").TableType | import("./emit-go-types.ts").StructType} */ (t)});
   return CLONES.get(key).name;
 }
 const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key", "refattr", "dref_field"]);
@@ -941,7 +941,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     "\treturn func(receiver any, m amc.Message) {", "\t\tswitch m.Type {", ...cases,
     "\t\tdefault:", "\t\t\tpanic(abap.NotCompiled(\"AMC delivery\", \"no receiver for a \"+m.Type+\" message in this program\"))", "\t\t}", "\t}", "}", ""];
 }
-/** @param {import("./emit-go-types.ts").Class} cls @param {import("./emit-go-types.ts").LoweredMethod} m @returns {string[]} */ function method(cls, m) {
+/** @param {import("./emit-go-types.ts").Class} cls @param {import("./emit-go-types.ts").Method} m @returns {string[]} */ function method(cls, m) {
   SYMBOLS?.(cls, m, m.static ? funcName(cls.name, m.name) : typeName(m.name), m.static ? null : typeName(cls.name));
   const lines = [...(LINES && m.pos ? [`//line ${m.pos.file}:${m.pos.row}`] : []), `${signature(cls, m)} {`, "\t_ = s"];
   if (m.static && m.name !== "CLASS_CONSTRUCTOR" && chainCctor(cls)) lines.push(`\tEnsure_${typeName(cls.name)}(s)`);
@@ -956,7 +956,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   // 00 bytes, d, t, n, p) starts at the type's initial value, as the JS
   // emitter's locals do; before (ultra/packs, ZCL_GOGEN_T_BYTECAT) an x never
   // assigned read as zero bytes long
-  const sunkLocals = ((sinkLocals))(m);
+  const sunkLocals = (/** @type {import("./emit-go-types.ts").SinkLocals} */ (sinkLocals))(m);
   const localIndex = lines.length;
   // the RETURNING parameter starts at its initial value too (the JS emitter's
   // let r = zero(t)); Go's named result starts at Go's zero value
