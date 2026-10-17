@@ -2,6 +2,8 @@ import {test} from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync, readdirSync} from "node:fs";
 import {recordLowering, replayLowering} from "./frontend-replay.mjs";
+import {compactLowering} from "./frontend-object-cache.mjs";
+import {serialize, deserialize} from "node:v8";
 
 const program = () => ({wanted: new Set(["BASE"]), sigs: new Map(), skipped: [], currentClass: undefined});
 test("guard compaction preserves distinct primitive lookup arguments", () => {
@@ -13,6 +15,10 @@ test("guard compaction preserves distinct primitive lookup arguments", () => {
     assert.equal(recorded.ir, "A,A,A,A");
     assert.ok(recorded.replay);
     assert.equal(recorded.replay.ops.length, 2, `${String(first)} / ${String(second)}`);
+    const persisted = deserialize(serialize(compactLowering(recorded)));
+    assert.equal(persisted.replay.ops.length, 2);
+    assert.equal(replayLowering({m: new Map([[first, "A"], [second, "A"]])}, persisted.replay), true);
+    assert.equal(replayLowering({m: new Map([[first, "A"], [second, "B"]])}, persisted.replay), false);
     assert.equal(replayLowering({reg: null, m: new Map([[first, "A"], [second, "A"]])}, recorded.replay), true);
     assert.equal(replayLowering({reg: null, m: new Map([[first, "A"], [second, "B"]])}, recorded.replay), false);
   }
@@ -27,6 +33,10 @@ test("guard compaction preserves signed zero for collections that distinguish it
   assert.equal(recorded.ir, "A,A");
   assert.ok(recorded.replay);
   assert.equal(recorded.replay.ops.length, 2);
+  const persisted = deserialize(serialize(compactLowering(recorded)));
+  assert.equal(persisted.replay.ops.length, 2);
+  assert.equal(replayLowering({m: new SignedMap([[0, "A"], ["-0", "A"]])}, persisted.replay), true);
+  assert.equal(replayLowering({m: new SignedMap([[0, "A"], ["-0", "B"]])}, persisted.replay), false);
   assert.equal(replayLowering({m: new SignedMap([[0, "A"], ["-0", "A"]])}, recorded.replay), true);
   assert.equal(replayLowering({m: new SignedMap([[0, "A"], ["-0", "B"]])}, recorded.replay), false);
 });

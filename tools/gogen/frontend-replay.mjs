@@ -64,6 +64,16 @@ export function replayLowering(program, cached, refused = () => {}) {
   return true;
 }
 
+// Only scalar arguments have a portable value identity. Object arguments keep
+// every guard: equal JSON does not establish equal Map/Set key identities.
+/** @param {{kind: string, method?: string, args?: unknown[]}} op @returns {string | undefined} */
+export function replayGuardKey(op) {
+  if (!(op.args ?? []).every((a) => a === null || ["undefined", "string", "number", "boolean"].includes(typeof a))) return;
+  // JSON alone aliases undefined/nonfinite numbers with null, and -0 with 0.
+  const args = op.args?.map((a) => [typeof a, Object.is(a, -0) ? "-0" : String(a)]);
+  return JSON.stringify([op.kind, op.method, args]);
+}
+
 export function recordLowering(program, lower) {
   const ops = [], written = new Set(), borrowed = new Map(), seen = new Map();
   let safe = true, characters = 0, refusal;
@@ -73,14 +83,15 @@ export function recordLowering(program, lower) {
     // Compact before applying bounds. Repeated reads still fingerprint their
     // values, so aliases changed and restored between reads remain unsafe.
     if (op.kind === "assign" || op.kind === "effect") seen.delete(op.key);
-    else if ((op.args ?? []).every((a) => a === null || ["undefined", "string", "number", "boolean"].includes(typeof a))) {
-      if (!seen.has(op.key)) seen.set(op.key, new Map());
-      // JSON alone aliases undefined/nonfinite numbers with null, and -0 with 0.
-      const args = op.args?.map((a) => [typeof a, Object.is(a, -0) ? "-0" : String(a)]);
-      const reads = seen.get(op.key), id = JSON.stringify([op.kind, op.method, args]);
-      if (!reads.has(id)) reads.set(id, new Set());
-      if (reads.get(id).has(op.value)) return;
-      reads.get(id).add(op.value);
+    else {
+      const id = replayGuardKey(op);
+      if (id !== undefined) {
+        if (!seen.has(op.key)) seen.set(op.key, new Map());
+        const reads = seen.get(op.key);
+        if (!reads.has(id)) reads.set(id, new Set());
+        if (reads.get(id).has(op.value)) return;
+        reads.get(id).add(op.value);
+      }
     }
     characters += typeof op.value === "string" ? op.value.length : 0;
     for (const arg of op.args ?? []) if (typeof arg === "string") characters += arg.length;

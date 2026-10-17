@@ -102,11 +102,11 @@ test("docs-only Git commits preserve tool identity; tool content changes it", ()
     symlinkSync(join(home, "node_modules"), join(dir, "node_modules"));
     mkdirSync(join(dir, "docs")); writeFileSync(join(dir, "docs", "identity.md"), "initial\n");
     git("init", "--quiet");
-    git("add", "tools/gogen/frontend-object-cache.mjs", "docs/identity.md");
+    git("add", "tools", "docs/identity.md");
     const commit = (message) => git("-c", "user.name=Alice V.", "-c", "user.email=ooisee@gmail.com", "-c", "core.hooksPath=/dev/null", "commit", "--quiet", "-m", message);
     commit("identity baseline");
     let count = 0;
-    const identity = () => execFileSync(process.execPath, ["--input-type=module", "-e", `
+    const identity = (env = process.env) => execFileSync(process.execPath, ["--input-type=module", "-e", `
       import {objectCache} from ${JSON.stringify(pathToFileURL(join(dir, "tools/gogen/frontend-object-cache.mjs")).href)};
       import {readdirSync} from 'node:fs';
       const root = ${JSON.stringify(join(dir, "cache-"))} + ${++count};
@@ -114,7 +114,7 @@ test("docs-only Git commits preserve tool identity; tool content changes it", ()
       const cache = objectCache(registry, root);
       cache.write('CLAS IDENTITY', {name: 'IDENTITY', ir: {}}, [], {wanted: new Set(['IDENTITY'])});
       console.log(readdirSync(root)[0]);
-    `], {cwd: dir, encoding: "utf8"}).trim();
+    `], {cwd: dir, encoding: "utf8", env}).trim();
     const before = identity();
     writeFileSync(join(dir, "docs", "identity.md"), "docs edit\n");
     git("add", "docs/identity.md"); commit("docs only");
@@ -128,6 +128,18 @@ test("docs-only Git commits preserve tool identity; tool content changes it", ()
     assert.notEqual(identity(), before, "global identity still includes source-library pins");
     assert.equal(semanticIdentity(), semanticBefore, "v3 source-library changes are guarded per artifact");
     writeFileSync(pins, originalPins);
+    for (const relative of ["tools/gogen/frontend-replay.test.mjs", "tools/gogen/frontend-provenance-bench.mjs",
+      "tools/gogen/testdata/identity.json", "tools/gogen/testdata-extra/identity.json",
+      "tools/.out/identity.json", "tools/.local/identity.json", "tools/gogen/go/generated/identity.json",
+      "tools/gogen/go/abap/zz_identity.mjs", "tools/gogen/go/symbols.json"]) {
+      const file = join(dir, relative); mkdirSync(join(file, ".."), {recursive: true});
+      writeFileSync(file, relative.endsWith(".json") ? "{}\n" : "// identity fixture\n");
+      git("add", "-f", relative);
+      assert.equal(identity(), before, `${relative} must not enter compiler identity`);
+    }
+    const scratch = join(dir, "tools/gogen/identity-scratch.mjs");
+    writeFileSync(scratch, "// untracked scratch\n");
+    assert.equal(identity(), before, "untracked scratch must not enter compiler identity");
     const tool = join(dir, "tools/gogen/frontend-source-key.mjs");
     writeFileSync(tool, readFileSync(tool, "utf8") + "\n// tool identity test edit\n");
     assert.notEqual(identity(), before, "working-tree tool contents must enter compiler identity");
@@ -135,7 +147,16 @@ test("docs-only Git commits preserve tool identity; tool content changes it", ()
     for (const extension of ["mjs", "ts", "cjs", "json"]) {
       const previous = identity();
       writeFileSync(join(nested, `module.${extension}`), extension === "json" ? "{}\n" : "// future module\n");
-      assert.notEqual(identity(), previous, `nested tools/**/*.${extension} must enter compiler identity`);
+      assert.equal(identity(), previous, "a new module enters identity only after git add");
+      git("add", `tools/future-frontend-dependency/module.${extension}`);
+      assert.notEqual(identity(), previous, `tracked nested tools/**/*.${extension} must enter compiler identity`);
     }
+    const noGit = join(dir, "no-git"); mkdirSync(noGit);
+    symlinkSync("/bin/false", join(noGit, "git"));
+    const fallbackEnv = {...process.env, PATH: noGit}, fallback = identity(fallbackEnv);
+    writeFileSync(join(dir, "tools/gogen/frontend-replay.test.mjs"), "// fallback test edit\n");
+    assert.equal(identity(fallbackEnv), fallback, "the directory fallback excludes tests too");
+    writeFileSync(scratch, "// fallback production edit\n");
+    assert.notEqual(identity(fallbackEnv), fallback, "without Git the fallback hashes production files on disk");
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });

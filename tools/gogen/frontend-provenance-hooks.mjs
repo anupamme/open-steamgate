@@ -126,7 +126,14 @@ export function installHooks(core, requireCore, r) {
         const pure = pureReads.has(fn);
         return function(...args) {
           const reg = owners.get(this) ?? (args.find((a) => a instanceof core.Registry));
-          if (!reg) return fn.apply(this, args);
+          if (!reg) {
+            // A borrowed artifact may have escaped through a raw inventory.
+            // Its registry cannot be inferred, so refuse the enclosing lowering.
+            const frame = r.stack.findLast((f) => f.lowering);
+            if (frame && !r.auditDepth) r.query(frame.state, {kind: "unknown-scan",
+              args: ["unowned-artifact-read", method], result: [], phase: frame.phase}, frame.key);
+            return fn.apply(this, args);
+          }
           owners.set(this, reg);
           if (r.auditDepth) return r.auditArtifact(reg, this, () => fn.apply(this, args));
           if (!recursive && r.stack[r.stack.length - 1]?.obj === this) return fn.apply(this, args);

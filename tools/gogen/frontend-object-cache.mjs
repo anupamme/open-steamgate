@@ -1,13 +1,14 @@
 import {cacheDiagnostic, diagnosticCache} from "./frontend-cache-diagnostics.mjs";
 import {artifactLowering, storedProvenance, inheritStoredProvenance, recordingProvenance, auditedBookkeeping} from "./frontend-provenance.mjs";
 import {projectionMatches, readVariants, rememberVariant} from "./frontend-cache-variants.mjs";
-import {recordLowering, replayLowering} from "./frontend-replay.mjs";
+import {recordLowering, replayLowering, replayGuardKey} from "./frontend-replay.mjs";
 // Portable class lowerings. The registry still parses/checks normally; replay
 // verifies the program inputs and ordering before applying cached IR effects.
 import {createHash, randomUUID} from "node:crypto";
 import {createRequire} from "node:module";
 import {existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync} from "node:fs";
-import {join, resolve} from "node:path";
+import {execFileSync} from "node:child_process";
+import {join, resolve, extname} from "node:path";
 import {serialize, deserialize} from "node:v8";
 import {deflateRawSync, inflateRawSync} from "node:zlib";
 import {dependencyGraph} from "./frontend-provenance-metadata.mjs";
@@ -19,11 +20,29 @@ import {hashV3, graphRawFiles} from "./frontend-v3-key.mjs";
 const here = import.meta.dirname, home = resolve(here, "../..");
 const automatic = new WeakMap();
 const digest = (value) => createHash("sha256").update(value).digest("hex");
+const toolPath = (name) => {
+  const parts = name.split("/"), base = parts.at(-1);
+  if (parts.some((p) => p === ".out" || p === ".local" || p.startsWith("testdata"))) return false;
+  return !name.startsWith("tools/gogen/go/") || !parts.includes("generated")
+    && base !== "symbols.json" && !base.startsWith("zz_");
+};
 const walk = (dir, toolsOnly = false) => readdirSync(dir, {withFileTypes: true})
   .sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
-  .flatMap((e) => toolsOnly && (e.name === ".out" || e.name === ".local"
-    || dir.includes("/gogen/go/") && (e.name === "generated" || e.name === "symbols.json" || e.name.startsWith("zz_")))
-    ? [] : e.isDirectory() ? walk(join(dir, e.name), toolsOnly) : [join(dir, e.name)]);
+  .flatMap((e) => toolsOnly && !toolPath(join(dir, e.name).slice(home.length + 1)) ? []
+    : e.isDirectory() ? walk(join(dir, e.name), toolsOnly) : [join(dir, e.name)]);
+const toolSource = (name) => toolPath(name) && [".mjs", ".ts", ".cjs", ".json"].includes(extname(name))
+  && ![".test", "-bench"].some((suffix) => name.endsWith(suffix + extname(name)));
+function toolSources() {
+  let names;
+  try {
+    names = execFileSync("git", ["ls-files", "-z", "--cached", "--", "tools"],
+      {cwd: home, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 1 << 24}).split("\0").filter(Boolean);
+  } catch {
+    // Source distributions without Git retain the same production-file filter.
+    names = walk(join(home, "tools"), true).map((file) => file.slice(home.length + 1));
+  }
+  return names.filter(toolSource).sort().map((name) => join(home, name)).filter(existsSync);
+}
 const identities = new Map();
 let sharedIdentity;
 export function toolIdentity(sourceIndependent = false) {
@@ -33,7 +52,7 @@ export function toolIdentity(sourceIndependent = false) {
     const fileHash = (name, file) => hash.update(JSON.stringify([name, digest(readFileSync(file))]));
     // Actual tool sources, locks and installed builds define the compiler.
     // Repository commits (including docs-only ones) do not change its identity.
-    for (const file of walk(join(home, "tools"), true).filter((f) => /\.(mjs|ts|cjs|json)$/.test(f))) {
+    for (const file of toolSources()) {
       fileHash(file.slice(home.length), file);
     }
     if (existsSync(join(home, "package-lock.json"))) fileHash("package-lock.json", join(home, "package-lock.json"));
@@ -89,8 +108,6 @@ function portableWithin(value, seen) {
   } catch { return false; } // An unreadable value must not break compilation either.
 }
 
-const primitiveArgument = (a) => a === null || ["undefined", "string", "number", "boolean"].includes(typeof a);
-
 // Rechecking the same input twice without an intervening write adds no guard.
 // Nested mutations already refuse replay; writes validate the compacted result.
 export function compactLowering(value) {
@@ -102,12 +119,19 @@ export function compactLowering(value) {
       // Refuse registry instances before JSON can expand their shared graphs.
       // Share the bounded walk across all reads, including discarded duplicates;
       // all-primitive arguments are cheap to serialize and spend no budget.
-      if (!(op.args ?? []).every(primitiveArgument) && !portableWithin(op.args, argumentsSeen)) throw new TypeError("Non-portable replay arguments");
-      if (!seen.has(op.key)) seen.set(op.key, new Map());
-      const reads = seen.get(op.key), access = JSON.stringify([op.kind, op.method, op.args]);
-      if (!reads.has(access)) reads.set(access, new Set());
-      if (reads.get(access).has(op.value)) continue;
-      reads.get(access).add(op.value);
+      const access = replayGuardKey(op);
+      if (access === undefined) {
+        if (!portableWithin(op.args, argumentsSeen)) throw new TypeError("Non-portable replay arguments");
+        // Preserve the serializability check for cyclic arguments, without
+        // treating their JSON representation as an identity or dedup key.
+        JSON.stringify(op.args);
+      } else {
+        if (!seen.has(op.key)) seen.set(op.key, new Map());
+        const reads = seen.get(op.key);
+        if (!reads.has(access)) reads.set(access, new Set());
+        if (reads.get(access).has(op.value)) continue;
+        reads.get(access).add(op.value);
+      }
     }
     ops.push(op);
   }
