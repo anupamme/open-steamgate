@@ -42,6 +42,7 @@
     "test/osd-rfc.mjs",
     "test/osd-routes.mjs",
     "test/osd-samc.mjs",
+    "test/osd-no-ts-runtime.mjs",
     "test/osd-runtime.mjs",
     "test/osd-identity.mjs",
     "test/osd-status.mjs",

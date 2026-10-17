@@ -4,8 +4,8 @@ import {readFileSync, readdirSync, statSync} from "node:fs";
 import {basename, join} from "node:path";
 import {generatorFoldersOf, winningByLayer} from "./osd-packs.mjs";
 import {currentStepToken, dialogStep, inSession, outsideStepContext, registerWaitPump} from "./osd-dialog-step.mjs";
-import {parseSamc} from "./osd-samc.ts";
-export {parseSamc} from "./osd-samc.ts";
+import {parseSamc} from "./osd-samc.mjs";
+export {parseSamc} from "./osd-samc.mjs";
 
 const keyOf = (app, path) => `${String(app).trim().toUpperCase()}|${String(path).trim().toLowerCase()}`;
 

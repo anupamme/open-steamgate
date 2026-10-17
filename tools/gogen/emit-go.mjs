@@ -1,8 +1,8 @@
 import {dynamicResultMoves, dynamicAdapters} from "./emit-dynamic-call.mjs";
 import {env} from "./host-io.ts";
 import {append} from "./append.ts";
-import {typeName, funcName} from "./go-symbols.ts";
-export {typeName, funcName} from "./go-symbols.ts";
+import {typeName, funcName} from "./go-symbols.mjs";
+export {typeName, funcName} from "./go-symbols.mjs";
 import {localConstant, localConstantDeclarations} from "./emit-local-constants.ts";
 import {constructorFactories} from "./emit-constructors.ts";
 import {analyzeTableMoves} from "./emit-table-move.ts";

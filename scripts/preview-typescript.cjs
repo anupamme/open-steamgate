@@ -1,11 +1,10 @@
 const path = require("node:path");
 
-// Deliberate allowlist: tools/gogen/**/*.ts plus the shared SAMC leaf.
+// Deliberate allowlist: tools/gogen/**/*.ts.
 const gogen = path.resolve(__dirname, "../tools/gogen") + path.sep;
-const samc = path.resolve(__dirname, "../tools/osd-samc.ts");
 // A dependency directory never counts as approved, even below tools/gogen.
 const inDependencies = file => file.split(/[\\/]/).includes("node_modules");
-const includes = [file => file.startsWith(gogen) && file.endsWith(".ts") && !inDependencies(file), samc];
+const includes = [file => file.startsWith(gogen) && file.endsWith(".ts") && !inDependencies(file)];
 const allowed = file => includes.some(one => typeof one === "string" ? file === one : one(file));
 
 class PreviewTypeScriptBoundaryPlugin {

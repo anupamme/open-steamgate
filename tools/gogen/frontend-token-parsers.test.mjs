@@ -211,7 +211,7 @@ test("round 2 analysis loads the transpiler core instance", async () => {
     // Relocate only this module; keep its unrelated local dependencies in place.
     source = source.replace('"./frontend-inventory.mjs"', JSON.stringify(new URL("./frontend-inventory.mjs", import.meta.url).href))
       .replace('"./host-io.ts"', JSON.stringify(new URL("./host-io.ts", import.meta.url).href))
-      .replace('"../osd-samc.ts"', JSON.stringify(new URL("../osd-samc.ts", import.meta.url).href));
+      .replace('"../osd-samc.mjs"', JSON.stringify(new URL("../osd-samc.mjs", import.meta.url).href));
     const file = join(dir, "analysis.mjs");
     writeFileSync(file, source);
     const analysis = await import(pathToFileURL(file).href);

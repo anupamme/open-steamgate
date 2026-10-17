@@ -4,7 +4,7 @@ import {readText, listEntries, writeText, dirname, join, gitHead} from "./host-i
 import {emitGo} from "./emit-go.mjs";
 
 // Compatibility exports for callers that also collect symbol provenance.
-export {typeName, funcName} from "./go-symbols.ts";
+export {typeName, funcName} from "./go-symbols.mjs";
 
 export function buildCommit(): string {
   return gitHead(import.meta.dirname) ?? "unknown";
