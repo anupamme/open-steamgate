@@ -38,7 +38,7 @@ const {Expressions, ExpressionsCDS, Nodes, Structures} = abaplint;
 /** @param {readonly string[]} folders */
 export function samcOf(folders) {
   /** @type {Map<string, string>} */ const byName = new Map();
-  const walk = (dir) => {
+  /** @param {string} dir @returns {void} */ const walk = (dir) => {
     let entries;
     try { entries = listEntries(dir); } catch { return; }
     for (const [name, directory] of entries.sort((a, b) => a[0].localeCompare(b[0]))) {

@@ -3377,7 +3377,7 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
 }
 
 /** @param {import("@abaplint/core").Nodes.ExpressionNode} n @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").ValueExpr} */ function fieldChain(n, ctx) {
-  const kids = isExpr(n, Expressions.SourceField) ? [n] : n.getChildren();
+  /** @type {readonly import("@abaplint/core").INode[]} */ const kids = isExpr(n, Expressions.SourceField) ? [n] : n.getChildren();
   const text = upper(n.concatTokens());
   if (SY_MESSAGES[text]) return {e: "sy", ...SY_MESSAGES[text]};
   if (SY[text] !== undefined) return {e: "sy", field: SY[text], type: I};
