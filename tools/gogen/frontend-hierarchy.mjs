@@ -52,7 +52,7 @@ export class CaughtIndex {
 // Rebuild the current selection's hierarchy before the class seam. A CATCH
 // consumes whether any selected class matches, not the matching names or their
 // implementation bytes. The old walk also tests at most twenty chain members.
-const yes = Object.freeze([true]), no = Object.freeze([false]), /** @type {readonly string[]} */ noProviders = Object.freeze([]);
+/** @type {readonly import('./frontend-session-types.ts').QueryScalar[]} */ const yes = Object.freeze([true]), /** @type {readonly import('./frontend-session-types.ts').QueryScalar[]} */ no = Object.freeze([false]), /** @type {readonly string[]} */ noProviders = Object.freeze([]);
 /** @param {import('./frontend-session-types.ts').Registry} reg @param {ReadonlySet<string>} wanted @param {(name: string) => string | null | undefined} step @returns {CaughtIndex} */ export function caughtIndex(reg, wanted, step) {
   /** @type {Set<string>} */ const ancestors = new Set(), /** @type {Set<string>} */ providers = new Set();
   withRole("scheduling", () => {
@@ -72,7 +72,8 @@ const yes = Object.freeze([true]), no = Object.freeze([false]), /** @type {reado
     if (trace.unknownVersion === epoch) return complete;
     /** @param {{queries: Map<string, {role: string, kind: string}>} | undefined} entry @returns {boolean} */ const unknown = (entry) => [...entry?.queries.values() ?? []].some((q) => q.role === "artifact" && q.kind === "unknown-scan");
     epoch = trace.unknownVersion;
-    return complete = !unknown(trace.global) && ![...providers].some((owner) => unknown(trace.artifacts.get(owner)));
+    complete = !unknown(trace.global) && ![...providers].some((owner) => unknown(trace.artifacts.get(owner)));
+    return complete;
   };
   /** @type {Map<string, boolean>} */ const values = new Map();
   /** @param {readonly string[]} names @returns {boolean} */ const answer = (names) => names.some((name) => ancestors.has(name));
