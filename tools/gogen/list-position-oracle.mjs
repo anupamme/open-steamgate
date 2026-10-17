@@ -1,5 +1,5 @@
-// Diagnostic measurements, not assertions of SAP behavior. No SAP connection.
-// OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh node tools/gogen/list-position-oracle.mjs [--native]
+// Direct-Node semantics comparisons, not assertions of SAP behavior. No SAP connection.
+// OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh node tools/gogen/list-position-oracle.mjs [--native] [--check]
 import {execFileSync} from "node:child_process";
 import {mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
@@ -8,22 +8,20 @@ import {pathToFileURL} from "node:url";
 import {ABAP, MemoryConsole} from "@abaplint/runtime";
 import {modulesOf} from "../osd-transpile.mjs";
 import {libraryPath} from "../osd-lib-path.mjs";
+import {acceptanceTextSource} from "./list-acceptance-oracle.mjs";
+import assert from "node:assert/strict";
+import {repairListPosition} from "./osabap-list.mjs";
 import {home} from "./home.mjs";
 
-const cases = [
-  ["reported", "WRITE / 'a'. ULINE. WRITE / 'b'."],
-  ["start", "ULINE. WRITE / 'b'."],
-  ["twice", "ULINE. ULINE. WRITE / 'b'."],
-  ["inline", "WRITE / 'a'. ULINE. WRITE 'b'."],
-  ["write-uline", "WRITE / 'a'. ULINE."],
-  ["skip", "WRITE / 'a'. SKIP. WRITE / 'b'."],
-  ["new-line", "WRITE / 'a'. NEW-LINE. WRITE / 'b'."],
-  ["top", "TOP-OF-PAGE. ULINE. WRITE / 'h'. START-OF-SELECTION. WRITE / 'b'."],
-];
+const fixtureDir = join(import.meta.dirname, "testdata-list");
+const cases = readdirSync(fixtureDir).filter(file => file.endsWith(".prog.abap")).sort()
+  .map(file => [file.slice(0, -10), readFileSync(join(fixtureDir, file), "utf8")]);
+
 const gui = libraryPath(home, "open-abap-gui");
 const core = join(libraryPath(home, "open-abap-core"), "src");
 const {Transpiler} = modulesOf(home);
 const {convertProgram} = await import(pathToFileURL(join(gui, "converter/src/api.mjs")).href);
+const {parseSource} = await import(pathToFileURL(join(gui, "converter/src/parser.mjs")).href);
 const options = {ignoreSyntaxCheck: true, unknownTypes: "runtimeError", addCommonJS: true};
 const dir = mkdtempSync(join(tmpdir(), "list-position-oracle-"));
 const saved = globalThis.abap;
@@ -75,22 +73,68 @@ lt_lines = lo_list->finish_output( ).
 WRITE '@KERNEL abap.console.add(JSON.stringify(lt_lines.array().map(row => row.get())));'.`;
 
 try {
-  for (const [name, body] of cases) {
-    const source = `REPORT zprobe. ${body}`;
+  if (process.env.LIST_ACCEPTANCE_REPORT) {
+    const source = readFileSync(process.env.LIST_ACCEPTANCE_REPORT, "utf8");
+    try {
+      const output = await runNode([{filename: "zprobe.prog.abap", contents: source}], join(dir, "acceptance-direct"));
+      console.log(JSON.stringify({name: "acceptance", engine: "Node-direct", output}));
+    } catch (error) {
+      console.log(JSON.stringify({name: "acceptance", engine: "Node-direct", error: error.message}));
+    }
+    if (process.env.LIST_ACCEPTANCE_CSV) {
+      const filename = process.env.LIST_ACCEPTANCE_CSV;
+      const projected = acceptanceTextSource(source, parseSource, filename, readFileSync(filename, "utf8"));
+      const output = await runNode([{filename: "zprobe.prog.abap", contents: projected}], join(dir, "acceptance-text"));
+      console.log(JSON.stringify({name: "acceptance", engine: "Node-direct-text-projection", output}));
+    }
+  }
+  for (const [name, source] of cases) {
     try {
       const output = await runNode([{filename: "zprobe.prog.abap", contents: source}], join(dir, name, "direct"));
       console.log(JSON.stringify({name, engine: "Node-direct", source, output}));
     } catch (error) {
       console.log(JSON.stringify({name, engine: "Node-direct", error: error.message}));
+      if (process.argv.includes("--check")) {
+        const expected = name.startsWith("format") || name.startsWith("reset") ? "FORMAT, not supported"
+          : name === "new-line" ? "Statement NewLine not supported"
+          : name === "top" ? "TOP-OF-PAGE, not supported" : undefined;
+        assert.ok(expected && error.message.includes(expected), `${name}: ${error.message}`);
+      }
+    }
+    // FORMAT is unsupported upstream. Elide only parsed attribute statements
+    // for a separate, explicitly labelled text oracle.
+    const attrs = parseSource(source).units[0].statements.filter(s => s.kind === "Format");
+    let textSource = source;
+    for (const s of attrs.reverse()) textSource = textSource.slice(0, s.span.startOffset) + textSource.slice(s.span.endOffset);
+    let direct;
+    try {
+      direct = await runNode([{filename: "zprobe.prog.abap", contents: textSource}], join(dir, name, "text-direct"));
+      if (attrs.length) console.log(JSON.stringify({name, engine: "Node-direct-format-elided", output: direct}));
+    } catch (error) {
+      if (process.argv.includes("--check") && !["new-line", "top"].includes(name)) throw error;
     }
     const converted = await convertProgram({source, filename: "zprobe.prog.abap", mode: "strict",
       nativePassthrough: true, className: "ZCL_OSABAP_PROBE", transactionCode: "ZPROBE"});
     if (!converted.supported) throw new Error(JSON.stringify(converted.diagnostics));
-    const files = [...hostFiles, {filename: "zcl_osabap_probe.clas.abap", contents: converted.classSource},
-      ...(converted.helperSources ?? []).map(h => ({filename: `${h.className.toLowerCase()}.clas.abap`, contents: h.source})),
+    const files = [...hostFiles, {filename: "zcl_osabap_probe.clas.abap", contents: repairListPosition(converted.classSource, parseSource)},
+      ...(converted.helperSources ?? []).map(h => ({filename: `${h.className.toLowerCase()}.clas.abap`, contents: repairListPosition(h.source, parseSource)})),
       {filename: "zprobe.prog.abap", contents: driver}];
     const lines = JSON.parse(await runNode(files, join(dir, name, "converted")));
     console.log(JSON.stringify({name, engine: "Node-converted", lines}));
+    if (process.argv.includes("--check") && name === "inline") {
+      // Known upstream defect: direct ULINE does not advance before plain
+      // WRITE. Assert both observations explicitly instead of ignoring them.
+      assert.equal(direct, "a\n" + "-".repeat(50) + "b");
+      assert.deepEqual(lines, ["a", "-".repeat(132), "b"]);
+    }
+    if (process.argv.includes("--check") && name === "new-line") assert.deepEqual(lines, ["a", "b"]);
+    if (process.argv.includes("--check") && name === "top") assert.deepEqual(lines, ["-".repeat(132), "h", "b"]);
+    if (process.argv.includes("--check") && direct !== undefined && name !== "inline") {
+      // Width is a host policy (132 vs upstream's hardcoded 50), not cursor
+      // positioning. Keep every other character, including empty lines.
+      const normalized = lines.map(line => line === "-".repeat(132) ? "-".repeat(50) : line).join("\n");
+      assert.equal(normalized, direct, name);
+    }
     if (process.argv.includes("--native")) {
       const reportDir = join(dir, "report");
       mkdirSync(reportDir, {recursive: true});
@@ -102,6 +146,7 @@ try {
       });
       const output = execFileSync(join(build, ".out/osabap"), ["-params", "{}"], {encoding: "utf8"});
       console.log(JSON.stringify({name, engine: "Go-native", output}));
+      if (process.argv.includes("--check")) assert.equal(output, lines.join("\n") + "\n", name);
     }
   }
 } finally {

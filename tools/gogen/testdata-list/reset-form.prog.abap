@@ -1,0 +1,1 @@
+REPORT zprobe. WRITE / 'a'. ULINE. FORMAT RESET. PERFORM row. FORM row. WRITE / 'b'. ENDFORM.

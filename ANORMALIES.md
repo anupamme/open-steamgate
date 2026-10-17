@@ -32,7 +32,9 @@ Format adapted from `larshp/hithub` (MIT).
 
 ### ANOMALY-2026-10-17-list-position -- Converted ULINE adds positioning absent from the direct Node oracle
 
-- Status: `open`; measurement only, no runtime workaround.
+- Status: `workaround`; osabap repairs the pinned converter's redundant ULINE
+  positioning before closure compilation. Width policy and direct-runtime gaps
+  remain documented below.
 - Discovery date: `2026-10-17`.
 - Affected versions: pinned transpiler `f34e9bf4947daaf6464566b42b1e3ef1eaeb369c`
   (`@abaplint/runtime` 2.14.3), open-abap-core `84125c41`, and open-abap-gui
@@ -43,7 +45,6 @@ Format adapted from `larshp/hithub` (MIT).
 - Exact command: `TMPDIR=/mnt/ssd-510/osg/stoker/tmp GOCACHE=/mnt/ssd-510/osg/go-build OSD_HEAVY_TMP=/mnt/ssd-510/osg/stoker/tmp OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh node tools/gogen/list-position-oracle.mjs --native`.
   No SAP connection, fetch, or library modification is involved.
 - Expected SAP behavior: **unmeasured; measure on A4H** for all cases below.
-  No list-positioning rule was found in the existing `docs/` or this log.
   The mirrored keyword documentation says [WRITE /](https://eduardocopat.github.io/abap-docs/7.54/abapwrite-/)
   ignores the slash immediately after explicit positioning; [NEW-LINE](https://eduardocopat.github.io/abap-docs/7.54/abapnew-line/)
   ignores a cursor already positioned by NEW-LINE or SKIP;
@@ -53,7 +54,8 @@ Format adapted from `larshp/hithub` (MIT).
   the cursor at the first column of the next line. These are documentation
   claims, not new kernel measurements. In particular, do not infer a SKIP
   correction solely from the number of newline characters in console output.
-- Actual behavior: the direct abaplint Node runtime writes a 50-character
+- Baseline measurements (before the local repair, HEAD `72207e39`):
+  the direct abaplint Node runtime writes a 50-character
   rule, while the GUI list processor used by converted reports writes 132.
   Let `H50 = "-".repeat(50)` and `H132 = "-".repeat(132)`. The table gives
   exact direct-Node console strings and exact converted-Node list arrays.
@@ -70,34 +72,66 @@ Format adapted from `larshp/hithub` (MIT).
   | `WRITE / 'a'. NEW-LINE. WRITE / 'b'.` | Refused: `Statement NewLine not supported, NEW-LINE.` | `["a", "b"]` |
   | `TOP-OF-PAGE. ULINE. WRITE / 'h'. START-OF-SELECTION. WRITE / 'b'.` | Refused: `TOP-OF-PAGE, not supported, transpiler` | `[H132, "    h", "b"]` |
 
-- Isolation: the original report has **no extra blank line after ULINE** on
-  this base, on either converted Node or Go; both instead indent `b` by four
-  spaces. Repeated ULINE and trailing ULINE expose empty lines on both hosts.
-  In the pinned GUI converter, `converter/src/passes/lower-statements.mjs`
-  emits `uline( ... )`, `new_line( )`, and `set_position( 5 )`, and separately
-  strips the slash from an immediately following WRITE. The ABAP
-  `framework/host/zcl_gg_host_list.clas.abap` method `end_line` flushes an
-  empty current line when the column is greater than one. Go compiles this
-  same list processor; there is no independent Go ULINE implementation to
-  correct for these measurements.
-- Impact: converted reports gain unwanted indentation and, in the repeated
-  or trailing ULINE cases, empty lines. Direct Node also fails to advance
-  after ULINE followed by plain WRITE, so it is not a complete positioning
-  oracle. The requested Go-only correction was stopped because the related
-  empty-line behavior reproduces on Node and the original report's claimed
-  extra blank line does not reproduce with the current pins.
-- Smallest safe workaround: none applied. Preserve these observations and
-  measure the list cursor contract on A4H before changing the shared converter
-  or list writer. Before/after outputs are identical; no runtime was changed.
-- Upstream issue: none sent; this needs an open-abap-gui converter/list-writer
-  investigation, with the direct Node limitations distinguished from it.
-- Regression-test location: the diagnostic runner measures the cases without
-  asserting anomalous output as an ABAP contract. No semantics expectation
-  or Go/IR-JS behavior was changed.
-- Colors: FORMAT metadata already belongs to the GUI list model. Any future
-  FORMAT COLOR to ANSI rendering would belong at the terminal output loop
-  in `tools/gogen/go/cmd/osabap/main.go`, using the model's formatting/fragments;
-  no colors were implemented.
+- Isolation: immediately adjacent `ULINE. WRITE /` strips the slash during
+  conversion and exposes four spaces. With FORMAT or PERFORM/LOOP between
+  ULINE and WRITE, the slash survives and flushes a phantom empty line.
+  FORMAT itself does **not** move the cursor: the shared ABAP writer's
+  `set_format` assigns `ms_format`; `reset_format` clears it. The cause is
+  `converter/src/passes/lower-statements.mjs` emitting `uline( ... )`,
+  `new_line( )`, `set_position( 5 )` although the ABAP writer's `uline`
+  already ends the rule at column one of the next line. Its `end_line`
+  flushes an empty current line when the column is greater than one.
+- Direct-Node oracle first (2026-10-17 follow-up): all four minimal FORMAT
+  COLOR / RESET, inline / FORM reports are refused with
+  `FORMAT, not supported, transpiler`. The unchanged CSV acceptance report
+  is refused with `Illegal return statement` (a top-level RETURN emitted
+  into an ES module). No claim that these unchanged reports pass direct Node
+  is made. Separately labelled FORMAT-elided minimal reports print
+  `"a\n" + H50 + "\nb"`, with no empty line or indentation.
+- Local repair: `tools/gogen/osabap-list.mjs` uses the converter's abaplint
+  parser, statement kinds, tokens and source spans to remove only the two
+  redundant calls following a generated `lo_writer->uline` call. It runs on
+  the converted class and helpers before closure compilation. Libraries and
+  pins, shared ABAP list writer, Go runtime, IR-JS and `frontend.mjs` are
+  unchanged. The same adapter is used by the converted-Node oracle.
+  FORMAT metadata remains intact; no terminal colours are emitted.
+- After repair: reported/start/FORMAT/RESET/FORM cases have `b` at column one;
+  repeated ULINE gives `[H132, H132, "b"]`; trailing ULINE gives
+  `["a", H132]`; TOP-OF-PAGE gives `[H132, "h", "b"]`. The existing
+  SKIP and NEW-LINE observations remain unchanged. Native stdout equals
+  converted Node's list joined with newlines plus one terminal newline.
+- Width decision: retain 132 as the GUI/native host's fallback policy.
+  [REPORT LINE-SIZE documentation](https://eduardocopat.github.io/abap-docs/7.54/abapreport_list_options/)
+  defines an omitted LINE-SIZE by the current dynpro window width (at least
+  a standard GUI window), **not a universal 50 or 132**; its 132 example
+  specifies LINE-SIZE explicitly. Neither fixed value implements that dynamic
+  default. Direct Node hardcodes 50 in its ULINE statement. Width-only
+  normalization in the comparison is explicit; empty lines and indentation
+  are never normalized. No SAP width measurement was made.
+- Remaining direct-Node gaps: plain WRITE after ULINE appends `b` to H50;
+  converted output correctly starts a new line. Direct Node refuses NEW-LINE,
+  TOP-OF-PAGE and FORMAT. The runner asserts these known observations
+  separately; it does not use them as a universal SAP oracle.
+- CSV acceptance: original builder from `72207e39` reproduces two blank lines,
+  before the heading and first data row, and four spaces before the count.
+  Rebuilt with the repair: zero blank lines, rows unchanged, count at column
+  one: `6 rows, 6 columns`. Both versions keep three H132 rules.
+  The separately labelled direct text projection removes the selection-screen
+  event and FORMAT, replaces GUI upload with APPEND of the supplied CSV
+  lines, initializes the file parameter, and replaces the unreachable
+  empty-upload RETURN with a failing ASSERT (direct module syntax limitation).
+  All calculations and FORM/PERFORM calls remain. It produces the same
+  heading and six data rows with no blank lines and H50 rules, but summary
+  `6rows,6columns`: direct WRITE lacks converted field gaps. This remaining
+  spacing divergence is not normalized away or claimed fixed.
+- Regression-test locations: `tools/gogen/testdata-list/*.prog.abap`,
+  `tools/gogen/list-position-oracle.mjs --native --check` (direct / converted
+  Node / Go semantics), `tools/gogen/osabap-list.test.mjs` (parsed adapter
+  boundaries and idempotence). The optional `LIST_ACCEPTANCE_REPORT` and
+  `LIST_ACCEPTANCE_CSV` inputs measure the unchanged and projected CSV report;
+  `tools/gogen/list-acceptance-oracle.mjs` documents the projection.
+- Upstream issue: none sent; local compatibility adapter only. The pinned
+  open-abap-gui converter still needs its redundant positioning removed.
 - Upstream version containing a fix: unknown.
 
 ### ANOMALY-2026-10-15-tabl-elementary-builtins -- TABL field with COMPTYPE E and no ROLLNAME
