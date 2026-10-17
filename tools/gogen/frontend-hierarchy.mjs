@@ -69,7 +69,7 @@ export class CaughtIndex {
     const trace = provenanceGraph(reg);
     if (!trace) return true;
     if (trace.unknownVersion === state.epoch) return state.complete;
-    /** @param {{queries: Map<string, {role: string, kind: string}>} | undefined} entry @returns {boolean} */ const unknown = (entry) => [...entry?.queries.values() ?? []].some((q) => q.role === "artifact" && q.kind === "unknown-scan");
+    /** @param {import('./frontend-session-types.ts').QueryEntry | undefined} entry @returns {boolean} */ const unknown = (entry) => [...entry?.queries.values() ?? []].some((q) => q.role === "artifact" && q.kind === "unknown-scan");
     state.epoch = trace.unknownVersion;
     state.complete = !unknown(trace.global) && ![...providers].some((owner) => unknown(trace.artifacts.get(owner)));
     return state.complete;
