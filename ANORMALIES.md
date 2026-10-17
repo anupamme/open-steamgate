@@ -90,7 +90,9 @@ Format adapted from `larshp/hithub` (MIT).
   `"a\n" + H50 + "\nb"`, with no empty line or indentation.
 - Local repair: `tools/gogen/osabap-list.mjs` uses the converter's abaplint
   parser, statement kinds, tokens and source spans to remove only the two
-  redundant calls following a generated `lo_writer->uline` call. It runs on
+  redundant calls following every generated `lo_writer->uline` call. An
+  unmatched sequence fails the build with a converter-pin diagnostic; this
+  includes a bare ULINE call at the end of the statement list. It runs on
   the converted class and helpers before closure compilation. Libraries and
   pins, shared ABAP list writer, Go runtime, IR-JS and `frontend.mjs` are
   unchanged. The same adapter is used by the converted-Node oracle.
@@ -98,7 +100,11 @@ Format adapted from `larshp/hithub` (MIT).
 - After repair: reported/start/FORMAT/RESET/FORM cases have `b` at column one;
   repeated ULINE gives `[H132, H132, "b"]`; trailing ULINE gives
   `["a", H132]`; TOP-OF-PAGE gives `[H132, "h", "b"]`. The existing
-  SKIP and NEW-LINE observations remain unchanged. Native stdout equals
+  SKIP and NEW-LINE observations remain unchanged. The added `ULINE. SKIP.`
+  fixture gives `[H132, ""]` (one blank line; previously `[H132, "", ""]`,
+  two blank lines). Keyword documentation expectation: one blank line,
+  **unmeasured; measure on A4H**; the direct console is not a SAP oracle.
+  Native stdout equals
   converted Node's list joined with newlines plus one terminal newline.
 - Width decision: retain 132 as the GUI/native host's fallback policy.
   [REPORT LINE-SIZE documentation](https://eduardocopat.github.io/abap-docs/7.54/abapreport_list_options/)
@@ -115,7 +121,8 @@ Format adapted from `larshp/hithub` (MIT).
 - CSV acceptance: original builder from `72207e39` reproduces two blank lines,
   before the heading and first data row, and four spaces before the count.
   Rebuilt with the repair: zero blank lines, rows unchanged, count at column
-  one: `6 rows, 6 columns`. Both versions keep three H132 rules.
+  one, but integer output is still too short (see the separate integer-width
+  anomaly below). Both versions keep three H132 rules.
   The separately labelled direct text projection removes the selection-screen
   event and FORMAT, replaces GUI upload with APPEND of the supplied CSV
   lines, initializes the file parameter, and replaces the unreachable
@@ -127,11 +134,78 @@ Format adapted from `larshp/hithub` (MIT).
 - Regression-test locations: `tools/gogen/testdata-list/*.prog.abap`,
   `tools/gogen/list-position-oracle.mjs --native --check` (direct / converted
   Node / Go semantics), `tools/gogen/osabap-list.test.mjs` (parsed adapter
-  boundaries and idempotence). The optional `LIST_ACCEPTANCE_REPORT` and
+  boundaries and mutated real converter output). CI runs the adapter test
+  and the non-native `list-position-oracle.mjs --check`; native builds remain
+  an optional local comparison to avoid rebuilding every fixture in CI.
+  The optional `LIST_ACCEPTANCE_REPORT` and
   `LIST_ACCEPTANCE_CSV` inputs measure the unchanged and projected CSV report;
   `tools/gogen/list-acceptance-oracle.mjs` documents the projection.
-- Upstream issue: none sent; local compatibility adapter only. The pinned
-  open-abap-gui converter still needs its redundant positioning removed.
+- Upstream: needs an issue/PR in oisee/open-abap-gui. The sequence fix belongs
+  in our fork at `converter/src/passes/lower-statements.mjs:1154`; the adapter
+  is a workaround until that fix lands. No issue or PR filed.
+- Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-17-list-integer-width -- Converted WRITE loses the default integer output length
+
+- Status: `open`; separate from the ULINE positioning workaround.
+- Discovery date: `2026-10-17`.
+- Affected versions: open-abap-gui `b65c4431`, pinned runtime 2.14.3.
+- Affected API: converter WRITE lowering and `zcl_gg_host_list`'s `write_field`.
+- Minimal ABAP reproducer: `REPORT zprobe. DATA gv_rows TYPE i VALUE 6. WRITE: / gv_rows, 'rows,', gv_rows, 'columns'.`
+- Exact command: the CSV acceptance inputs to `tools/gogen/list-position-oracle.mjs`
+  described above; inspection of the pinned writer's `write_field` and `fit`.
+- Expected SAP behaviour: TYPE i has default output length 11, right-justified;
+  expected summary `          6 rows,           6 columns`, **unmeasured; measure on A4H**.
+- Actual converted behaviour: `WRITE: / gv_rows` prints `6` at column 1.
+  `write_field` calls `fit` with `is_field-placement-length = 0`, so numeric
+  right justification has no field width to pad to. The CSV summary still
+  has this formatting defect after the cursor repair.
+- Impact: numeric columns and summaries lose their default field width.
+- Smallest safe workaround: none applied; preserve the type's output length
+  through conversion rather than treating the shortened count as correct.
+- Upstream: needs an issue/PR in oisee/open-abap-gui. None filed.
+- Regression-test location: optional CSV acceptance projection above; no A4H oracle.
+- Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-17-list-uline-slash -- Converter removes explicit WRITE slash after ULINE
+
+- Status: `open`.
+- Discovery date: `2026-10-17`.
+- Affected versions: open-abap-gui `b65c4431`.
+- Minimal ABAP reproducer: `REPORT zprobe. ULINE. WRITE /10 'b'.`
+- Isolation: `converter/src/passes/lower-statements.mjs:1760-1764` strips `/`
+  from a WRITE immediately after ULINE, so this becomes `WRITE 10 'b'.`
+  The generated writer no longer receives the explicit line positioning.
+- Expected SAP behaviour: preserve `/10` positioning; **unmeasured; measure on A4H**.
+- Actual behaviour: the slash removal is redundant with the writer's cursor
+  model and wrong for explicit positioning. The adapter removes only the
+  extra ULINE calls and does not repair this separate converter transformation.
+- Exact command: source inspection of the pinned converter, not an A4H measurement.
+- Smallest safe workaround: none applied.
+- Upstream: needs an issue/PR in oisee/open-abap-gui. None filed.
+- Regression-test location: no oracle yet; reproducer above.
+- Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-17-list-uline-placement -- Positioned and dynamic rules lose ULINE semantics
+
+- Status: `open`.
+- Discovery date: `2026-10-17`.
+- Affected versions: open-abap-gui `b65c4431` converter and shared list writer.
+- Minimal ABAP reproducers: `REPORT zprobe. WRITE 'x'. ULINE AT 20(10). WRITE 'y'.`
+  and `REPORT zprobe. DATA pos TYPE i VALUE 20. DATA len TYPE i VALUE 10. ULINE AT pos(len).`
+- Exact command: source inspection of the pinned converter's ULINE branch
+  (`converter/src/passes/lower-statements.mjs:1147-1154`) and shared writer.
+- Expected SAP behaviour: positioned ULINE without `/` probably keeps the rule
+  on the current line; dynamic position and length should be honored.
+  Both expectations are **unmeasured; measure on A4H**.
+- Actual behaviour: the writer always starts a new line for a rule, including
+  `ULINE AT 20(10)` after `WRITE 'x'`. The converter's regex accepts only
+  numeric literals, so variable `pos(len)` silently falls back to full width.
+  The positioning adapter does not change either behaviour.
+- Impact: inline rules and rules with variable bounds are misplaced or too wide.
+- Smallest safe workaround: none applied.
+- Upstream: needs an issue/PR in oisee/open-abap-gui. None filed.
+- Regression-test location: no oracle yet; reproducers above.
 - Upstream version containing a fix: unknown.
 
 ### ANOMALY-2026-10-15-tabl-elementary-builtins -- TABL field with COMPTYPE E and no ROLLNAME

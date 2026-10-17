@@ -127,6 +127,12 @@ try {
       assert.equal(direct, "a\n" + "-".repeat(50) + "b");
       assert.deepEqual(lines, ["a", "-".repeat(132), "b"]);
     }
+    if (process.argv.includes("--check") && name === "uline-skip") {
+      // Keyword documentation expectation: unmeasured; measure on A4H.
+      // Neither console newline counts nor the direct runtime are a SAP oracle.
+      assert.equal(direct, "-".repeat(50) + "\n");
+      assert.deepEqual(lines, ["-".repeat(132), ""]);
+    }
     if (process.argv.includes("--check") && name === "new-line") assert.deepEqual(lines, ["a", "b"]);
     if (process.argv.includes("--check") && name === "top") assert.deepEqual(lines, ["-".repeat(132), "h", "b"]);
     if (process.argv.includes("--check") && direct !== undefined && name !== "inline") {

@@ -148,7 +148,11 @@ jobs:
         # the library clones must be the pinned ones (tools/gogen/lib-pins.mjs)
         env:
           OSABAP_STRICT_PINS: "1"
-        run: node --test tools/gogen/builtins.test.mjs tools/gogen/lib-pins.test.mjs tools/gogen/osabap-f4.test.mjs tools/gogen/osabap.test.mjs tools/gogen/osabap-sql-corpus.test.mjs tools/gogen/unit.test.mjs
+        run: node --test tools/gogen/builtins.test.mjs tools/gogen/lib-pins.test.mjs tools/gogen/osabap-f4.test.mjs tools/gogen/osabap-list.test.mjs tools/gogen/osabap.test.mjs tools/gogen/osabap-sql-corpus.test.mjs tools/gogen/unit.test.mjs
+      # Node only: reuse the pinned libraries without rebuilding a native
+      # binary for every list fixture; keep the 35-minute job budget.
+      - name: List positioning, direct and converted Node
+        run: node tools/gogen/list-position-oracle.mjs --check
       - name: Generated-class ABAP Unit CI entry points (real Go and JS builds)
         run: flock /tmp/osd-heavy.lock node tools/osd-suites.mjs --group gogen
 
