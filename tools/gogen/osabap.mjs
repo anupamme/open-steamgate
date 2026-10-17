@@ -13,6 +13,7 @@ import {compileClosedProgram} from "./frontend-closure.mjs";
 import {home} from "./home.mjs";
 import {checkLibPins} from "./lib-pins.mjs";
 import {libraryPath} from "../osd-lib-path.mjs";
+import {repairListPosition} from "./osabap-list.mjs";
 import {prepareF4} from "./osabap-f4.mjs";
 import {assertTableFieldsTyped} from "./frontend-ddic.mjs";
 
@@ -93,7 +94,7 @@ const converted = await convertProgram({source: convertedSource, filename: basen
 if (converted.supported !== true || converted.classSource === undefined) {
   throw new Error(`${report}: converter refused the report: ${JSON.stringify(converted.diagnostics)}`);
 }
-let classSource = converted.classSource;
+let classSource = repairListPosition(converted.classSource, parseSource);
 if (f4Fields.length) {
   const state = converted.reportIR?.statePlan?.selectionState ?? {};
   const marker = "  METHOD zif_gg_report_v1~at_selection_screen_value_req.";
@@ -223,7 +224,7 @@ while (pending.length > 0) {
 }
 coreObjects.sort();
 for (const helper of converted.helperSources ?? []) {
-  writeFileSync(join(generated, `${helper.className.toLowerCase()}.clas.abap`), helper.source);
+  writeFileSync(join(generated, `${helper.className.toLowerCase()}.clas.abap`), repairListPosition(helper.source, parseSource));
 }
 
 const selections = (converted.reportIR?.selections ?? []).flatMap((screen) => screen.elements ?? [])
