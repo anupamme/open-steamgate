@@ -2,7 +2,16 @@ import {inputSnapshot} from "./frontend-inventory.mjs";
 import {currentCaughtAnswer} from "./frontend-hierarchy.mjs";
 // The frontend's explicit query contracts. Discovery indexes are compile-local;
 // consuming a named answer, including an empty answer, belongs to its reader.
-import {enumerateObjects, semanticQuery, withArtifact, withRole, recordingProvenance} from "./frontend-provenance.mjs";
+import {enumerateObjects, semanticQuery, withArtifact, withRole, recordingProvenance, exposingProvenance} from "./frontend-provenance.mjs";
+const selections = new WeakMap();
+// The frontend freezes its private selection after expansion. Mutable callers
+// keep Array.includes semantics; membership never changes iteration order.
+/** @param {readonly string[]} wanted @param {string} name @returns {boolean} */
+export function selectionHas(wanted, name) {
+  if (!Object.isFrozen(wanted)) return wanted.includes(name);
+  if (!selections.has(wanted)) selections.set(wanted, new Set(wanted));
+  return selections.get(wanted).has(name);
+}
 /** @type {WeakMap<import("./frontend-session-types.ts").Registry, import("./frontend-cache-types.ts").SuppliedIndex | undefined>} */ const suppliedIndexes = new WeakMap();
 /** @type {WeakMap<import("./frontend-session-types.ts").Registry, Map<string, string[]>>} */ const localAnswers = new WeakMap();
 /** @param {Pick<import("./frontend-session-types.ts").ArtifactObject, "getType" | "getName">} obj @returns {string} */ const keyOf = (obj) => `${obj.getType()} ${obj.getName().toUpperCase()}`;
@@ -94,7 +103,7 @@ const emptyProviders = Object.freeze([]);
 });
 
 /** @param {import("./frontend-session-types.ts").Registry} reg @param {import("./frontend-session-types.ts").ArtifactObject} obj @param {() => [string[], [string, import("./frontend-session-types.ts").RttiComponent[]][]]} project @returns {void} */ export function rttiProjection(reg, obj, project) {
-  if (!recordingProvenance()) return;
+  if (!exposingProvenance()) return;
   const [known, structs] = project();
   semanticQuery(reg, "rtti-owner", [obj.getName().toUpperCase()], [keyOf(obj)],
     {role: "final-output", known, structs, policy: "owner-type-projection"});

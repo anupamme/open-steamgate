@@ -1,4 +1,5 @@
 import {cacheDiagnostic, diagnosticCache} from "./frontend-cache-diagnostics.mjs";
+import {timedFrontend} from "./frontend-timing.mjs";
 import {artifactLowering, storedProvenance, inheritStoredProvenance, recordingProvenance, auditedBookkeeping} from "./frontend-provenance.mjs";
 import {projectionMatches, readVariants, rememberVariant} from "./frontend-cache-variants.mjs";
 import {recordLowering, replayLowering, replayGuardKey, setProxyCheck} from "./frontend-replay.mjs";
@@ -263,9 +264,11 @@ export function objectCache(registry, root, dependencyCache = false) {
         if (entry.metadata?.graph && recordingProvenance()) {
           const id = entry.metadata.graph;
           if (!provenanceGraphs.has(id)) {
-            const graphBytes = readFileSync(join(root, version, `${id}.provenance`));
-            if (digest(graphBytes) !== id) continue;
-            provenanceGraphs.set(id, deserialize(inflateRawSync(graphBytes)));
+            timedFrontend("graphLoading", () => {
+              const graphBytes = readFileSync(join(root, version, `${id}.provenance`));
+              if (digest(graphBytes) !== id) throw new Error("bad global graph checksum");
+              provenanceGraphs.set(id, deserialize(inflateRawSync(graphBytes)));
+            });
           }
           const nodes = provenanceGraphs.get(id).nodes;
           const own = nodes[owner], lowering = nodes[entry.metadata.root];
@@ -319,6 +322,7 @@ export function objectCache(registry, root, dependencyCache = false) {
       } // Non-portable lowerings compile normally.
     },
     finish(program) {
+      return timedFrontend("finalization", () => {
       if (!pending.length) { diagnostic?.finish(); return; }
       const graph = dependencyGraph(registry, pending.map((e) => e.owner),
         shadow ? pending.flatMap((e) => [...borrowedOwners(deserialize(e.valueBytes))]) : []);
@@ -340,6 +344,7 @@ export function objectCache(registry, root, dependencyCache = false) {
         cache.persist(entry);
       }
       diagnostic?.finish();
+      });
     },
     persist({owner, value, valueBytes, reads, program, metadata, variant}) {
       // Repeated reads can exceed the budget before compaction. A transcript
@@ -413,7 +418,7 @@ export const compileDiskClass = artifactLowering(/** @param {import('./frontend-
   let fromDependency = false;
   let cached = session?.classes.get(key);
   const replay = (entry) => entry && entry.file === file && entry.structure === file.getStructure()
-    && entry.supplied === suppliedKey(program, key) && entry.replay && replayLowering(program, entry.replay, (row) => { miss = row; });
+    && entry.supplied === suppliedKey(program, key) && entry.replay && timedFrontend("replay", () => replayLowering(program, entry.replay, (row) => { miss = row; }));
   let valid = replay(cached);
   if (!valid) {
     const stored = session?.disk?.read(owner, key, program);

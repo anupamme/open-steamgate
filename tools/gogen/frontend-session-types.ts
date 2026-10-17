@@ -147,6 +147,7 @@ export interface DiskFrontend {
   compileDiskClass(ctx: LoweringContext, obj: ClassObject, lower: ClassLowering, session: CacheSession | null | undefined): ClassIR;
 }
 export interface CompileOptions {
+  closureContext?: {round: number};
   folders: string[];
   objects: string[];
   tolerant?: boolean;

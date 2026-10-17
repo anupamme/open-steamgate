@@ -1,9 +1,10 @@
 // Explicit opt-in NDJSON; diagnostics never participate in cache decisions.
 import {appendFileSync} from "node:fs";
+import {frontendRound} from "./frontend-timing.mjs";
 export function cacheDiagnostic(row) {
   const path = process.env.GOGEN_CACHE_DIAGNOSTICS;
   if (!path) return;
-  try { appendFileSync(path, JSON.stringify({pid: process.pid, elapsedMs: Math.round(performance.now()), ...row}) + "\n"); }
+  try { appendFileSync(path, JSON.stringify({pid: process.pid, round: frontendRound(), elapsedMs: Math.round(performance.now()), ...row}) + "\n"); }
   catch { /* Unavailable diagnostics must not change compilation. */ }
 }
 

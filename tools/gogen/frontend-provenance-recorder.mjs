@@ -1,4 +1,5 @@
 import {projectedQuery, projectionAnswer} from "./frontend-query-contract.mjs";
+import {timedFrontend, timingEnabled} from "./frontend-timing.mjs";
 // Observational tracing only: no cache key, parser invalidation or replay decisions.
 import {inputSnapshot, objectKey, artifactIdentity as artifacts, sameArtifactIdentity} from "./frontend-inventory.mjs";
 import {createRequire} from "node:module";
@@ -19,6 +20,10 @@ const core = coreRequire("@abaplint/core");
   return child;
 }
 
+const queryIdentity = (role, phase, owner, query) => ["getObject", "getFileByName", "findObjectForFile", "getFirstObject"].includes(query.kind)
+  ? `${role}\0${phase}\0${owner ?? "<registry>"}\0${query.kind}\0${query.args.join("\0")}\u0001${query.result.join("\0")}`
+  : JSON.stringify([role, phase, owner, projectedQuery(query) ? projectionAnswer(query) : query]);
+
 class Recorder {
   /** @param {boolean} expose */ constructor(expose) {
     this.expose = expose;
@@ -30,6 +35,10 @@ class Recorder {
     /** @type {import('./frontend-session-types.ts').Role[]} */ this.roles = [];
     /** @type {WeakMap<import('./frontend-session-types.ts').QueryEntry, import('./frontend-session-types.ts').QueryTrie>} */ this.named = new WeakMap();
     /** @type {WeakMap<import('./frontend-session-types.ts').Registry, import('./frontend-session-types.ts').InputSnapshot>} */ this.inventories = new WeakMap();
+    if (timingEnabled()) for (const name of ["query", "inventory"]) {
+      const method = this[name];
+      this[name] = (...args) => timedFrontend("observation", () => method.apply(this, args));
+    }
   }
   /** @param {import('./frontend-session-types.ts').Registry} reg @returns {import('./frontend-session-types.ts').RegistryState} */ state(reg) {
     let state = registries.get(reg);
@@ -92,9 +101,7 @@ class Recorder {
     const role = query.role ?? this.role(state), frame = this.current(state);
     const phase = query.phase ?? frame?.phase ?? "registry";
     const entry = role === "scheduling" ? state.scheduling : role === "final-output" ? state.finalOutput : this.own(state, owner);
-    const simple = ["getObject", "getFileByName", "findObjectForFile", "getFirstObject"].includes(query.kind);
-    const id = simple ? `${role}\0${phase}\0${owner ?? "<registry>"}\0${query.kind}\0${query.args.join("\0")}\u0001${query.result.join("\0")}`
-      : JSON.stringify([role, phase, owner, projectedQuery(query) ? projectionAnswer(query) : query]);
+    const id = queryIdentity(role, phase, owner, query);
     if (entry.queries.has(id)) return;
     const row = {role, artifact: owner ?? "<registry>", phase, ...query};
     entry.queries.set(id, row);
@@ -258,6 +265,7 @@ class Recorder {
 // Disk IR replay performs no lowering lookups. Carry its stored observation
 // transcript too, without using it to validate or change any cache key.
 /** @returns {boolean} */ export const recordingProvenance = () => !!active;
+/** @returns {boolean} */ export const exposingProvenance = () => active?.expose === true;
 
 /** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').ArtifactInput} obj @returns {import('./frontend-session-types.ts').StoredProvenance | undefined} */ export function storedProvenance(reg, obj) {
   if (!active) return;
@@ -268,14 +276,16 @@ class Recorder {
 
 /** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').ArtifactInput} obj @param {import('./frontend-session-types.ts').StoredProvenance | undefined} stored @returns {void} */ export function inheritStoredProvenance(reg, obj, stored) {
   if (!active) return;
-  const state = active.state(reg), key = keyOf(obj.obj ?? obj);
-  if (!stored || !Array.isArray(stored.rows) || !Array.isArray(stored.edges)) {
-    active.query(state, {kind: "unknown-scan", args: ["lowering-built-before-recording"], result: []}, key);
-    return;
-  }
-  const entry = active.entry(state, key, true);
-  for (const row of stored.rows) active.query(state, row, key);
-  for (const edge of stored.edges) entry.edges.add(edge);
+  return timedFrontend("observation", () => {
+    const state = active.state(reg), key = keyOf(obj.obj ?? obj);
+    if (!stored || !Array.isArray(stored.rows) || !Array.isArray(stored.edges)) {
+      active.query(state, {kind: "unknown-scan", args: ["lowering-built-before-recording"], result: []}, key);
+      return;
+    }
+    const entry = active.entry(state, key, true);
+    for (const row of stored.rows) active.query(state, row, key);
+    for (const edge of stored.edges) entry.edges.add(edge);
+  });
 }
 
 // Expanded macros bypass the raw-source selection scan. Observe the actual

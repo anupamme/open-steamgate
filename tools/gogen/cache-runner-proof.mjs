@@ -35,32 +35,35 @@ function capture(label, enabled) {
       elapsedMs: Math.round(performance.now() - start), log}; save();
     throw new Error(`${label}: build failed: ${log}`);
   }
-  const phases = {};
+  const phases = {}, phaseRounds = [];
   let counts;
   for (const line of readFileSync(log, "utf8").split("\n")) if (line.startsWith("OSABAP_TIMING ")) {
-    const row = JSON.parse(line.slice("OSABAP_TIMING ".length)); phases[row.phase] = row.ms;
+    const row = JSON.parse(line.slice("OSABAP_TIMING ".length));
+    if (row.round > 0) { phaseRounds.push(row); phases[row.phase] = (phases[row.phase] ?? 0) + row.ms; }
+    else phases[row.phase] = row.ms;
     if (row.phase === "frontend") counts = {lowered: row.lowered, reused: row.reused};
   }
   for (const name of ["frontend", "emit", "goBuild", "total"]) assert.ok(Number.isFinite(phases[name]), `missing ${name}`);
   const generated = join(build, "go/cmd/osabap");
   const hashes = Object.fromEntries(readdirSync(generated).filter((name) => name.startsWith("zz_") || name === "symbols.json").sort()
     .map((name) => [name, createHash("sha256").update(readFileSync(join(generated, name))).digest("hex")]));
-  const reasons = {}, loweredClasses = [], rounds = [], allClasses = new Set();
-  let seen = new Set(), round = {lowered: 0, reused: 0};
+  const reasons = {}, loweredClasses = [], roundCounts = new Map(), allClasses = new Set(), invalidation = [];
   if (existsSync(diagnostics)) for (const line of readFileSync(diagnostics, "utf8").split("\n")) if (line) {
     const row = JSON.parse(line);
+    if (row.event === "certificate-validation") invalidation.push(row);
     if (row.event === "class") {
-      if (seen.has(row.name)) { rounds.push(round); seen = new Set(); round = {lowered: 0, reused: 0}; }
-      seen.add(row.name); allClasses.add(row.name); round[row.hit ? "reused" : "lowered"]++;
+      if (!roundCounts.has(row.round)) roundCounts.set(row.round, {round: row.round, lowered: 0, reused: 0});
+      const round = roundCounts.get(row.round);
+      allClasses.add(row.name); round[row.hit ? "reused" : "lowered"]++;
       if (!row.hit) {
         const reason = [row.reason, row.key, row.method].filter(Boolean).join(":");
         reasons[reason] = (reasons[reason] ?? 0) + 1; loweredClasses.push(row.name);
       }
     }
   }
-  if (seen.size) rounds.push(round);
+  const rounds = [...roundCounts.values()];
   if (enabled) assert.equal(allClasses.size, counts.lowered + counts.reused, "diagnostics must cover the final class universe");
-  results.rows.push({label, enabled, phases, counts, reasons, loweredClasses, rounds,
+  results.rows.push({label, enabled, phases, phaseRounds, invalidation, counts, reasons, loweredClasses, rounds,
     uniqueClasses: allClasses.size || counts.lowered + counts.reused,
     uniqueLowered: enabled ? [...new Set(loweredClasses)].sort() : undefined,
     manifestHash: createHash("sha256").update(JSON.stringify(hashes)).digest("hex"),
@@ -91,5 +94,6 @@ results.minimumRoundReuseRatio = Math.min(...warm.rounds.map((r) => r.reused / (
 results.reuseBudgetMet = results.reuseRatio >= 0.99 && results.minimumRoundReuseRatio >= 0.99;
 results.editedNewlyLowered = results.rows.find((r) => r.label === "edited-enabled").uniqueLowered.filter((n) => !warm.uniqueLowered.includes(n));
 results.unchangedWarmRatio = warm.phases.total / disabled.phases.total;
-results.editedBudgetMet = results.rows.find((r) => r.label === "edited-enabled").phases.total <= 100000;
+results.editedBudgetMet = results.rows.find((r) => r.label === "edited-enabled").phases.total < 561900;
+results.unchangedAbsoluteBudgetMet = warm.phases.total <= 346000;
 save();

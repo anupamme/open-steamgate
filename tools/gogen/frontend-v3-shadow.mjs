@@ -10,6 +10,8 @@ import {deflateRawSync, inflateRawSync} from "node:zlib";
 import {keyComputer, hashV3, mismatchReason, borrowedOwners, sealDependencyGraph} from "./frontend-v3-key.mjs";
 import {recordLowering, replayLowering, copyReplayProgram} from "./frontend-replay.mjs";
 import {auditedBookkeeping, auditBuiltArtifacts} from "./frontend-provenance.mjs";
+import {certificateIndex, certificateValidator} from "./frontend-certificates.mjs";
+import {timedFrontend} from "./frontend-timing.mjs";
 const checksum = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const validHash = (s) => typeof s === "string" && /^[0-9a-f]{64}$/.test(s);
 const KEEP_CANDIDATES = 4;
@@ -33,9 +35,31 @@ export function shadowCache(reg, root, namespace, portable) {
   let namespaceValue, directory;
   const namespaceOf = () => namespaceValue ??= typeof namespace === "function" ? namespace() : namespace;
   const dir = () => directory ??= join(root, "v3", namespaceOf());
-  const graphs = new Map();
+  const graphs = new Map(), certificates = new Map();
   let compute, stats;
-  const computer = (program) => compute ??= keyComputer(reg, namespaceOf(), program);
+  let roundProgram;
+  const computer = (program) => {
+    compute ??= keyComputer(reg, namespaceOf(), program);
+    if (roundProgram !== program) { compute.round(program); roundProgram = program; }
+    return compute;
+  };
+  const certificateOf = (id, program) => {
+    if (!validHash(id)) throw new Error("bad v3 graph id");
+    if (process.env.GOGEN_CACHE_SHADOW_FAULT) return;
+    if (!certificates.has(id)) {
+      try {
+        certificates.set(id, timedFrontend("graphLoading", () => {
+          const index = unpack(join(dir(), `${id}.certificates`));
+          if (index.graph !== id) throw new Error("certificate-graph-identity");
+          return certificateValidator(index, reg);
+        }));
+      }
+      catch { certificates.set(id, undefined); }
+    }
+    const certificate = certificates.get(id);
+    timedFrontend("certificateValidation", () => certificate?.round(program));
+    return certificate;
+  };
   const entryDir = (owner, name) => join(dir(), hashV3([owner, name]));
   const index = (location) => {
     const keys = JSON.parse(readFileSync(join(location, "index.json"), "utf8"));
@@ -45,9 +69,11 @@ export function shadowCache(reg, root, namespace, portable) {
   const graphOf = (id) => {
     if (!validHash(id)) throw new Error("bad v3 graph id");
     if (!graphs.has(id)) {
-      const bytes = readFileSync(join(dir(), `${id}.provenance`));
-      if (checksum(bytes) !== id) throw new Error("bad v3 graph checksum");
-      graphs.set(id, sealDependencyGraph(deserialize(inflateRawSync(bytes))));
+      timedFrontend("graphLoading", () => {
+        const bytes = readFileSync(join(dir(), `${id}.provenance`));
+        if (checksum(bytes) !== id) throw new Error("bad v3 graph checksum");
+        graphs.set(id, sealDependencyGraph(deserialize(inflateRawSync(bytes))));
+      });
     }
     return graphs.get(id);
   };
@@ -58,7 +84,7 @@ export function shadowCache(reg, root, namespace, portable) {
     if (attach) program.frontendCounts.shadowV3 = stats;
   };
   return {
-    reset() { stats = undefined; compute = undefined; },
+    reset() { stats = undefined; },
     probe(owner, name, program) {
       begin(program);
       const row = {name, wouldReuseV3: false, actuallyLowered: false, reason: "no-candidate"};
@@ -68,31 +94,40 @@ export function shadowCache(reg, root, namespace, portable) {
       try {
         const location = entryDir(owner, name);
         for (const key of index(location)) {
-          let candidate, graph, value;
+          let candidate, graph, value, certificate, certified;
           try {
             candidate = unpack(join(location, `${key}.bin`));
-            graph = graphOf(candidate.graph);
             value = deserialize(candidate.valueBytes);
-            if (value.name !== name || graph.nodes[candidate.root]?.owner !== owner || candidate.key !== key) continue;
+            if (value.name !== name || candidate.root !== `lowering:${owner}` || candidate.key !== key) continue;
             if (!portable(value)) { refuse("nonportable-candidate"); continue; }
+            certificate = certificateOf(candidate.graph, program);
+            certified = certificate?.entry(key, candidate.root, value, namespaceOf());
+            if (!certified) {
+              graph = graphOf(candidate.graph);
+              certificate?.seed(computer(program), graph);
+            }
           } catch { refuse("corrupt-candidate"); continue; }
           // Recompute completeness from the graph, never trust a persisted bit.
-          const saved = computer(program)(graph, candidate.root, value);
+          const saved = certified ? {complete: true, key} : timedFrontend("certificateValidation", () => computer(program)(graph, candidate.root, value));
           if (!saved.complete || saved.key !== key) { refuse(saved.reason ?? "corrupt-key"); continue; }
           row.complete = true;
-          const current = computer(program)(graph, candidate.root, value, {current: true});
+          const current = certified ? saved : timedFrontend("certificateValidation", () => computer(program)(graph, candidate.root, value, {current: true}));
           if (auditBuiltArtifacts(reg)) { refuse("audit-built-artifact"); break; }
           if (!current.complete) { refuse(current.reason); continue; }
           if (current.key !== key) { refuse(mismatchReason(saved, current)); continue; }
           // Ordered replay already forks every collection it writes. A shallow
           // trial isolates its effects without copying all growing maps first.
           const trial = {...program};
-          if (value.supplied !== suppliedGuard(program, name) || !auditedBookkeeping("v3-shadow-replay-validation", () => replayLowering(trial, value.replay))) {
+          if (value.supplied !== suppliedGuard(program, name) || !timedFrontend("replay", () => auditedBookkeeping("v3-shadow-replay-validation", () => replayLowering(trial, value.replay)))) {
             refuse("replay-refused"); continue;
           }
-          const own = graph.nodes[owner], lowering = graph.nodes[candidate.root];
-          value.provenance = {rows: [...own.rows, ...lowering.rows],
-            edges: [...new Set([...own.dependencies, ...lowering.dependencies].filter((k) => k !== owner))]};
+          if (certified) value.provenance = certificate.provenance(owner, candidate.root);
+          else {
+            const own = graph.nodes[owner], lowering = graph.nodes[candidate.root];
+            value.provenance = {rows: [...own.rows, ...lowering.rows],
+              edges: [...new Set([...own.dependencies, ...lowering.dependencies].filter((k) => k !== owner))]};
+          }
+          row.certificate = !!certified;
           row.wouldReuseV3 = true; row.currentComplete = true; row.reason = "would-reuse-v3"; row.key = key;
           return {row, value, trial};
         }
@@ -135,6 +170,7 @@ export function shadowCache(reg, root, namespace, portable) {
       const bytes = deflateRawSync(serialize(graph), {level: 4}), graphHash = checksum(bytes);
       try { mkdirSync(dir(), {recursive: true}); write(join(dir(), `${graphHash}.provenance`), bytes); }
       catch { return; }
+      const certifiedEntries = [];
       for (const entry of entries) {
         const value = deserialize(entry.valueBytes), root = `lowering:${entry.owner}`;
         const result = computer(program)(graph, root, value);
@@ -142,6 +178,7 @@ export function shadowCache(reg, root, namespace, portable) {
         const row = stats.entries.findLast((r) => r.name === value.name);
         if (row) { row.currentComplete = result.complete; row.completenessReason = result.reason; }
         if (!result.complete) continue;
+        certifiedEntries.push({result, root, value});
         const location = entryDir(entry.owner, value.name);
         try {
           mkdirSync(location, {recursive: true});
@@ -153,6 +190,8 @@ export function shadowCache(reg, root, namespace, portable) {
           for (const key of previous) if (!keys.includes(key)) rmSync(join(location, `${key}.bin`), {force: true});
         } catch { /* Observational persistence cannot break compilation. */ }
       }
+      try { write(join(dir(), `${graphHash}.certificates`), pack({...certificateIndex(reg, graph, computer(program), certifiedEntries), graph: graphHash})); }
+      catch { /* Missing compact proof keeps the complete validation path. */ }
     },
   };
 }

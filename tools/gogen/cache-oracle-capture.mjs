@@ -53,6 +53,7 @@ export function captureArtifacts(options) {
 }
 function capture({folders, objects, cacheDir, order, provenance}) {
   const program = compileProgram({folders, objects, cacheDir, provenance, tolerant: true,
+    dependencyCache: process.env.GOGEN_CACHE_ORACLE_DEPENDENCY === "1",
     includeTests: new Set(["ZCL_CONTROL_0000"]),
     registry: orderedRegistry(folders, order)});
   const capture = artifactsOf(program);

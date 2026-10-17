@@ -307,3 +307,19 @@ test("portable filenames preserve explicit missing values and path basenames", a
   assert.equal(portableFilename("/source/z.prog.abap"), "z.prog.abap");
   assert.equal(portableFilename("C:\\source\\z.prog.abap"), "z.prog.abap");
 });
+
+test("digest memos survive only the same guarded closed-program invocation", async () => {
+  const {inputSnapshot, core} = await import("./frontend-inventory.mjs");
+  const reg = new core.Registry();
+  reg.addFile(new core.MemoryFile("z.clas.abap", classSource("Z")));
+  const context = {round: 1}, first = prepareArtifactDigests(reg, true, context);
+  context.round++;
+  assert.equal(prepareArtifactDigests(reg, true, context), first);
+  assert.notEqual(prepareArtifactDigests(reg, true, {round: 1}), first);
+  const beforeEdit = prepareArtifactDigests(reg, true, context);
+  reg.addFile(new core.MemoryFile("zother.clas.abap", classSource("ZOTHER")));
+  inputSnapshot(reg, true);
+  assert.notEqual(prepareArtifactDigests(reg, true, context), beforeEdit);
+  const beforeStandalone = prepareArtifactDigests(reg, true, context);
+  assert.notEqual(prepareArtifactDigests(reg), beforeStandalone, "ordinary retained-registry compiles still reset");
+});

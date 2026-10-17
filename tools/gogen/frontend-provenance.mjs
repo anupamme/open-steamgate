@@ -1,6 +1,7 @@
 // Observational tracing facade. Ordinary compilation never loads the recorder.
 import {freshRegistry, finishInputs} from "./frontend-inventory.mjs";
 import {createRequire} from "node:module";
+import {beginFrontendRound, finishFrontendRound} from "./frontend-timing.mjs";
 const require = createRequire(import.meta.url);
 /** @type {typeof import("@abaplint/core")} */ const core = createRequire(require.resolve("@abaplint/transpiler/package.json"))("@abaplint/core");
 /** @type {typeof import('./frontend-provenance-recorder.mjs') | undefined} */ let recorder;
@@ -15,6 +16,7 @@ function loadRecorder() {
 /** Disk builds record internally; expanded public reporting stays opt-in. */
 /** @param {(options: import('./frontend-session-types.ts').CompileOptions) => import('./frontend-types.ts').FrontendProgram} compile @returns {(options: import('./frontend-session-types.ts').CompileOptions) => import('./frontend-types.ts').FrontendProgram} */ export function withProvenance(compile) {
   return (options) => {
+    beginFrontendRound(options.closureContext?.round);
     /** @type {boolean} */ const expose = options.provenance ?? (process.env.GOGEN_PROVENANCE === "1");
     const run = () => {
       if (options.registry) options = {...options, registry: freshRegistry(options.registry, options.session)};
@@ -24,7 +26,14 @@ function loadRecorder() {
       return program;
     };
     /** @type {boolean | string | undefined} */ const record = expose || (options.cacheDir && (options.provenance !== false || options.dependencyCache === true));
-    return record ? recordProvenance(run, {expose}) : run();
+    try { return record ? recordProvenance(run, {expose}) : run(); }
+    finally {
+      const rows = finishFrontendRound();
+      if (process.env.GOGEN_CACHE_DIAGNOSTICS && options.cacheDir) {
+        const {cacheDiagnostic} = require("./frontend-cache-diagnostics.mjs");
+        for (const row of rows) cacheDiagnostic({event: "phase", ...row});
+      }
+    }
   };
 }
 
@@ -42,6 +51,11 @@ function loadRecorder() {
 
 /** @returns {boolean} */ export function recordingProvenance() {
   return recorder?.recordingProvenance() ?? false;
+}
+
+/** Public reporting projections are unnecessary for internal cache observation. */
+/** @returns {boolean} */ export function exposingProvenance() {
+  return recorder?.exposingProvenance() ?? false;
 }
 
 /** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').ArtifactInput} obj @returns {import('./frontend-session-types.ts').StoredProvenance | undefined} */ export function storedProvenance(reg, obj) {

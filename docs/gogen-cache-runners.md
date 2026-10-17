@@ -9,8 +9,9 @@ object-cache opt-in. The opt-in does not change the kept report binary's key.
 
 Ordinary cacheDir callers retain the globally guarded production lookup.
 The runner opt-in also allows replay from the existing v3 dependency namespace,
-only after recomputing its complete artifact/query closure and validating the
-ordered program-state transcript. Unknown observations, missing providers,
+only after validating its complete artifact/query closure, reusing proven
+unchanged component certificates where eligible, and validating the ordered
+program-state transcript. Unknown observations, missing providers,
 changed named query answers, corrupt entries and nonportable payloads fall back
 to lowering. No lexical source-word dependency approximation replaces those
 checks. `GOGEN_PROVENANCE=1` additionally exposes provenance reporting.
@@ -35,6 +36,171 @@ Cache entries and graph/index files publish by unique temporary file plus atomic
 rename. Concurrent writers may lose a candidate from the bounded v3 index; this
 causes a miss, not partial IR. The report binary retains its separate build lock.
 Fresh-process concurrent tests cover both global and dependency modes.
+
+## Existing-class certificate fast path (step 4b.2)
+
+The opt-in dependency cache writes a checksummed `.certificates` index beside
+each immutable provenance graph. It contains effective ordered owner/file input
+hashes, dependency components and their saved certificates, forward and reverse
+artifact edges, interned query specifications and answer certificates, and entry
+roots. Candidate keys bind the saved components and replay guards. The compact
+index is linked to its exact full graph; a missing, corrupt or incomplete index
+uses the existing graph validator.
+
+Fast validation is bounded to edits of existing CLAS owners. Inventory, object
+roles, file order, configuration and CDS inputs must match; the tool namespace
+must also match. Changed owners invalidate the reverse dependency closure.
+Query contracts describe possible answer changes independently of former
+provider edges: local discovery, selected supplied contributions and CATCH answers are rebuilt
+for every round; named lookups bind unchanged inventory; provider scans have
+explicit type or whole-input coverage. Uncovered contracts and newly observed
+unknowns invalidate their consumers and use full validation. Additions, removals,
+non-class edits and order changes retain the original validation path.
+
+Unchanged complete roots use their saved component certificates without loading
+the full graph. Affected components use the original artifact/query validator,
+seeded with proven unchanged component certificates. Every reused class still
+passes ordered program-state replay. Saved SCC work survives rounds, while
+current query answers and current component results reset at each program
+boundary. Artifact projection memos survive only within the same explicit
+closed-program invocation, with unchanged input/config guards and per-artifact
+identity checks. Standalone compiles retain their previous reset behavior.
+Observers and lowering transcripts keep their original per-compile lifetimes;
+provider observations retained by the registry keep their existing validation
+rules. Closure-controller discovery runs under the scheduling role. Private
+frozen selections use a membership set without changing their order; mutable
+selection callers retain ordinary array membership checks.
+Internal caching omits the pure `rtti-owner` reporting projection, which copies
+and filters growing RTTI maps for every owner although final-output rows never
+enter dependency keys. Actual RTTI construction still runs. Explicit provenance
+reports retain the projection. The closure algorithm, emission and whole-file
+gofmt also continue to run.
+
+Frontend timing records carry explicit round IDs (1 onward; 0 denotes osabap invocation
+phases). Per-round counters cover `graphLoading`, `certificateValidation`,
+`observation`, `replay` and `finalization`; emission and gofmt are separate.
+Observation counts query/row recording, inventory bookkeeping and inherited
+transcript merges. It excludes cheap getter/edge/gap checks and named-query
+intern hits, as well as parser/lowerer work inside observed calls. Timing every
+hot getter added about 60–70% to an isolated million-read loop, so those hooks
+remain outside this subcounter; their work remains in frontend time. These counters can overlap finalization, and are not
+additive subdivisions of frontend time. Finalization covers cache graph/key/index
+publication; graph loading includes compact-index preflight. Both `OSABAP_TIMING=1` and the opt-in
+diagnostic stream expose them. Certificate diagnostics include changed owners,
+invalidated nodes/entry variants and query evaluations for each graph and round.
+Timing flags are sampled once per round, and redundant edge-index integrity
+checks use set membership to avoid quadratic edge scans.
+
+The fresh-process negative control deliberately drops a reverse edge after
+integrity validation and requires the cold oracle to detect stale constant
+readers in both line modes. A separate negative control requires the inner shadow validator to reject the
+same fault. The outer byte-oracle control explicitly leaves that inner checker
+off so it can observe stale bytes even under CI. Persisted edge, query-coverage
+and owner corruption tests recompute the storage checksum and verify
+full-validator fallback.
+
+The final focused matrix passes 259 tests with `--preserve-symlinks
+--test-concurrency=1` and CI's `GOGEN_CACHE_SHADOW_VALIDATE=1` (503.2 s), with no
+failures or skips. Its CI oracle covers 60 supported mutations in 62 attempts
+with zero mismatches (132.2 s). The production dependency-mode oracle with 300 generated
+controls and the pinned real libraries passes 66 fresh-process observations:
+64 supported mutations, two retained unsupported pool-constant attempts, and
+zero mismatches (884.7 s). Both line modes, multi-edits and reverts are included.
+The matrix includes closure scheduling, guarded round reuse, both reverse-edge
+fault detectors, and real runner timing/round checks. The host boundary passes all four
+tests; TypeScript and the 153-budget changed-file size gate also pass.
+
+### Full-shard proof for step 4b.2
+
+Measured on 2026-10-17 from the implementation based on `e718aa49`, with
+installed `zlnt-system` v0.5.2 and tool identity `b723301a419c`. All six cases
+used fresh processes and distinct build roots. The proof copied the inputs,
+kept the six closure rounds, capped every large child at 70 GiB with zero swap
+and a 24 GiB Node heap, and skipped Go compilation. Cold production overlapped
+small regression tests; warm, edited and disabled controls ran after those tests
+finished. The installed input was unchanged.
+
+| Run | Cache | Frontend (s) | Emission (s) | gofmt (s) | Total (s) |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Cold | off | 537.8 | 38.0 | 21.2 | 599.3 |
+| Cold | on | 1,487.9 | 42.4 | 19.0 | 1,551.5 |
+| Warm | off | 522.7 | 38.7 | 19.9 | 583.7 |
+| Warm | on | 318.2 | 48.7 | 20.7 | 390.0 |
+| Edited | off | 524.2 | 39.0 | 19.5 | 585.2 |
+| Edited | on | 797.8 | 42.7 | 20.0 | 862.7 |
+
+Totals are the child’s `total` phase; the proof also records wall time. Go build
+is 0 (skipped) in every case.
+
+| Enabled run | Graph loading (s) | Certificate validation (s) | Observation rows (s) | Replay (s) | Finalization (s) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Cold | 37.7 | 3.0 | 11.7 | 11.2 | 126.0 |
+| Warm | 0.0 | 0.0 | 0.0 | 12.1 | 0.0 |
+| Edited | 23.4 | 24.6 | 11.5 | 17.1 | 41.6 |
+
+These are the defined subcounters above, aggregated over rounds 1–6. They
+can overlap and do not partition frontend time.
+
+The edit changes one existing owner, `CLAS ZCL_LNT_ADD_MODULE`. In the main
+6,429-node saved graph, its reverse closure invalidates 6 nodes and
+3 entry roots; the first round evaluates 73,624 round-sensitive queries.
+
+| Saved graph | Rounds checked | Nodes | Invalidated nodes | Invalidated entry roots | Queries evaluated |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `0df3e54490ed` | 1 | 6429 | 6 | 3 | 73624 |
+| `9050128e09c5` | 1, 2 | 2747 | 0–13 | 0–13 | 436 |
+| `96203a126505` | 1, 2, 3 | 378 | 0–20 | 0–20 | 387 |
+| `71163e8db675` | 2, 3, 4 | 290 | 0–18 | 0–18 | 303 |
+| `2b9117aeca15` | 2, 3, 4, 5 | 275 | 0–3 | 0–3 | 98 |
+| `ff3ee99ea720` | 5, 6 | 21 | 0–1 | 0–1 | 1 |
+
+Smaller saved graphs also reject query answers from a different closure-round
+selection. Their context invalidations are not additional source edits.
+
+The dependency-invalidated classes lowered are `ZCL_LNT_ADD_MODULE`, `ZCL_LNT_P_STATEMENTS_DEL`, `ZCL_LNT_P_STATEMENTS_FAC`.
+
+Additional lowering beyond unchanged refusal cases: `CL_ABAP_UNIT_ASSERT` (ordered replay/candidate refusal).
+
+Unchanged warm lowers 9 distinct classes and reuses
+3,048/3,055 classes in the final round. Every reused class still
+passes ordered replay.
+
+All four artifacts—`zz_app.go`, `zz_generated.go`, `zz_db.json` and
+`symbols.json`—are byte-identical for cold on/off, unchanged warm on/off,
+and fresh-process edited warm versus edited cache-disabled cold. The edit
+changes `zz_generated.go` only. Baseline manifest SHA-256: `e480151e44fe7e62c99c14bfe4a0be8f1e8538a829b950972201ff5406bde300`;
+edited manifest: `2f86760fe30835c4a725952db0b233b503c6e0f3b1d893b8aeb25a435c083db8`.
+
+**Performance gates: edited missed; unchanged warm
+missed.** Edited takes 862.7 s against the
+561.9 s target and 585.2 s for this run's cache-disabled edited control.
+Unchanged warm takes 390.0 s against the 346.0 s ceiling.
+
+The edited result is faster than the historical 965.1 s
+cache-enabled result, and misses the 280–400 s planning range.
+
+Certificate reuse passes the correctness checks, but the end-to-end
+performance objective remains open. Remaining work is to profile and reduce
+repeated artifact/query observation and parsed-program rebuilding, and avoid
+redundant provenance serialization during promotion/publication. A certified
+previous selection and emission caching remain separate planned steps; neither
+is implemented here. Warm runs have dependency recording off, so their remaining
+fixed parsing/signature/RTTI/selection and emission/gofmt costs also need work.
+Ordered replay and unknown/nonportable/audit refusal paths must remain intact.
+
+Machine-local evidence: `/mnt/ssd-510/osg/stoker/tmp/c4b2b-cert-proof-release/report.json`,
+with per-case logs, round diagnostics and generated artifacts beside it. The
+edited copy is `/mnt/ssd-510/osg/stoker/tmp/c4b2b-cert-input-release`.
+
+Step 4b.2 changes these files (unqualified names below share `tools/gogen/`):
+
+| Area | Files |
+| --- | --- |
+| Compact proofs and validation | `frontend-certificates.mjs` (new), `frontend-v3-key.mjs`, `frontend-v3-shadow.mjs` |
+| Round lifetimes and replay integration | `frontend-closure.mjs`, `frontend-provenance.mjs`, `frontend-provenance-recorder.mjs`, `frontend-queries.mjs`, `frontend-artifact-digests.mjs`, `frontend-object-cache.mjs`, `frontend-session-types.ts`, `frontend.mjs` |
+| Timing and runner proof | `frontend-timing.mjs` (new), `frontend-cache-diagnostics.mjs`, `osabap.mjs`, `cache-runner-proof.mjs` |
+| Tests and CI | `frontend-certificates.test.mjs` (new), `frontend-artifact-digests.test.mjs`, `osabap.test.mjs`, `cache-oracle-capture.mjs`, `.github/workflows/gogen.yml` |
+| Documentation | `docs/gogen-cache-runners.md` |
 
 ## Diagnosis
 
@@ -145,7 +311,7 @@ different build roots. The report records cache-off cold/warm controls,
 cache-on cold/warm, and edited warm/cold controls. Go compilation and execution
 are covered separately by the real runner and Unit tests.
 
-## Full-shard measurements
+## Full-shard measurements (step 4b, historical)
 
 Measured on 2026-10-17 with installed `zlnt-system` v0.5.2, implementation
 `8dc0b019`, copied inputs, separate build roots, and Go compilation disabled.
@@ -236,7 +402,7 @@ Machine-local evidence is retained at
 NDJSON diagnostics and generated artifacts beside it. The edited input copy is
 `/mnt/ssd-510/osg/stoker/tmp/c4b2-in/result`; the installed input was never edited.
 
-## Changed files
+## Changed files (step 4b, historical)
 
 The implementation is based on `7503cdee`; it does not require the subsequent
 parse-observation work on main.
@@ -253,7 +419,7 @@ parse-observation work on main.
 Filenames without a directory in this table share the preceding `tools/gogen/`
 prefix. `frontend.mjs` stays below the task base's line count.
 
-## Validation
+## Validation (step 4b, historical)
 
 The final implementation passed 111 focused cache/query/replay/runner tests and
 82 oracle/exception/provenance/portable/binary tests. The CI mutation oracle ran
