@@ -276,11 +276,12 @@ export function whereColumns(t) {
     for (const obj of enumerateObjects(reg, "table-inventory", [], "final-output", (o) => o instanceof abaplint.Objects.Table || o instanceof abaplint.Objects.View)) {
       const view = obj instanceof abaplint.Objects.View;
       if (!(obj instanceof abaplint.Objects.Table) && !view) continue;
-      withArtifact({reg}, obj, () => { const name = upper(obj.getName());
+      /** @type {import("@abaplint/core").Objects.Table | import("@abaplint/core").Objects.View} */ const o = obj;
+      withArtifact({reg}, o, () => { const name = upper(o.getName());
       let st;
-      try { st = obj.parseType(reg); } catch { return; }
+      try { st = o.parseType(reg); } catch { return; }
       if (!(st instanceof BasicTypes.StructureType)) return;
-      /** @type {import("@abaplint/core").Objects.Table | undefined} */ const table = obj instanceof abaplint.Objects.Table ? obj : undefined; let key = [];
+      /** @type {import("@abaplint/core").Objects.Table | undefined} */ const table = o instanceof abaplint.Objects.Table ? o : undefined; let key = [];
       try { key = view ? [] : (table?.listKeys?.(reg) ?? []).map(upper); } catch { key = []; }
       const columns = st.getComponents().map((c) => {
         const kind = typeKindOf(c.type);
@@ -295,7 +296,7 @@ export function whereColumns(t) {
       // (dbTable refuses it at build time; a read by name at run time does
       // the same, go/abap selectdyn.go)
       if (view && !entry.client) {
-        const hidden = [...new Set((obj.getFields() ?? []).map((f) => upper(f.TABNAME)))].find((b) => {
+        const hidden = [...new Set(((/** @type {import("@abaplint/core").Objects.View} */ (o)).getFields() ?? []).map((f) => upper(f.TABNAME)))].find((b) => {
           try {
             /** @type {import("@abaplint/core").Objects.Table | undefined} */ const baseTable = reg.getObject("TABL", b); const bt = baseTable?.parseType(reg);
             return bt instanceof BasicTypes.StructureType && bt.getComponents().some((c) => upper(c.name) === "MANDT");
@@ -3377,8 +3378,10 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
 }
 
 /** @param {import("@abaplint/core").Nodes.ExpressionNode} n @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").ValueExpr} */ function fieldChain(n, ctx) {
-  /** @type {readonly import("@abaplint/core").INode[]} */ const kids = isExpr(n, Expressions.SourceField) ? [n] : n.getChildren();
-  const text = upper(n.concatTokens());
+  return fieldChainParts(isExpr(n, Expressions.SourceField) ? [n] : n.getChildren(), () => n.concatTokens(), ctx);
+}
+/** @param {readonly import("@abaplint/core").INode[]} kids @param {() => string} tokenText @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").ValueExpr} */ function fieldChainParts(kids, tokenText, ctx) {
+  const text = upper(tokenText());
   if (SY_MESSAGES[text]) return {e: "sy", ...SY_MESSAGES[text]};
   if (SY[text] !== undefined) return {e: "sy", field: SY[text], type: I};
   // the logon client: the transpiler runtime's constant (abap.Mandt)
@@ -3420,13 +3423,13 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
     /** @type {import("./frontend-types.ts").ValueExpr} */ const attr = findAttribute(ctx, upper(kids[2].concatTokens())); place = {e: "attr", name: upper(kids[2].concatTokens()), type: attr.type};
     i = 3;
   } else {
-    throw new Unsupported(`field chain ${n.concatTokens()}`);
+    throw new Unsupported(`field chain ${tokenText()}`);
   }
   for (; i < kids.length; i += 1) {
     if (isExpr(kids[i], Expressions.TableExpression)) {
       place = rowOf(place, kids[i], ctx);
     } else if (isTok(kids[i], "-") && isExpr(kids[i + 1], Expressions.ComponentName)) {
-      const f = fieldOf(ctx, place.type, kids[i + 1].concatTokens(), n.concatTokens());
+      const f = fieldOf(ctx, place.type, kids[i + 1].concatTokens(), tokenText());
       place = {e: "field", base: place, name: f.name, type: f.type};
       i += 1;
     } else if (isTok(kids[i], "->") && isExpr(kids[i + 1], Expressions.AttributeName) && ["ref", "exc"].includes(place.type.k)) {
@@ -3442,10 +3445,10 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
       const off = isExpr(kids[i], Expressions.FieldOffset) ? offsetValue(kids[i], ctx) : null;
       if (off !== null) i += 1;
       const len = isExpr(kids[i], Expressions.FieldLength) ? offsetValue(kids[i], ctx) : null;
-      if (i < kids.length - 1) throw new Unsupported(`field chain ${n.concatTokens()}`);
-      return substring(place, off, len, n);
+      if (i < kids.length - 1) throw new Unsupported(`field chain ${tokenText()}`);
+      return substring(place, off, len, tokenText);
     } else {
-      throw new Unsupported(`field chain ${n.concatTokens()}`);
+      throw new Unsupported(`field chain ${tokenText()}`);
     }
   }
   return place;
@@ -3467,7 +3470,7 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
  * range raises CX_SY_RANGE_OUT_OF_BOUNDS. A c field is read as its full
  * length (trailing blanks included) and the part is stored trimmed again.
  */
-/** @param {import("./frontend-types.ts").ValueExpr} base @param {import("./frontend-types.ts").ValueExpr | null} off @param {import("./frontend-types.ts").ValueExpr | null} len @param {import("./frontend-types.ts").SyntaxNode} node @returns {import("./frontend-types.ts").ValueExpr} */ function substring(base, off, len, node) {
+/** @param {import("./frontend-types.ts").ValueExpr} base @param {import("./frontend-types.ts").ValueExpr | null} off @param {import("./frontend-types.ts").ValueExpr | null} len @param {() => string} text @returns {import("./frontend-types.ts").ValueExpr} */ function substring(base, off, len, text) {
   // a d or t is read as the c of its length (measured on A4H: t '123456'
   // gives 12 and 34 for (2) and +2(2) into i)
   if (base.type.k === "d" || base.type.k === "t") base = {...base, type: C(base.type.len)};
@@ -3475,7 +3478,7 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
   // an i and 000000123 into an n 9; ultra/demodata)
   if (base.type.k === "n") base = {...base, type: C(base.type.len)};
   const k = base.type.k;
-  if (!["string", "c", "xstring", "x"].includes(k)) throw new Unsupported(`offset on a ${k}: ${node.concatTokens()}`);
+  if (!["string", "c", "xstring", "x"].includes(k)) throw new Unsupported(`offset on a ${k}: ${text()}`);
   const litLen = len?.e === "int" ? len.value : undefined;
   const type = k === "string" ? S : k === "xstring" ? XS : k === "c" ? C(litLen ?? base.type.len) : X(litLen ?? base.type.len);
   return {e: "substr", x: base, off, len, base: base.type, type};
@@ -5871,7 +5874,7 @@ const FUNCTIONS = {
   if (!arithL && !arithR && types.some((t) => t.k === "x" || t.k === "xstring")) {
     const bl = source(sources[0], ctx);
     const br = source(sources[1], ctx);
-    const r2 = compareBytes(op, bl, br, node);
+    const r2 = compareBytes(op, bl, br, () => node.concatTokens());
     if (r2) return not ? {c: "not", x: r2} : r2;
   }
   // calculation type p for the comparison (A4H 2026-09-24, PDFMT c: and
@@ -5906,9 +5909,7 @@ const FUNCTIONS = {
   const fk = fc?.getChildren() ?? [];
   const te = fk.at(-1);
   if (!fc || !isExpr(te, Expressions.TableExpression)) throw new Unsupported(`line_exists form: ${chain.concatTokens()}`);
-  /** @type {import("./frontend-types.ts").LineExistsHead} */ const head = {getChildren: () => fk.slice(0, -1), concatTokens: () => fk.slice(0, -1).map((k) => k.concatTokens()).join(""),
-    findFirstExpression: (t) => fk.slice(0, -1).map((k) => (isExpr(k, t) ? k : k instanceof Nodes.ExpressionNode ? k.findFirstExpression(t) : undefined)).find(Boolean), get: () => fc.get()};
-  const table = fk.length === 2 ? sourceOperand(fk[0], ctx) : fieldChain(/** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (head), ctx);
+  const table = fk.length === 2 ? sourceOperand(fk[0], ctx) : fieldChainParts(fk.slice(0, -1), () => fk.slice(0, -1).map((k) => k.concatTokens()).join(""), ctx);
   if (table.type.k !== "table") throw new Unsupported("line_exists of a non-table");
   const inner = te.getChildren().filter((c) => !isTok(c, "[") && !isTok(c, "]"));
   /** @type {import("./ir.ts").TableKey[]} */ const keys = [];
@@ -5946,7 +5947,7 @@ const FUNCTIONS = {
  *   n retains the measured i rule.
  * Anything else with a byte operand (p, f, d, t, ...) is refused.
  * null when neither side is byte-like. */
-/** @param {string} op @param {import("./frontend-types.ts").ValueExpr} l @param {import("./frontend-types.ts").ValueExpr} r @param {import("./frontend-types.ts").TokenText} node @returns {import("./ir.ts").Condition | null} */ function compareBytes(op, l, r, node) {
+/** @param {string} op @param {import("./frontend-types.ts").ValueExpr} l @param {import("./frontend-types.ts").ValueExpr} r @param {() => string} text @returns {import("./ir.ts").Condition | null} */ function compareBytes(op, l, r, text) {
   /** @param {import("./ir.ts").Type} t @returns {t is Extract<import("./ir.ts").Type, {k: "x" | "xstring"}>} */ const isB = (t) => t.k === "x" || t.k === "xstring";
   if (!isB(l.type) && !isB(r.type)) return null;
   /** @param {import("./frontend-types.ts").ValueExpr} x @param {string} kind @param {import("./ir.ts").Type} to @returns {Extract<import("./frontend-types.ts").ValueExpr, {e: "conv"}>} */ const conv = (x, kind, to) => ({e: "conv", kind, from: x.type, to, x, type: to});
@@ -5972,7 +5973,7 @@ const FUNCTIONS = {
     const other = o.type.k === "n" ? conv(o, "c2n", I) : o;
     return {c: "cmp", op, l: side(l) ? other : n, r: side(r) ? other : n, type: n.type};
   }
-  throw new Unsupported(`comparison of ${l.type.k} with ${r.type.k}: not measured: ${node.concatTokens()}`);
+  throw new Unsupported(`comparison of ${l.type.k} with ${r.type.k}: not measured: ${text()}`);
 }
 
 /** character comparisons: c ignores trailing blanks, which the stored form already has */
@@ -5980,7 +5981,7 @@ const FUNCTIONS = {
   // CASE and table-row comparisons arrive here without the syntax-node path
   // in compare(), but use the same byte rules as IF comparisons.
   if ([l.type, r.type].some((t) => t.k === "x" || t.k === "xstring")) {
-    /** @type {import("./frontend-types.ts").ComparisonText} */ const tokenText = {concatTokens: () => `${l.type.k} ${op} ${r.type.k}`}; const bytes = compareBytes(op, l, r, tokenText);
+    const bytes = compareBytes(op, l, r, () => `${l.type.k} ${op} ${r.type.k}`);
     if (bytes) return bytes;
   }
   // two tables of one row type, = or <>: the same number of rows and each
