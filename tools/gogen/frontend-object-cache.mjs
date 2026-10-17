@@ -1,6 +1,6 @@
 import {cacheDiagnostic, diagnosticCache} from "./frontend-cache-diagnostics.mjs";
 import {timedFrontend} from "./frontend-timing.mjs";
-import {artifactLowering, storedProvenance, inheritStoredProvenance, recordingProvenance, auditedBookkeeping} from "./frontend-provenance.mjs";
+import {withArtifact, scopedProvenance, storedProvenance, inheritStoredProvenance, recordingProvenance, auditedBookkeeping} from "./frontend-provenance.mjs";
 import {projectionMatches, readVariants, rememberVariant} from "./frontend-cache-variants.mjs";
 import {recordLowering, replayLowering, replayGuardKey, setProxyCheck} from "./frontend-replay.mjs";
 // Portable class lowerings. The registry still parses/checks normally; replay
@@ -261,7 +261,7 @@ export function objectCache(registry, root, dependencyCache = false) {
         if (entry.valueBytes) entry.value = {...deserialize(entry.valueBytes), ...entry.value};
         // The global content certificate validates IR independently. Load
         // provenance only when an observer will consume it.
-        if (entry.metadata?.graph && recordingProvenance()) {
+        if (entry.metadata?.graph && recordingProvenance() && !scopedProvenance()) {
           const id = entry.metadata.graph;
           if (!provenanceGraphs.has(id)) {
             timedFrontend("graphLoading", () => {
@@ -403,7 +403,7 @@ function suppliedKey(program, owner) {
   return JSON.stringify([...program.supplied].filter(([k]) => k.startsWith(`${owner}=>`)).map(([k, v]) => [k, [...v]]));
 }
 
-export const compileDiskClass = artifactLowering(/** @param {import('./frontend-session-types.ts').LoweringContext} ctx @param {import('./frontend-session-types.ts').ClassObject} obj @param {import('./frontend-session-types.ts').ClassLowering} lower @param {import('./frontend-session-types.ts').CacheSession | null | undefined} session @returns {import('./frontend-session-types.ts').ClassIR} */ function compileDiskClass(ctx, obj, lower, session) {
+export const compileDiskClass = /** @param {import('./frontend-session-types.ts').LoweringContext} ctx @param {import('./frontend-session-types.ts').ClassObject} obj @param {import('./frontend-session-types.ts').ClassLowering} lower @param {import('./frontend-session-types.ts').CacheSession | null | undefined} session @returns {import('./frontend-session-types.ts').ClassIR} */ function compileDiskClass(ctx, obj, lower, session) {
   const program = ctx.program;
   const counts = program.frontendCounts;
   const file = obj.getMainABAPFile();
@@ -436,7 +436,7 @@ export const compileDiskClass = artifactLowering(/** @param {import('./frontend-
     if (!valid && prediction?.row) miss = {reason: prediction.row.reason};
   }
   if (valid) {
-    inheritStoredProvenance(program.reg, obj, cached.provenance);
+    if (!scopedProvenance()) withArtifact(ctx, obj, () => inheritStoredProvenance(program.reg, obj, cached.provenance));
     Object.assign(program, cached.current);
     cacheDiagnostic({event: "class", owner, name: key, hit: true});
     counts.reused++;
@@ -461,7 +461,7 @@ export const compileDiskClass = artifactLowering(/** @param {import('./frontend-
   if (prediction) prediction.row.actuallyLowered = true;
   counts.loweredClasses.push(key);
   session?.classes.delete(key);
-  const run = () => {
+  const run = () => withArtifact(ctx, obj, () => {
     const recorded = session ? recordLowering(program, (tracked) => lower({...ctx, program: tracked}, obj)) : undefined;
     if (recorded && !recorded.replay) {
       cacheDiagnostic({event: "refused", name: key, reason: recorded.refusal});
@@ -472,7 +472,7 @@ export const compileDiskClass = artifactLowering(/** @param {import('./frontend-
       replay: recorded.replay, supplied: suppliedKey(program, key),
       current: Object.fromEntries([...current].map((k) => [k, program[k]]))});
     return ir;
-  };
+  });
   if (!session?.disk) return run();
   const {value, reads} = session.disk.record(run);
   const entry = session.classes.get(key);
@@ -487,4 +487,4 @@ export const compileDiskClass = artifactLowering(/** @param {import('./frontend-
     prediction.row.currentComplete = false; prediction.row.completenessReason = "unrecordable-lowering";
   }
   return value;
-});
+};

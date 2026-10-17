@@ -39,6 +39,61 @@ export function queryCoverage(q) {
 }
 const answerHash = (q, answer) => hashV3(projectedQuery(q) ? projectionAnswer(answer) : answer);
 
+// Provider observations have an invocation lifetime, unlike lowering transcripts.
+// Retain them only under the bounded input/query coverage of certificates.
+// Possible answer changes refresh the provider and its reverse closure.
+export function recordingPlan(reg, saved, identity) {
+  const inputs = effectiveInputs(reg), before = saved?.inputs;
+  if (saved?.format !== "gogen-recording-1" || saved.fullOnly || saved.identity !== identity
+      || before.config !== inputs.config || before.cds !== inputs.cds
+      || before.owners.length !== inputs.owners.length) throw new Error("recording-input-scope");
+  const changed = new Set(), owners = new Set(inputs.owners.map(([owner]) => owner));
+  for (let i = 0; i < inputs.owners.length; i++) {
+    const [owner, role, files] = inputs.owners[i], old = before.owners[i];
+    if (owner !== old[0] || role !== old[1] || files.length !== old[2].length
+        || files.some(([name], n) => name !== old[2][n][0])) throw new Error("recording-inventory-order");
+    if (files.some(([, hash], n) => hash !== old[2][n][1])) {
+      if (!owner.startsWith("CLAS ")) throw new Error("recording-edit-scope");
+      changed.add(owner);
+    }
+  }
+  const refresh = new Set(changed), reverse = new Map();
+  for (const [owner, node] of Object.entries(saved.nodes)) {
+    if (!owners.has(owner) || !Array.isArray(node.rows) || !Array.isArray(node.edges)) throw new Error("recording-owner");
+    for (const edge of node.edges) {
+      if (!owners.has(edge)) throw new Error("recording-provider");
+      if (!reverse.has(edge)) reverse.set(edge, new Set());
+      reverse.get(edge).add(owner);
+    }
+    if (!node.trusted || node.rows.some((q) => {
+      const coverage = queryCoverage(q);
+      return coverage === null || coverage === "round" || coverage === "all" && changed.size > 0
+        || Array.isArray(coverage) && coverage.some((provider) => changed.has(provider)
+          || provider.startsWith("type:") && [...changed].some((c) => c.startsWith(provider.slice(5) + " ")));
+    })) refresh.add(owner);
+  }
+  const actualReverse = Object.fromEntries([...reverse].map(([owner, readers]) => [owner, [...readers].sort()]));
+  if (hashV3(actualReverse) !== hashV3(saved.reverse)) throw new Error("recording-reverse-edges");
+  for (const owner of owners) if (!saved.nodes[owner]) refresh.add(owner);
+  const queue = [...refresh];
+  for (let i = 0; i < queue.length; i++) for (const reader of reverse.get(queue[i]) ?? [])
+    if (!refresh.has(reader)) { refresh.add(reader); queue.push(reader); }
+  return {inputs, refresh, changed, nodes: saved.nodes};
+}
+
+export function recordingSnapshot(reg, trace, identity, trusted) {
+  const nodes = {}, reverse = {};
+  for (const [owner, entry] of trace.entries) {
+    const rows = [...entry.queries.values()].filter((q) => q.role === "artifact");
+    nodes[owner] = {rows, edges: [...entry.edges], trusted: trusted(owner)
+      && !rows.some((q) => queryCoverage(q) === null)};
+    for (const edge of entry.edges) (reverse[edge] ??= []).push(owner);
+  }
+  for (const readers of Object.values(reverse)) readers.sort();
+  return {format: "gogen-recording-1", identity, inputs: effectiveInputs(reg), nodes, reverse,
+    fullOnly: [...trace.global.queries.values()].some((q) => q.role === "artifact")};
+}
+
 export function certificateIndex(reg, graph, compute, entries) {
   const queries = [], intern = new Map(), rows = new WeakMap(), nodes = {}, reverse = {};
   for (const [id, node] of Object.entries(graph.nodes)) {

@@ -1,6 +1,6 @@
 import {parseObserved} from "./frontend-inventory.mjs";
 import {borrowedDefinitionArtifact} from "./cache-oracle-definitions.mjs";
-import {recordProvenance} from "./frontend-provenance.mjs";
+import {recordProvenance, scopedProvenance, withRole} from "./frontend-provenance.mjs";
 import {createRequire} from "node:module";
 import {readFileSync, readdirSync} from "node:fs";
 import {join} from "node:path";
@@ -49,15 +49,18 @@ export function orderedRegistry(folders, order = [], {parse = true} = {}) {
 export function captureArtifacts(options) {
   const expose = options.provenance ?? (process.env.GOGEN_PROVENANCE === "1");
   return expose || (options.cacheDir && options.provenance !== false)
-    ? recordProvenance(() => capture(options), {expose}) : capture(options);
+    ? recordProvenance(() => capture(options), {expose,
+      cacheDir: !expose && process.env.GOGEN_CACHE_ORACLE_DEPENDENCY === "1" ? options.cacheDir : undefined}) : capture(options);
 }
 function capture({folders, objects, cacheDir, order, provenance}) {
   const program = compileProgram({folders, objects, cacheDir, provenance, tolerant: true,
     dependencyCache: process.env.GOGEN_CACHE_ORACLE_DEPENDENCY === "1",
     includeTests: new Set(["ZCL_CONTROL_0000"]),
-    registry: orderedRegistry(folders, order)});
-  const capture = artifactsOf(program);
-  const borrowed = borrowedDefinitionArtifact(program, cacheDir);
+    registry: orderedRegistry(folders, order, {parse: false})});
+  const capture = withRole("final-output", () => artifactsOf(program));
+  capture.counts.scopedRecording = scopedProvenance();
+  // This independent replay control is not a program-wide semantic read.
+  const borrowed = withRole("scheduling", () => borrowedDefinitionArtifact(program, cacheDir));
   if (borrowed !== undefined) capture.artifacts.borrowedDefinitionReplay = borrowed;
   return capture;
 }

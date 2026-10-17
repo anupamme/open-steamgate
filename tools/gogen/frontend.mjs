@@ -72,7 +72,6 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   FAE_N = 0;
   PERSIST_LOWERING = !!cacheDir;
   /** @type {import("./frontend-session-types.ts").Registry} */ const reg = registry ?? /** @type {import("./frontend-session-types.ts").Registry} */ (new abaplint.Registry(new abaplint.Config(JSON.stringify(config))));
-  beginProvenanceCompile(reg);
   // Load every file for resolution; lower and report diagnostics for selected objects.
   /** @param {string} fn @returns {string} */ const objName = (fn) => fn.split("/").pop().split(".")[0].toLowerCase().replace(/#/g, "/");
   /** @type {string[]} */ let wanted = objects.map((o) => o.toLowerCase().replace(/#/g, "/"));
@@ -96,8 +95,8 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
     }
   };
   for (const folder of folders) walk(folder);
-  if (!registry) parseObserved(reg);
   /** @type {typeof import("./frontend-inventory.mjs")} */ (require("./frontend-inventory.mjs")).prepareCdsRegistry(reg, ddls, !registry || folders.length > 0, cdsViewsByRegistry);
+  beginProvenanceCompile(reg); if (!registry) parseObserved(reg);
   REG = reg;
   // Load cache code and its module state only for an explicit opt-in.
   // Only the three entry points, not the module namespace, are held.

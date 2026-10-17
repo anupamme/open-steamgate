@@ -67,24 +67,24 @@ export function parseObserved(reg, ...args) { return /** @type {import("@abaplin
 /** @param {import("@abaplint/core").IRegistry} reg @param {unknown[]} args @returns {Promise<import("@abaplint/core").IRegistry>} */
 export function parseObservedAsync(reg, ...args) { return /** @type {Promise<import("@abaplint/core").IRegistry>} */ (observeParse(/** @type {import("./frontend-session-types.ts").Registry} */ (reg), args, true)); }
 
-/** @param {import("./frontend-session-types.ts").Registry} reg @param {import("./frontend-session-types.ts").SessionInput} session @returns {import("./frontend-session-types.ts").Registry} */ export function freshRegistry(reg, session) {
+/** @param {import("./frontend-session-types.ts").Registry} reg @param {import("./frontend-session-types.ts").SessionInput} session @param {(reg: import("./frontend-session-types.ts").Registry) => void} prepare @returns {import("./frontend-session-types.ts").Registry} */ export function freshRegistry(reg, session, prepare = () => {}) {
   const inputs = inputSnapshot(reg, true), previous = parsed.get(reg);
   const retained = replacements.get(reg);
   if (retained?.signature === inputs.signature && retained.configObject === inputs.configObject
-      && inputSnapshot(retained.reg, true).signature === inputs.signature) return retained.reg;
-  if (previous?.signature === inputs.signature && previous.configObject === inputs.configObject) return reg;
+      && inputSnapshot(retained.reg, true).signature === inputs.signature) { prepare(retained.reg); return retained.reg; }
+  if (previous?.signature === inputs.signature && previous.configObject === inputs.configObject) { prepare(reg); return reg; }
   // A never-parsed registry can be parsed in place. A prebuilt registry without
   // an observed boundary must be rebuilt, as must every edited retained one.
   const built = hasBuiltArtifacts(inputs);
-  if (!previous && !built) { parseObserved(reg); return reg; }
+  if (!previous && !built) { prepare(reg); parseObserved(reg); return reg; }
   const fresh = new core.Registry(new core.Config(inputs.config));
   for (const {dependency, sources} of inputs.objects.values()) for (const source of sources) {
     const file = new core.MemoryFile(source.name, source.raw);
     if (dependency) fresh.addDependency(file); else fresh.addFile(file);
   }
   if (session) for (const key of Object.keys(session)) delete session[key];
-  parseObserved(fresh);
   origins.set(fresh, inputOrigin(reg));
+  prepare(fresh); parseObserved(fresh);
   replacements.set(reg, {signature: inputs.signature, configObject: inputs.configObject, reg: fresh});
   return fresh;
 }

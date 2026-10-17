@@ -30,6 +30,11 @@ function unpack(file) {
   if (bytes[64] !== 10 || bytes.subarray(0, 64).toString() !== checksum(payload)) throw new Error("bad v3 checksum");
   return deserialize(inflateRawSync(payload));
 }
+export function readRecordingPlan(root) { return unpack(join(root, "recording.plan")); }
+export function writeRecordingPlan(root, value) {
+  try { mkdirSync(root, {recursive: true}); write(join(root, "recording.plan"), pack(value)); }
+  catch { /* An unavailable plan restores full recording next time. */ }
+}
 export function shadowCache(reg, root, namespace, portable) {
   // Namespace/tool identity and key/query indexes are needed only on a miss.
   let namespaceValue, directory;

@@ -10,11 +10,13 @@ import {compileProgram} from "./frontend.mjs";
 import {compileClosedProgram} from "./frontend-closure.mjs";
 import {compareArtifacts, artifactsOf} from "./cache-oracle-capture.mjs";
 import {runOracle, syntheticCorpus} from "./cache-oracle.mjs";
-import {queryCoverage} from "./frontend-certificates.mjs";
+import {queryCoverage, recordingPlan} from "./frontend-certificates.mjs";
+import {toolIdentity} from "./frontend-object-cache.mjs";
 import {provenanceGraph, recordProvenance, compilationProvenanceOf, inheritStoredProvenance,
-  beginProvenanceCompile, withArtifact, semanticQuery} from "./frontend-provenance.mjs";
+  beginProvenanceCompile, withArtifact, semanticQuery, auditedBookkeeping, auditBuiltArtifacts, scopedProvenance} from "./frontend-provenance.mjs";
 import {rttiProjection, selectionHas} from "./frontend-queries.mjs";
-import {core} from "./frontend-inventory.mjs";
+import {core, parseObserved} from "./frontend-inventory.mjs";
+import {readRecordingPlan, writeRecordingPlan} from "./frontend-v3-shadow.mjs";
 
 const source = (name, body) => `CLASS ${name} DEFINITION PUBLIC. PUBLIC SECTION.
 CLASS-METHODS run RETURNING VALUE(rv) TYPE i. ENDCLASS.
@@ -30,6 +32,83 @@ function fixture(run) {
   } finally { rmSync(dir, {recursive: true, force: true}); }
 }
 const equalCold = (p, build) => assert.deepEqual(compareArtifacts(artifactsOf(p), artifactsOf(build({cacheDir: undefined}))), {equal: true});
+
+test("scoped misses publish complete new dependencies across a later edit and revert", () => fixture(({put, build, options}) => {
+  build();
+  put("ZBASE", "rv = zother=>run( ).");
+  const changed = build(); equalCold(changed, build);
+  assert.deepEqual(changed.frontendCounts.loweredClasses, ["ZBASE", "ZREADER"]);
+  const trace = provenanceGraph(changed.reg);
+  assert.deepEqual([...trace.lowerings.keys()].sort(), ["CLAS ZBASE", "CLAS ZREADER"], "reused roots must not open lowering frames");
+  assert.equal(trace.global.queries.size, 0, "preparation must not acquire global rows");
+  for (const row of changed.frontendCounts.shadowV3.entries.filter((r) => r.actuallyLowered))
+    assert.equal(row.currentComplete, true, JSON.stringify(row));
+  const plan = readRecordingPlan(options.cacheDir);
+  assert.ok(plan.nodes["CLAS ZBASE"].edges.includes("CLAS ZOTHER"), "new provider edge must survive publication");
+  put("ZOTHER", "rv = 4.");
+  const later = build(); equalCold(later, build);
+  assert.deepEqual(later.frontendCounts.loweredClasses, ["ZBASE", "ZOTHER", "ZREADER"]);
+  put("ZBASE", "rv = 1."); put("ZOTHER", "rv = 3.");
+  equalCold(build(), build);
+}));
+
+test("retained closure rounds preserve provider syntax when local discovery is refreshed", () => fixture(({put, options}) => {
+  const run = (extra = {}) => compileClosedProgram({...options, objects: ["ZREADER"], includeTests: true, ...extra});
+  put("ZBASE", "rv = zother=>run( ).");
+  run(); put("ZBASE", "rv = zother=>run( ) + 17.");
+  const edited = run(), cold = run({cacheDir: undefined});
+  assert.deepEqual(compareArtifacts(artifactsOf(edited), artifactsOf(cold)), {equal: true});
+  for (const owner of ["CLAS ZBASE", "CLAS ZREADER"]) {
+    const rows = [...provenanceGraph(edited.reg).artifacts.get(owner).queries.values()];
+    assert.ok(rows.some((q) => q.phase === "syntax"), `${owner}: retained syntax observations disappeared`);
+  }
+}));
+
+test("successful stateless DDIC typing remains trusted without a parsedType field", () => fixture(({dir, put, build, options}) => {
+  const corpus = syntheticCorpus({classes:4});
+  for (const [name, raw] of Object.entries(corpus.files)) if (name.endsWith(".doma.xml") || name.endsWith(".dtel.xml"))
+    writeFileSync(join(dir, name), raw);
+  writeFileSync(join(dir, "zother.clas.abap"), source("ZOTHER", "rv = 3.").replace("TYPE i.", "TYPE zoracle_num."));
+  const p = build(), saved = readRecordingPlan(options.cacheDir);
+  assert.equal(saved.nodes["DOMA ZORACLE_NUM"].trusted, true);
+  put("ZBASE", "rv = 7.");
+  const edited = build(); equalCold(edited, build);
+  assert.equal(recordingPlan(p.reg, saved, toolIdentity(true)).refresh.has("DOMA ZORACLE_NUM"), false);
+}));
+
+test("idle scoped validation preserves unknown markers from audited provider builds", () => fixture(({dir, build, options}) => {
+  build();
+  const saved = readRecordingPlan(options.cacheDir), reg = new core.Registry(new core.Config(saved.inputs.config));
+  for (const name of readdirSync(dir).filter((n) => n.endsWith(".abap"))) reg.addFile(new core.MemoryFile(name, readFileSync(join(dir, name), "utf8")));
+  recordProvenance(() => {
+    beginProvenanceCompile(reg); parseObserved(reg);
+    assert.equal(scopedProvenance(), true);
+    const obj = reg.getObject("CLAS", "ZBASE");
+    auditedBookkeeping("test-idle-build", () => new core.SyntaxLogic(reg, obj).run());
+    assert.equal(auditBuiltArtifacts(reg), true);
+    assert.ok([...provenanceGraph(reg).artifacts.get("CLAS ZBASE").queries.values()].some((q) => q.kind === "unknown-scan" && q.args[0] === "untraced-artifact"));
+  }, {expose:false, cacheDir:options.cacheDir});
+  assert.equal(readRecordingPlan(options.cacheDir).nodes["CLAS ZBASE"].trusted, false);
+}));
+
+for (const fault of ["reverse", "global"]) test(`recording plan with ${fault} damage restores full observation`, () => fixture(({dir, put, build, options}) => {
+  build();
+  const plan = readRecordingPlan(options.cacheDir);
+  if (fault === "reverse") plan.reverse["CLAS ZBASE"] = [];
+  else plan.fullOnly = true;
+  writeRecordingPlan(options.cacheDir, plan);
+  const diagnostic = join(dir, "diagnostics.ndjson"), previous = process.env.GOGEN_CACHE_DIAGNOSTICS;
+  try {
+    process.env.GOGEN_CACHE_DIAGNOSTICS = diagnostic;
+    put("ZBASE", "rv = 6.");
+    const p = build(); equalCold(p, build);
+    const scopes = readFileSync(diagnostic, "utf8").trim().split("\n").map(JSON.parse).filter((r) => r.event === "recording-scope");
+    assert.ok(scopes.some((r) => r.mode === "full"), JSON.stringify(scopes));
+  } finally {
+    if (previous === undefined) delete process.env.GOGEN_CACHE_DIAGNOSTICS;
+    else process.env.GOGEN_CACHE_DIAGNOSTICS = previous;
+  }
+}));
 
 test("compact proofs reuse an unrelated root through multi-edits/revert; affected roots use full validation", () => fixture(({put, build}) => {
   build();

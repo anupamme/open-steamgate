@@ -9,8 +9,8 @@ function loadRecorder() {
   return recorder ??= require("./frontend-provenance-recorder.mjs");
 }
 
-/** @template T @param {() => T} run @param {{expose?: boolean}} options @returns {T} */ export function recordProvenance(run, {expose = true} = {}) {
-  return loadRecorder().recordProvenance(run, {expose});
+/** @template T @param {() => T} run @param {{expose?: boolean, cacheDir?: string}} options @returns {T} */ export function recordProvenance(run, {expose = true, cacheDir} = {}) {
+  return loadRecorder().recordProvenance(run, {expose, cacheDir});
 }
 
 /** Disk builds record internally; expanded public reporting stays opt-in. */
@@ -19,14 +19,14 @@ function loadRecorder() {
     beginFrontendRound(options.closureContext?.round);
     /** @type {boolean} */ const expose = options.provenance ?? (process.env.GOGEN_PROVENANCE === "1");
     const run = () => {
-      if (options.registry) options = {...options, registry: freshRegistry(options.registry, options.session)};
+      if (options.registry) options = {...options, registry: freshRegistry(options.registry, options.session, (reg) => recorder?.prepareProvenanceInputs(reg))};
       if (options.registry) recorder?.inventoryProvenance(options.registry);
       const program = compile(options);
       finishInputs(program.reg);
       return program;
     };
     /** @type {boolean | string | undefined} */ const record = expose || (options.cacheDir && (options.provenance !== false || options.dependencyCache === true));
-    try { return record ? recordProvenance(run, {expose}) : run(); }
+    try { return record ? recordProvenance(run, {expose, cacheDir: !expose && options.dependencyCache ? options.cacheDir : undefined}) : run(); }
     finally {
       const rows = finishFrontendRound();
       if (process.env.GOGEN_CACHE_DIAGNOSTICS && options.cacheDir) {
@@ -52,6 +52,8 @@ function loadRecorder() {
 /** @returns {boolean} */ export function recordingProvenance() {
   return recorder?.recordingProvenance() ?? false;
 }
+/** Reuse needs no observation merge when provider provenance is already seeded. */
+export function scopedProvenance() { return recorder?.scopedProvenance() ?? false; }
 
 /** Public reporting projections are unnecessary for internal cache observation. */
 /** @returns {boolean} */ export function exposingProvenance() {

@@ -5,8 +5,13 @@ import {createHash} from "node:crypto";
 import {cpSync, mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync, openSync, closeSync} from "node:fs";
 import {join, resolve} from "node:path";
 const [source, destination, inputDestination, ...flags] = process.argv.slice(2);
-if (!source || !destination || !inputDestination || flags.some((f) => f !== "--build"))
-  throw new Error("usage: cache-runner-proof.mjs <zlnt-system> <fresh-evidence-dir> <fresh-input-copy> [--build]");
+let baseline;
+for (let i = 0; i < flags.length; i++) {
+  if (flags[i] === "--baseline" && flags[i + 1]) baseline = resolve(flags[++i]);
+  else if (flags[i] !== "--build") throw new Error(`unknown proof flag: ${flags[i]}`);
+}
+if (!source || !destination || !inputDestination)
+  throw new Error("usage: cache-runner-proof.mjs <zlnt-system> <fresh-evidence-dir> <fresh-input-copy> [--build] [--baseline <source-copy>]");
 const work = resolve(destination), input = resolve(inputDestination), buildBinary = flags.includes("--build");
 for (const folder of [work, input]) {
   if (existsSync(folder)) throw new Error(`${folder} must be fresh`);
@@ -17,18 +22,19 @@ for (const folder of ["libs/zlnt-core/src", "inputs/zlnt-tests-statements/src", 
   cpSync(join(resolve(source), folder), join(input, folder), {recursive: true, dereference: true});
 const report = join(input, "inputs/zlnt-tests-base/src/zlnt_tests_run.prog.abap");
 const libs = ["libs/zlnt-core/src", "inputs/zlnt-tests-statements/src"].flatMap((folder) => ["--lib", join(input, folder)]);
-const results = {buildBinary, rows: [], comparisons: []};
+const results = {buildBinary, baseline, rows: [], comparisons: []};
 const save = () => writeFileSync(join(work, "report.json"), JSON.stringify(results, null, 2) + "\n");
-function capture(label, enabled) {
+function capture(label, enabled, cwd = process.cwd()) {
   const build = join(work, `.build-${label}`), diagnostics = join(work, `${label}.ndjson`);
   const env = {...process.env, NODE_OPTIONS: "--max-old-space-size=24576", OSABAP_BUILD_ROOT: build,
     OSABAP_TIMING: "1", OSABAP_EMIT_ONLY: buildBinary ? "" : "1", OSD_GOGEN_CACHE: enabled ? cache : "",
-    GOGEN_CACHE_DIAGNOSTICS: diagnostics};
+    GOGEN_CACHE_DIAGNOSTICS: diagnostics, OSG_HOME: cwd};
+  if (cwd === baseline && enabled) env.OSD_GOGEN_CACHE = join(work, "baseline-frontend");
   const start = performance.now(), log = join(work, `${label}.log`), fd = openSync(log, "w");
   let child;
   try {
     child = spawnSync("systemd-run", ["--user", "--scope", "-q", "-p", "MemoryMax=70G", "-p", "MemorySwapMax=0",
-      process.execPath, "--preserve-symlinks", "tools/gogen/osabap.mjs", report, ...libs], {env, stdio: ["ignore", fd, fd]});
+      process.execPath, "--preserve-symlinks", "tools/gogen/osabap.mjs", report, ...libs], {cwd, env, stdio: ["ignore", fd, fd]});
   } finally { closeSync(fd); }
   if (child.status !== 0) {
     results.failure = {label, status: child.status, signal: child.signal, error: child.error?.message,
@@ -47,10 +53,11 @@ function capture(label, enabled) {
   const generated = join(build, "go/cmd/osabap");
   const hashes = Object.fromEntries(readdirSync(generated).filter((name) => name.startsWith("zz_") || name === "symbols.json").sort()
     .map((name) => [name, createHash("sha256").update(readFileSync(join(generated, name))).digest("hex")]));
-  const reasons = {}, loweredClasses = [], roundCounts = new Map(), allClasses = new Set(), invalidation = [];
+  const reasons = {}, loweredClasses = [], roundCounts = new Map(), allClasses = new Set(), invalidation = [], recordingScopes = [];
   if (existsSync(diagnostics)) for (const line of readFileSync(diagnostics, "utf8").split("\n")) if (line) {
     const row = JSON.parse(line);
     if (row.event === "certificate-validation") invalidation.push(row);
+    if (row.event === "recording-scope") recordingScopes.push(row);
     if (row.event === "class") {
       if (!roundCounts.has(row.round)) roundCounts.set(row.round, {round: row.round, lowered: 0, reused: 0});
       const round = roundCounts.get(row.round);
@@ -63,7 +70,7 @@ function capture(label, enabled) {
   }
   const rounds = [...roundCounts.values()];
   if (enabled) assert.equal(allClasses.size, counts.lowered + counts.reused, "diagnostics must cover the final class universe");
-  results.rows.push({label, enabled, phases, phaseRounds, invalidation, counts, reasons, loweredClasses, rounds,
+  results.rows.push({label, enabled, phases, phaseRounds, invalidation, recordingScopes, counts, reasons, loweredClasses, rounds,
     uniqueClasses: allClasses.size || counts.lowered + counts.reused,
     uniqueLowered: enabled ? [...new Set(loweredClasses)].sort() : undefined,
     manifestHash: createHash("sha256").update(JSON.stringify(hashes)).digest("hex"),
@@ -76,6 +83,10 @@ function equal(left, right, label) {
   results.comparisons.push({label, equal: true}); save();
 }
 const recorded = capture("cold-enabled", true);
+if (baseline) {
+  const prime = capture("baseline-cold-enabled", true, baseline);
+  equal(prime, capture("baseline-warm-enabled", true, baseline), "baseline warm = recorded");
+}
 equal(recorded, capture("warm-enabled", true), "unchanged warm = recorded");
 const cold = capture("cold-disabled", false);
 equal(cold, recorded, "cold enabled = disabled");
@@ -94,6 +105,12 @@ results.minimumRoundReuseRatio = Math.min(...warm.rounds.map((r) => r.reused / (
 results.reuseBudgetMet = results.reuseRatio >= 0.99 && results.minimumRoundReuseRatio >= 0.99;
 results.editedNewlyLowered = results.rows.find((r) => r.label === "edited-enabled").uniqueLowered.filter((n) => !warm.uniqueLowered.includes(n));
 results.unchangedWarmRatio = warm.phases.total / disabled.phases.total;
-results.editedBudgetMet = results.rows.find((r) => r.label === "edited-enabled").phases.total < 561900;
-results.unchangedAbsoluteBudgetMet = warm.phases.total <= 346000;
+const edited = results.rows.find((r) => r.label === "edited-enabled"), editedDisabled = results.rows.find((r) => r.label === "edited-disabled");
+results.editedBudgetMet = edited.phases.total < editedDisabled.phases.total;
+results.editedPlanningBudgetMet = edited.phases.total <= 450000;
+const baselineWarm = results.rows.find((r) => r.label === "baseline-warm-enabled");
+if (baselineWarm) {
+  results.unchangedWarmBaselineRatio = warm.phases.total / baselineWarm.phases.total;
+  results.unchangedBaselineBudgetMet = warm.phases.total <= baselineWarm.phases.total;
+}
 save();

@@ -5,6 +5,9 @@ import {inputSnapshot, objectKey, artifactIdentity as artifacts, sameArtifactIde
 import {createRequire} from "node:module";
 import {pathToFileURL} from "node:url";
 import {installHooks} from "./frontend-provenance-hooks.mjs";
+import {recordingPlan, recordingSnapshot, effectiveInputs} from "./frontend-certificates.mjs";
+import {readRecordingPlan, writeRecordingPlan} from "./frontend-v3-shadow.mjs";
+import {cacheDiagnostic} from "./frontend-cache-diagnostics.mjs";
 const require = createRequire(import.meta.url);
 const coreRequire = createRequire(require.resolve("@abaplint/transpiler/package.json"));
 const core = coreRequire("@abaplint/core");
@@ -25,8 +28,12 @@ const queryIdentity = (role, phase, owner, query) => ["getObject", "getFileByNam
   : JSON.stringify([role, phase, owner, projectedQuery(query) ? projectionAnswer(query) : query]);
 
 class Recorder {
-  /** @param {boolean} expose */ constructor(expose) {
+  /** @param {boolean} expose @param {string | undefined} cacheDir */ constructor(expose, cacheDir) {
     this.expose = expose;
+    this.cacheDir = cacheDir;
+    this.enabled = true;
+    /** @type {Set<string> | undefined} */ this.refresh = undefined;
+    /** @type {WeakSet<object>} */ this.completedBuilds = new WeakSet();
     /** @type {import('./frontend-session-types.ts').ArtifactFrame[]} */ this.stack = [];
     /** @type {import('./frontend-session-types.ts').QueryContext[]} */ this.contexts = [];
     /** @type {Set<import('./frontend-session-types.ts').RegistryState>} */ this.states = new Set();
@@ -39,6 +46,52 @@ class Recorder {
       const method = this[name];
       this[name] = (...args) => timedFrontend("observation", () => method.apply(this, args));
     }
+  }
+  /** @param {import('./frontend-session-types.ts').Registry} reg @returns {void} */ prepareScope(reg) {
+    if (!this.cacheDir) return;
+    if (this.scopeReg) {
+      if (this.refresh && JSON.stringify(this.scopeInputs) !== JSON.stringify(effectiveInputs(reg))) {
+        // Supplied registries can bind folder CDS after their parse boundary.
+        // Never certify observations retained under a different input scope.
+        this.refresh = undefined; this.enabled = true;
+        const state = this.state(reg);
+        state.entries.clear(); state.lowerings.clear();
+        this.query(state, {kind: "unknown-scan", args: ["recording-input-change"], result: []});
+        cacheDiagnostic({event: "recording-scope", mode: "full", reason: "recording-input-change"});
+      }
+      return;
+    }
+    this.scopeReg = reg;
+    this.identity = require("./frontend-object-cache.mjs").toolIdentity(true);
+    try {
+      const plan = timedFrontend("graphLoading", () => recordingPlan(reg, readRecordingPlan(this.cacheDir), this.identity));
+      const state = this.state(reg), inputs = inputSnapshot(reg);
+      const live = state.config === reg.getConfig() && state.files.size === inputs.objects.size
+        && [...inputs.objects].every(([owner, {sources}]) => sources.length === state.files.get(owner)?.length
+          && sources.every((s, n) => s.name === state.files.get(owner)[n][0] && s.raw === state.files.get(owner)[n][1]));
+      if (!live) {
+        const retained = new Map();
+        for (const [owner, node] of Object.entries(plan.nodes)) if (!plan.refresh.has(owner)) {
+          const entry = empty(); retained.set(owner, entry);
+          for (const row of node.rows) entry.queries.set(queryIdentity(row.role, row.phase, owner, row), row);
+          for (const edge of node.edges) entry.edges.add(edge);
+        }
+        state.entries = retained; state.global = empty();
+      }
+      state.lowerings.clear();
+      this.refresh = plan.refresh;
+      this.scopeInputs = plan.inputs;
+      this.enabled = false;
+      cacheDiagnostic({event: "recording-scope", mode: "scoped", changedOwners: [...plan.changed], refreshOwners: [...plan.refresh], retainedOwners: state.entries.size});
+    } catch (error) {
+      this.refresh = undefined; this.enabled = true;
+      cacheDiagnostic({event: "recording-scope", mode: "full", reason: error.message});
+    }
+  }
+  /** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').ArtifactObject | undefined} obj @param {() => unknown} run @param {boolean} force @returns {unknown} */ observe(reg, obj, run, force = false) {
+    if (this.enabled || !this.refresh || reg !== this.scopeReg || !force && !this.refresh.has(keyOf(obj))) return run();
+    this.enabled = true;
+    try { return run(); } finally { this.enabled = false; }
   }
   /** @param {import('./frontend-session-types.ts').Registry} reg @returns {import('./frontend-session-types.ts').RegistryState} */ state(reg) {
     let state = registries.get(reg);
@@ -97,7 +150,7 @@ class Recorder {
     this.query(state, {kind, args: args.map(scalar), result: result ? [result] : []});
   }
   /** @param {import('./frontend-session-types.ts').RegistryState} state @param {import('./frontend-session-types.ts').Query} query @param {string | undefined} owner @returns {void} */ query(state, query, owner = this.current(state)?.key) {
-    if (this.auditDepth) return;
+    if (!this.enabled || this.auditDepth) return;
     const role = query.role ?? this.role(state), frame = this.current(state);
     const phase = query.phase ?? frame?.phase ?? "registry";
     const entry = role === "scheduling" ? state.scheduling : role === "final-output" ? state.finalOutput : this.own(state, owner);
@@ -128,13 +181,20 @@ class Recorder {
   }
   /** @param {import('./frontend-session-types.ts').RegistryState} state @param {string | undefined} key @param {string} reason @returns {void} */ artifactGap(state, key, reason) {
     // A provider gap belongs to its artifact even inside a consumer lowering.
+    // Refusal markers survive idle preparation and audited validation too.
+    const enabled = this.enabled; this.enabled = true;
     this.stack.push({state, key, phase: "artifact-read"});
     try { this.query(state, {kind: "unknown-scan", args: [reason], result: []}, key); }
-    finally { this.stack.pop(); }
+    finally { this.stack.pop(); this.enabled = enabled; }
   }
   /** @param {import('./frontend-session-types.ts').RegistryState} state @param {import('./frontend-session-types.ts').ArtifactObject} obj @param {string | undefined} key @returns {void} */ checkArtifact(state, obj, key) {
     /** @type {WeakMap<import('./frontend-session-types.ts').ArtifactObject, import('./frontend-session-types.ts').ArtifactIdentity>} */ this.checked ??= new WeakMap();
     const previous = this.checked.get(obj) ?? state.artifacts.get(obj), now = artifacts(obj);
+    // The plan proves provider construction under unchanged inputs/query
+    // coverage, even when preparation built it with the observer idle.
+    if (this.refresh && state.reg === this.scopeReg && !this.refresh.has(key)) {
+      this.checked.set(obj, now); return;
+    }
     if (previous && !sameArtifactIdentity(previous, now)) {
       this.artifactGap(state, key, "untraced-artifact");
     } else if (!previous && (obj.syntaxResult || obj.parsedType || obj.def || obj.definition || obj.isDirty?.() === false)) {
@@ -142,11 +202,12 @@ class Recorder {
     }
     this.checked.set(obj, now);
   }
-  /** @returns {void} */ leaveArtifact() {
+  /** @param {boolean} complete @returns {void} */ leaveArtifact(complete = true) {
     const frame = this.stack.pop();
     // Only recorded builds advance the trusted identity. Audit builds carry an
     // explicit marker even if an enclosing recorded frame later completes.
     this.checked.set(frame.obj, artifacts(frame.obj));
+    if (complete && ["syntax", "ddic-type"].includes(frame.phase)) this.completedBuilds.add(frame.obj);
   }
   /** @template T @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').ArtifactObject} obj @param {() => T} run @returns {T} */ auditArtifact(reg, obj, run) {
     const before = artifacts(obj);
@@ -177,8 +238,10 @@ class Recorder {
   }
   /** @template T @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').ArtifactObject} obj @param {string} phase @param {() => T} run @returns {T} */ artifact(reg, obj, phase, run) {
     if (this.auditDepth) return this.auditArtifact(reg, obj, run);
+    if (!this.enabled) return this.observe(reg, obj, () => this.enabled ? this.artifact(reg, obj, phase, run) : run(), phase === "lowering" || phase === "local-definitions");
     const entered = this.enterArtifact(reg, obj, phase);
-    try { return run(); } finally { if (entered) this.leaveArtifact(); }
+    let complete = false;
+    try { const value = run(); complete = true; return value; } finally { if (entered) this.leaveArtifact(complete); }
   }
   /** @template T @param {import('./frontend-session-types.ts').Query['kind']} kind @param {unknown[]} args @param {(frame: import('./frontend-session-types.ts').QueryContext) => T} run @returns {T} */ context(kind, args, run) {
     const frame = {kind, args};
@@ -225,19 +288,33 @@ class Recorder {
 }
 
 /** Scope hooks synchronously and restore every descriptor even on a refusal. */
-/** @template T @param {() => T} run @param {{expose?: boolean}} options @returns {T} */ export function recordProvenance(run, {expose = true} = {}) {
+/** @template T @param {() => T} run @param {{expose?: boolean, cacheDir?: string}} options @returns {T} */ export function recordProvenance(run, {expose = true, cacheDir} = {}) {
   if (active) return run();
-  const recorder = new Recorder(expose);
+  const recorder = new Recorder(expose, cacheDir);
   const restore = installHooks(core, coreRequire, recorder);
   active = recorder;
+  let completed = false;
   try {
     const value = run();
     if (value && typeof value === "object") results.set(value, {states: recorder.states, exposed: recorder.expose});
+    completed = true;
     return value;
   } finally {
     // AUDITED recorder finalization: snapshot cached identities, no resolution.
     for (const state of recorder.states) for (const obj of registryObjects.call(state.reg)) {
       if (recorder.checked?.has(obj)) state.artifacts.set(obj, artifacts(obj));
+    }
+    if (completed && recorder.scopeReg) {
+      const state = recorder.state(recorder.scopeReg), inputs = inputSnapshot(recorder.scopeReg);
+      try {
+        timedFrontend("finalization", () => writeRecordingPlan(cacheDir, recordingSnapshot(recorder.scopeReg, state, recorder.identity,
+          (owner) => {
+            const obj = inputs.objects.get(owner)?.obj;
+            return state.artifacts.has(obj) && (!(obj instanceof core.ABAPObject) || !!obj.syntaxResult)
+              && (typeof obj?.parseType !== "function" || recorder.completedBuilds.has(obj)
+                || recorder.refresh && !recorder.refresh.has(owner));
+          })));
+      } catch { /* Missing or incomplete metadata restores full recording. */ }
     }
     active = undefined; restore();
   }
@@ -245,6 +322,7 @@ class Recorder {
 
 /** @param {import('./frontend-session-types.ts').Registry} reg @returns {void} */ export function beginProvenanceCompile(reg) {
   if (!active) return;
+  active.prepareScope(reg);
   const state = active.state(reg);
   // Compile-wide refusal expires; provider unknown-scan markers remain in entries.
   state.auditBuilt = false;
@@ -262,9 +340,13 @@ class Recorder {
   return active && !active.auditDepth ? active.artifact(ctx.reg, obj.obj ?? obj, phase, run) : run();
 }
 
+/** Initialize the bounded scope before a supplied registry's observed parse. */
+/** @param {import('./frontend-session-types.ts').Registry} reg @returns {void} */ export function prepareProvenanceInputs(reg) { active?.prepareScope(reg); }
+
 // Disk IR replay performs no lowering lookups. Carry its stored observation
 // transcript too, without using it to validate or change any cache key.
 /** @returns {boolean} */ export const recordingProvenance = () => !!active;
+/** @returns {boolean} */ export const scopedProvenance = () => !!active?.refresh;
 /** @returns {boolean} */ export const exposingProvenance = () => active?.expose === true;
 
 /** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').ArtifactInput} obj @returns {import('./frontend-session-types.ts').StoredProvenance | undefined} */ export function storedProvenance(reg, obj) {
@@ -275,7 +357,7 @@ class Recorder {
 }
 
 /** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').ArtifactInput} obj @param {import('./frontend-session-types.ts').StoredProvenance | undefined} stored @returns {void} */ export function inheritStoredProvenance(reg, obj, stored) {
-  if (!active) return;
+  if (!active || active.refresh) return;
   return timedFrontend("observation", () => {
     const state = active.state(reg), key = keyOf(obj.obj ?? obj);
     if (!stored || !Array.isArray(stored.rows) || !Array.isArray(stored.edges)) {
@@ -292,7 +374,7 @@ class Recorder {
 // lowering lookup, including the signature owner's cached DDIC provenance.
 /** @param {import('./frontend-session-types.ts').LoweringContext} ctx @param {string} name @returns {import('./frontend-session-types.ts').FunctionModule | undefined} */ export function resolvedFunctionModule(ctx, name) {
   const value = ctx.program.functionModules.get(name);
-  if (active) {
+  if (active?.enabled) {
     const state = active.state(ctx.reg);
     if (value) active.link(state, value.group);
     active.query(state, {kind: "function-module-owner", args: [name],
@@ -343,7 +425,7 @@ class Recorder {
 // grant an exemption to other calls from the same file or an enclosing pass.
 /** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').Query['kind']} kind @param {import('./frontend-session-types.ts').QueryScalar[]} args @param {import('./frontend-session-types.ts').Role} role @param {(obj: import('./frontend-session-types.ts').ArtifactObject) => boolean} predicate @returns {import('./frontend-session-types.ts').ArtifactObject[]} */ export function enumerateObjects(reg, kind, args = [], role = "scheduling", predicate = () => true) {
   const objects = [...registryObjects.call(reg)].filter(predicate);
-  if (active) {
+  if (active?.enabled) {
     const state = active.state(reg);
     for (const obj of objects) active.entry(state, keyOf(obj));
     active.query(state, {kind, args, role, scan: "getObjects", result: objects.map(keyOf), complete: true});
@@ -351,10 +433,10 @@ class Recorder {
   return objects;
 }
 /** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').Query['kind']} kind @param {readonly import('./frontend-session-types.ts').QueryScalar[]} args @param {readonly import('./frontend-session-types.ts').QueryScalar[]} result @param {Partial<import('./frontend-session-types.ts').Query>} details @returns {void} */ export function semanticQuery(reg, kind, args, result, details = {}) {
-  if (active) active.query(active.state(reg), {kind, args, result, ...details});
+  if (active?.enabled) active.query(active.state(reg), {kind, args, result, ...details});
 }
 /** @template T @param {import('./frontend-session-types.ts').Role} role @param {() => T} run @returns {T} */ export function withRole(role, run) {
-  if (!active) return run();
+  if (!active?.enabled) return run();
   active.roles.push(role);
   try { return run(); } finally { active.roles.pop(); }
 }
@@ -416,5 +498,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (active) active.inventory(reg, [...registryObjects.call(reg)]);
 }
 /** @template T @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').ArtifactObject | undefined} obj @param {() => T} run @returns {T} */ export function withSelection(reg, obj, run) {
-  return active && obj ? active.artifact(reg, obj, "selection", run) : run();
+  return active?.enabled && obj ? active.artifact(reg, obj, "selection", run) : run();
 }
