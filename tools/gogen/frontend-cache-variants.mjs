@@ -1,13 +1,9 @@
-// Exact derived-read variants share a global content generation. Losing a
+// Program-selection variants share a global content generation. Losing a
 // racing index update is a miss; entries and indexes always publish atomically.
 import {readFileSync, writeFileSync, renameSync, rmSync} from "node:fs";
-import {createHash, randomUUID} from "node:crypto";
+import {randomUUID} from "node:crypto";
 const LIMIT = 4;
 const reads = (value) => value.replay?.ops.filter((op) => op.kind === "read" && op.key === "caught" && op.method === "get") ?? [];
-export function projectionVariant(value) {
-  const rows = reads(value).map((op) => JSON.stringify([op.args, op.value])).sort();
-  return rows.length ? createHash("sha256").update(JSON.stringify(["caught-variant-1", rows])).digest("hex") : "";
-}
 export function projectionMatches(value, program) {
   try { return reads(value).every((op) => JSON.stringify(program.caught?.get(...op.args)) === op.value); }
   catch { return false; }

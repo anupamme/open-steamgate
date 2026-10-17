@@ -3,7 +3,7 @@ import {appendFileSync} from "node:fs";
 export function cacheDiagnostic(row) {
   const path = process.env.GOGEN_CACHE_DIAGNOSTICS;
   if (!path) return;
-  try { appendFileSync(path, JSON.stringify({pid: process.pid, ...row}) + "\n"); }
+  try { appendFileSync(path, JSON.stringify({pid: process.pid, elapsedMs: Math.round(performance.now()), ...row}) + "\n"); }
   catch { /* Unavailable diagnostics must not change compilation. */ }
 }
 

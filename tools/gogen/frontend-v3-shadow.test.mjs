@@ -38,8 +38,8 @@ test("the CATCH index preserves the twenty-member walk, cycles and local names",
   const wanted = new Set(["C0", "A", "OWNER:LOCAL"]), reg = {}, owner = {};
   const step = (name) => parents.get(name), index = caughtIndex(reg, wanted, step);
   for (const ancestor of ["C0", "C19", "C20", "C21", "A", "B", "OWNER:LOCAL"])
-    assert.deepEqual(index.get(JSON.stringify([ancestor])), [...wanted].filter((name) => chainHas(owner, reg, name, ancestor, step)).sort());
-  assert.throws(() => index.set("[]", []), /read-only/);
+    assert.equal(index.get(JSON.stringify([ancestor])), [...wanted].some((name) => chainHas(owner, reg, name, ancestor, step)));
+  assert.throws(() => index.set("[]", false), /read-only/);
   assert.equal(copyReplayProgram({caught: index}).caught, index, "isolated replay shares the immutable derived index");
 });
 
@@ -50,7 +50,7 @@ test("CATCH dependency replay ignores unrelated bodies but observes changed and 
     "zcx_hidden.clas.abap": cx("zcx_hidden", "zcx_base"),
     "zreader.clas.abap": classSource("ZREADER", "TRY. rv = 1. CATCH zcx_base. rv = 2. ENDTRY."),
     "zunrelated.clas.abap": classSource("ZUNRELATED", "rv = 3.")});
-  const names = ["ZCX_BASE", "ZCX_OTHER", "ZCX_HIDDEN", "ZREADER", "ZUNRELATED", "CX_ROOT", "CX_STATIC_CHECK"];
+  const names = ["ZCX_OTHER", "ZCX_HIDDEN", "ZREADER", "ZUNRELATED", "CX_ROOT", "CX_STATIC_CHECK"];
   const options = {folders: [dir, join(libraryPath(process.cwd(), "open-abap-core"), "src")], objects: names,
     cacheDir: join(dir, "cache"), dependencyCache: true, provenance: false, tolerant: true};
   const run = (extra = {}) => compileProgram({...options, ...extra});
@@ -63,8 +63,9 @@ test("CATCH dependency replay ignores unrelated bodies but observes changed and 
   const hierarchy = run();
   assert.ok(hierarchy.frontendCounts.loweredClasses.includes("ZREADER"));
   assert.equal(compareArtifacts(artifactsOf(hierarchy), artifactsOf(run({cacheDir: undefined}))).equal, true);
+  const additionCache = join(dir, "addition-cache"); run({cacheDir: additionCache});
   put(dir, {"zcx_added.clas.abap": cx("zcx_added", "zcx_base")});
-  const added = {objects: [...names, "ZCX_ADDED"]}, selected = run(added);
+  const added = {objects: [...names, "ZCX_ADDED"], cacheDir: additionCache}, selected = run(added);
   assert.ok(selected.frontendCounts.loweredClasses.includes("ZREADER"));
   assert.equal(compareArtifacts(artifactsOf(selected), artifactsOf(run({...added, cacheDir: undefined}))).equal, true);
 }));

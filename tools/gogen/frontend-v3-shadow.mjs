@@ -84,7 +84,9 @@ export function shadowCache(reg, root, namespace, portable) {
           if (auditBuiltArtifacts(reg)) { refuse("audit-built-artifact"); break; }
           if (!current.complete) { refuse(current.reason); continue; }
           if (current.key !== key) { refuse(mismatchReason(saved, current)); continue; }
-          const trial = copyReplayProgram(program);
+          // Ordered replay already forks every collection it writes. A shallow
+          // trial isolates its effects without copying all growing maps first.
+          const trial = {...program};
           if (value.supplied !== suppliedGuard(program, name) || !auditedBookkeeping("v3-shadow-replay-validation", () => replayLowering(trial, value.replay))) {
             refuse("replay-refused"); continue;
           }

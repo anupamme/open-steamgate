@@ -4,7 +4,7 @@
 import {createHash} from "node:crypto";
 /** @param {{kind: string, policy?: string}} query @returns {boolean} */
 export const projectedQuery = (query) => query.kind === "supplied" && query.policy === "selected-contributions"
-  || query.kind === "caught" && query.policy === "selected-subclasses";
+  || query.kind === "caught" && query.policy === "selected-subclass-presence";
 const arrayHashes = new WeakMap();
 const primitive = (value) => value === null || ["undefined", "string", "number", "boolean"].includes(typeof value);
 function setHash(values) {

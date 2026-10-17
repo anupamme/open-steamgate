@@ -1,6 +1,6 @@
 import {cacheDiagnostic, diagnosticCache} from "./frontend-cache-diagnostics.mjs";
 import {artifactLowering, storedProvenance, inheritStoredProvenance, recordingProvenance, auditedBookkeeping} from "./frontend-provenance.mjs";
-import {projectionVariant, projectionMatches, readVariants, rememberVariant} from "./frontend-cache-variants.mjs";
+import {projectionMatches, readVariants, rememberVariant} from "./frontend-cache-variants.mjs";
 import {recordLowering, replayLowering} from "./frontend-replay.mjs";
 // Portable class lowerings. The registry still parses/checks normally; replay
 // verifies the program inputs and ordering before applying cached IR effects.
@@ -204,10 +204,9 @@ export function objectCache(registry, root, dependencyCache = false) {
   touch(join(root, version));
   pruneVersions(root, version);
   const location = (owner, name, selection = "") => join(root, version, digest(`${owner}:${name}:${selection}`) + ".bin");
-  const selection = (program) => digest(JSON.stringify([...program.wanted]));
-  const wholeSelection = (value) => value.replay?.ops.some((op) => op.key === "wanted"
-    && (op.kind === "measure" || (op.kind === "read" && !op.method)));
-  const variantOf = (value, program) => wholeSelection(value) ? selection(program) : projectionVariant(value);
+  // A class's effects can differ between closure rounds even when its IR is
+  // unchanged (e.g. which earlier class registered a shared structure).
+  const selection = (program) => digest(JSON.stringify([...program.wanted].sort()));
   const variantIndex = (owner, name) => location(owner, name) + ".variants.json";
   const pending = [], provenanceGraphs = new Map();
   const cache = {
@@ -279,7 +278,7 @@ export function objectCache(registry, root, dependencyCache = false) {
         }
         const {provenance, ...payload} = value;
         pending.push({owner, value: {name: value.name}, valueBytes: serialize(payload),
-          reads: [...reads], variant: variantOf(value, program)});
+          reads: [...reads], variant: selection(program)});
         return true;
       } catch (error) {
         diagnostic?.remember(owner, value.name, error.message);
@@ -317,7 +316,7 @@ export function objectCache(registry, root, dependencyCache = false) {
         try { value = compactLowering(value); } catch (error) { cacheDiagnostic({event: "persist-refused", name: value.name, reason: error.message}); diagnostic?.remember(owner, value.name, error.message); return; }
         if (!portable(value)) { cacheDiagnostic({event: "persist-refused", name: value.name, reason: "nonportable-value"}); diagnostic?.remember(owner, value.name, "nonportable-value"); return; }
       }
-      variant ??= variantOf(value, program);
+      variant ??= selection(program);
       const file = location(owner, value.name, variant), temp = `${file}.${randomUUID()}.pending`;
       try {
         mkdirSync(join(root, version), {recursive: true});

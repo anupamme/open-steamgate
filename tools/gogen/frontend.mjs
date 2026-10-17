@@ -39,7 +39,7 @@ import {hostPred as rangeHostPred} from "../ir-ranges.mjs";
 import * as WIR from "../ir-writes.mjs";
 import {samcOf, suppliedMethods, suppliedComparison, cdsMappingError, rearrangedClass, inlineTableLocals, nativeMethodBody} from "./frontend-analysis.mjs";
 import {join} from "./host-io.ts";
-import {caughtOnce, chainHas, caughtIndex} from "./frontend-hierarchy.mjs";
+import {caughtPresence, chainHas, caughtIndex} from "./frontend-hierarchy.mjs";
 import {typeKindOf, typeOf, rttiNamed, structOf, fieldOf, namedType} from "./frontend-types-signatures.mjs";
 
 import {TRANSPILER_MEANING, P_GENERIC, NATIVE, kernelOf, nativeArgs, AMC_HOST, AMC_CALLER, amcProgramOf, amcMethod, NATIVE_FM, DESTINATION_FM, NATIVE_ME, nativeMeSig, RUNTIME_CX, RUNTIME_CX_SUPER} from "./frontend-classes-native.mjs";
@@ -191,7 +191,9 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   });
   // lock objects must be known before methods compile: their key order is
   // part of every generated ENQUEUE / DEQUEUE argument
-  program.lockObjects = lockObjectRegistry(reg, program); program.caught = caughtIndex(reg, program.wanted, (c) => clasDef(reg, c)?.getSuperClass()?.toUpperCase() ?? RUNTIME_CX_SUPER[c]);
+  program.lockObjects = lockObjectRegistry(reg, program);
+  program.caught = caughtIndex(reg, program.wanted,
+    (c) => clasDef(reg, c)?.getSuperClass()?.toUpperCase() ?? RUNTIME_CX_SUPER[c]);
   const lowerClass = (ctx, obj) => {
     const saved = PROGRAM;
     PROGRAM = ctx.program; // Global type helpers must use the tracked program too.
@@ -1392,7 +1394,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     const covers = RUNTIME_CX.filter((cx) => names.some((n) => isSubclass(ctx.reg, cx, n)));
     // exception objects (RAISE EXCEPTION): taken when the raised class is one
     // of the names or inherits from one, decided at run time
-    const own = caughtClasses(ctx, names).length > 0 ? names : [];
+    const own = caughtPresence(ctx.program, names) ? names : [];
     // CATCH ... INTO x: when the CATCH covers exceptions the runtime raises,
     // x is an exception value whose one method here is get_text( ) (a raised
     // object's own get_text, else the class and the operation, not A4H's
@@ -4934,15 +4936,6 @@ function eventInfo(ctx, owner, evName) {
     for (let i = 0; i + 1 < chain.length; i += 1) out[chain[i]] = chain[i + 1];
   }
   return out;
-}
-
-/**
- * The classes a CATCH takes that are raised as objects: every compiled class
- * that is one of the named classes or inherits from one (by the hierarchy
- * abaplint knows, so an ancestor outside the program still counts).
- */
-/** @param {import("./frontend-types.ts").CompilationContext} ctx @param {readonly string[]} names @returns {string[]} */ function caughtClasses(ctx, names) {
-  return caughtOnce(ctx.program, names, () => [...ctx.program.wanted].filter((w) => names.some((n) => isSubclass(ctx.reg, w, n))).sort());
 }
 
 /** the importing parameters of a class's constructor, read off its definition */

@@ -45,15 +45,26 @@ function capture(label, enabled) {
   const generated = join(build, "go/cmd/osabap");
   const hashes = Object.fromEntries(readdirSync(generated).filter((name) => name.startsWith("zz_") || name === "symbols.json").sort()
     .map((name) => [name, createHash("sha256").update(readFileSync(join(generated, name))).digest("hex")]));
-  const reasons = {}, loweredClasses = [];
+  const reasons = {}, loweredClasses = [], rounds = [], allClasses = new Set();
+  let seen = new Set(), round = {lowered: 0, reused: 0};
   if (existsSync(diagnostics)) for (const line of readFileSync(diagnostics, "utf8").split("\n")) if (line) {
     const row = JSON.parse(line);
-    if (row.event === "class" && !row.hit) {
-      const reason = [row.reason, row.key, row.method].filter(Boolean).join(":");
-      reasons[reason] = (reasons[reason] ?? 0) + 1; loweredClasses.push(row.name);
+    if (row.event === "class") {
+      if (seen.has(row.name)) { rounds.push(round); seen = new Set(); round = {lowered: 0, reused: 0}; }
+      seen.add(row.name); allClasses.add(row.name); round[row.hit ? "reused" : "lowered"]++;
+      if (!row.hit) {
+        const reason = [row.reason, row.key, row.method].filter(Boolean).join(":");
+        reasons[reason] = (reasons[reason] ?? 0) + 1; loweredClasses.push(row.name);
+      }
     }
   }
-  results.rows.push({label, enabled, phases, counts, reasons, loweredClasses, wallMs: Math.round(performance.now() - start), hashes});
+  if (seen.size) rounds.push(round);
+  if (enabled) assert.equal(allClasses.size, counts.lowered + counts.reused, "diagnostics must cover the final class universe");
+  results.rows.push({label, enabled, phases, counts, reasons, loweredClasses, rounds,
+    uniqueClasses: allClasses.size || counts.lowered + counts.reused,
+    uniqueLowered: enabled ? [...new Set(loweredClasses)].sort() : undefined,
+    manifestHash: createHash("sha256").update(JSON.stringify(hashes)).digest("hex"),
+    wallMs: Math.round(performance.now() - start), hashes});
   save(); console.error(JSON.stringify(results.rows.at(-1)));
   return hashes;
 }
@@ -74,7 +85,11 @@ const editedWarm = capture("edited-enabled", true), editedCold = capture("edited
 equal(editedCold, editedWarm, "edited warm = edited cold");
 assert.notDeepEqual(editedCold, cold, "edit must change generated artifacts");
 const warm = results.rows.find((r) => r.label === "warm-enabled"), disabled = results.rows.find((r) => r.label === "warm-disabled");
-results.reuseRatio = warm.counts.reused / (warm.counts.reused + warm.counts.lowered);
+results.reuseRatio = 1 - warm.uniqueLowered.length / warm.uniqueClasses;
+results.finalRoundReuseRatio = warm.counts.reused / (warm.counts.reused + warm.counts.lowered);
+results.minimumRoundReuseRatio = Math.min(...warm.rounds.map((r) => r.reused / (r.reused + r.lowered)));
+results.reuseBudgetMet = results.reuseRatio >= 0.99 && results.minimumRoundReuseRatio >= 0.99;
+results.editedNewlyLowered = results.rows.find((r) => r.label === "edited-enabled").uniqueLowered.filter((n) => !warm.uniqueLowered.includes(n));
 results.unchangedWarmRatio = warm.phases.total / disabled.phases.total;
 results.editedBudgetMet = results.rows.find((r) => r.label === "edited-enabled").phases.total <= 100000;
 save();

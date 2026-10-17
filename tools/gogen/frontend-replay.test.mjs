@@ -4,6 +4,22 @@ import {readFileSync, readdirSync} from "node:fs";
 import {recordLowering, replayLowering} from "./frontend-replay.mjs";
 
 const program = () => ({wanted: new Set(["BASE"]), sigs: new Map(), skipped: [], currentClass: undefined});
+test("a shallow program trial isolates replay's ordered collection and scalar effects", () => {
+  const recorded = recordLowering(program(), (p) => {
+    p.sigs.set("NEW", {type: "i"});
+    assert.equal(p.sigs.get("NEW").type, "i");
+    p.wanted.add("ADDED"); p.skipped.push("effect"); p.currentClass = "CALLER";
+  });
+  const original = program(); original.sigs.set("BASE", {type: "i"});
+  const trial = {...original};
+  assert.equal(replayLowering(trial, recorded.replay), true);
+  assert.deepEqual([...original.sigs], [["BASE", {type: "i"}]]);
+  assert.deepEqual([...original.wanted], ["BASE"]);
+  assert.deepEqual(original.skipped, []); assert.equal(original.currentClass, undefined);
+  assert.deepEqual([...trial.sigs.keys()], ["BASE", "NEW"]);
+  assert.deepEqual([...trial.wanted], ["BASE", "ADDED"]);
+  assert.deepEqual(trial.skipped, ["effect"]); assert.equal(trial.currentClass, "CALLER");
+});
 test("replay checks dependency membership and preserves ordered effects atomically", () => {
   const first = program();
   const cached = recordLowering(first, (p) => {

@@ -3,7 +3,6 @@ import type {MethodSignature, FrontendParam} from './frontend-types.ts';
 import type {Registry, InputSnapshot, LockDescriptor} from './frontend-session-types.ts';
 
 export interface ChainEntry {reg: Registry; chain: string[]; done: boolean}
-export interface CaughtEntry {size: number; own: string[]}
 export interface SuppliedIndex {
   reg: Registry;
   providers: Map<string, Set<string>>;
@@ -13,7 +12,7 @@ export interface SuppliedIndex {
 export interface QueryProgram {
   reg: Registry;
   supplied: Map<string, Set<string>>;
-  caught?: Map<string, readonly string[]>;
+  caught?: Map<string, boolean>;
   lockObjects?: Map<string, LockDescriptor>;
 }
 export interface QueryContext {reg: Registry; program: QueryProgram}
