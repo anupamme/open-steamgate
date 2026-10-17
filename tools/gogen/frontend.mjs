@@ -101,7 +101,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   REG = reg;
   // Load cache code and its module state only for an explicit opt-in.
   // Only the three entry points, not the module namespace, are held.
-  /** @type {Pick<typeof import("./frontend-object-cache.mjs"), "cacheSession" | "prepareDiskSession" | "compileDiskClass"> | undefined} */ let diskFrontend;
+  /** @type {import("./frontend-session-types.ts").DiskFrontend | undefined} */ let diskFrontend;
   if (cacheDir) {
     const {cacheSession, prepareDiskSession, compileDiskClass} = /** @type {typeof import("./frontend-object-cache.mjs")} */ (require("./frontend-object-cache.mjs"));
     diskFrontend = {cacheSession, prepareDiskSession, compileDiskClass};

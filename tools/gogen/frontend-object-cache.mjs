@@ -109,6 +109,7 @@ export function compactLowering(value) {
   return {...value, replay: {...value.replay, ops}};
 }
 
+/** @param {import("./frontend-session-types.ts").SessionInput} session @param {import("./frontend-session-types.ts").Registry} registry @param {string | undefined} cacheDir @returns {import("./frontend-session-types.ts").SessionInput} */
 export function cacheSession(session, registry, cacheDir) {
   if (!cacheDir) { if (session) delete session.cacheDir; return session; }
   if (!session) {
@@ -301,6 +302,7 @@ export function objectCache(registry, root) {
 }
 
 const current = new Set(["currentClass", "currentOwner", "currentTypes"]);
+/** @param {import("./frontend-session-types.ts").SessionInput} session @param {import("./frontend-session-types.ts").Registry} registry @returns {void} */
 export function prepareDiskSession(session, registry) {
   if (!session) return;
   // Non-ABAP artifacts can remain dirty after parse(). File identity and
