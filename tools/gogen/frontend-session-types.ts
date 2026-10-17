@@ -150,7 +150,7 @@ export interface CompileOptions {
   closureContext?: {round: number};
   strictRoots?: Set<string>;
   selectionCache?: {
-    read(options: CompileOptions): {selection: string[]; evidence: string; rounds: unknown[]} | undefined;
+    read(options: CompileOptions): {selection: string[]; closed?: string[]; evidence: string; rounds: unknown[]} | undefined;
     write(options: CompileOptions, selection: string[], rounds: unknown[]): void;
   };
   folders: string[];

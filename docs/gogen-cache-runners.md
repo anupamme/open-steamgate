@@ -687,7 +687,13 @@ identity, runner syntax/skip policy, tolerant mode and test inclusion. Its round
 ledger records the input and expanded selections, lowering-time missing names,
 owner/superclass edges and additions. The reader checks the derivation from the
 original roots to the final selection, including a terminating closed round.
-Missing, malformed or inconsistent metadata starts discovery from roots.
+The controller's retained membership is reconstructed from this ledger; it is
+not reconstructed from final `wanted`, which drops broken dependencies and can
+include later in-place expansions. Compile inputs and retained membership keep
+their distinct original meanings.
+Exact-source and AST-proof digests have distinct domains; changed files must
+carry a valid AST proof. Missing, malformed or inconsistent metadata starts
+discovery from roots.
 Supplied registries and sessions are conservatively ineligible.
 
 Unchanged inputs certify the previous selection directly. Across edits, this
@@ -725,11 +731,11 @@ negative control deliberately compiles a stale closed superset and requires
 its bytes to differ from discovery from roots.
 
 Pre-proof validation passed 264 focused cache, certificate, replay, provenance,
-closure and osabap tests (598.0 s), plus 23 hardened fresh-process selection tests
-(80.2 s), with no failures or skips. The CI oracle inside that matrix exercised
+closure and osabap tests (600.5 s), plus 26 hardened fresh-process selection tests
+(84.6 s), with no failures or skips. The CI oracle inside that matrix exercised
 60 supported mutations in 62 attempts with zero mismatches (125.0 s). Both
 reverse-edge negative controls passed. Node suites used `--preserve-symlinks
 --test-concurrency=1`; the four host-boundary checks, TypeScript, the 153-budget
-size gate and the explicit ten-path leak-scan exit-code gate also passed.
+size gate and the explicit eleven-path leak-scan exit-code gate also passed.
 `frontend.mjs` is net one line and 183 bytes smaller than `origin/main`
 `c9dad34f`.

@@ -15,7 +15,7 @@ export function compileClosedProgram(options) {
     strictRoots: options.tolerant ? undefined : new Set(original.objects.map(n => n.toUpperCase().replaceAll("#", "/")))};
   options = {...options, closureContext};
   let program = compileProgram(options);
-  const selected = new Set(program.wanted);
+  const selected = new Set(seed?.closed ?? program.wanted);
   for (;;) {
     const more = withRole("scheduling", () => {
       const superEdges = [...selected].map(n => [n, program.reg.getObject("CLAS", n)?.getDefinition()?.getSuperClass()?.toUpperCase()]).filter(row => row[1]);

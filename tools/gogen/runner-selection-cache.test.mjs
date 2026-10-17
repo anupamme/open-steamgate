@@ -17,7 +17,7 @@ const {input, cacheDir, objects, policy, tolerant, forceSelection} = JSON.parse(
 const folders = [input];
 const runner = prepareRunnerCache(folders, cacheDir ? {cacheDir, dependencyCache: true, provenance: false} : {}, policy);
 try {
- const p = compileClosedProgram({...runner.options, folders, objects, tolerant, ...(forceSelection ? {selectionCache: {read: () => ({selection: forceSelection, evidence: "test-forced", rounds: []}), write() {}}} : {})});
+ const p = compileClosedProgram({...runner.options, folders, objects, tolerant, ...(forceSelection ? {selectionCache: {read: () => ({selection: forceSelection, closed: forceSelection, evidence: "test-forced", rounds: []}), write() {}}} : {})});
  finishRunnerCache(runner.certificate);
  console.log(JSON.stringify({artifacts: artifactsOf(p).artifacts, wanted: [...p.wanted], rounds: p.closureRounds, evidence: p.selectionEvidence}));
 } catch(e) { console.log(JSON.stringify({error: e.message})); }
@@ -93,6 +93,7 @@ for (const noline of [false, true]) {
       const warm = oracle(input, cache, {}, noline);
       assert.equal(warm.evidence, "exact-inputs");
       if (change === "broken") {
+        assert.equal(warm.rounds, 1, "known broken dependencies retain their previous controller membership");
         assert.ok(JSON.parse(warm.artifacts.diagnostics).some(d => d.object.toUpperCase() === "ZLEAF"));
         assert.match(capture(input, cache, {objects: ["zleaf"]}, noline).error, /cannot be generic/);
       }
@@ -155,4 +156,24 @@ test("literal edits must preserve the frontend's actual raw-source probe answers
   assert.notEqual(key("INTERFACE lif_one."), key("INTERFACE lif_two."));
   assert.notEqual(key("CL_AMC_CHANNEL_MANAGER"), key("ZL_AMC_CHANNEL_MANAGER"));
   assert.equal(key("add 2 to lv_foo."), key("add 3 to lv_foo."));
+});
+for (const noline of [false, true]) test(`later in-place expansion preserves original controller membership; noline=${noline}`, () => fixture(({input, cache, put}) => {
+  put("zentry", source("zentry", "zleaf=>run( )."));
+  put("zleaf", source("zleaf", "DATA x TYPE i. x = zattr=>counter."));
+  put("zbase", source("zbase", ""));
+  put("zattr", "CLASS zattr DEFINITION PUBLIC INHERITING FROM zbase. PUBLIC SECTION. CLASS-DATA counter TYPE i. ENDCLASS. CLASS zattr IMPLEMENTATION. ENDCLASS.");
+  const cold = oracle(input, cache, {}, noline);
+  assert.equal(cold.rounds, 2);
+  assert.ok(cold.wanted.includes("ZATTR"));
+  assert.ok(!cold.wanted.includes("ZBASE"), "reference discovery checks its retained membership, not final wanted");
+  const seeded = oracle(input, cache, {}, noline);
+  assert.equal(seeded.rounds, 1);
+  assert.equal(seeded.evidence, "exact-inputs");
+  assert.ok(!seeded.wanted.includes("ZBASE"), "seeding must not add an extra superclass absent from the reference result");
+}));
+
+test("exact source and AST certificate encodings have distinct evidence domains", () => {
+  const valid = source("z", "DATA(t5) = CONV string( |x| ).");
+  const unrelated = JSON.stringify([valid.replace("|x|", "|<local-string-value:3>|"), [], [], false]);
+  assert.notEqual(discoveryEvidence("z.clas.abap", valid), discoveryEvidence("z.clas.abap", unrelated));
 });

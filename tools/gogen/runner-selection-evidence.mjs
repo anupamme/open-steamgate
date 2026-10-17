@@ -6,7 +6,7 @@ import {createHash} from "node:crypto";
 import {createRequire} from "node:module";
 import {localInterfaceNames, currentTypeNames, amcSource} from "./frontend-source-observations.mjs";
 const require = createRequire(import.meta.url);
-const digest = (text) => createHash("sha256").update(text).digest("hex");
+const digest = (text, kind = "exact-v1") => `${kind}:${createHash("sha256").update(text).digest("hex")}`;
 export function discoveryEvidence(name, source) {
   if (!name.toLowerCase().endsWith(".clas.abap") || !source.includes("CONV string(")) return digest(source);
   try {
@@ -40,6 +40,6 @@ export function discoveryEvidence(name, source) {
     // source columns in generated local names; width changes are not certified.
     let result = source;
     for (const [start, end] of ranges.reverse()) result = result.slice(0, start) + `|<local-string-value:${end - start}>|` + result.slice(end);
-    return digest(JSON.stringify([result, localInterfaceNames(source), currentTypeNames(source), amcSource(source)]));
+    return digest(JSON.stringify([result, localInterfaceNames(source), currentTypeNames(source), amcSource(source)]), "local-v1");
   } catch { return digest(source); }
 }
