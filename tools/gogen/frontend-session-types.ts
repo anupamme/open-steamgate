@@ -85,7 +85,18 @@ export interface SessionEntry {
   replay?: Replay;
   provenance?: StoredProvenance;
 }
-export type CacheDiskEntry = Omit<SessionEntry, 'file' | 'structure'> & {name: string};
+// A SessionEntry as stored on disk: no parsed file or structure, plus its name.
+export interface CacheDiskEntry {
+  name: string;
+  ir: ClassIR;
+  supplied: string;
+  current: Pick<SessionProgram, 'currentClass' | 'currentOwner' | 'currentTypes'>;
+  sigs?: SignatureChanges;
+  skipped?: string[];
+  partial?: string[];
+  replay?: Replay;
+  provenance?: StoredProvenance;
+}
 export interface CachePrediction {
   row: {
     name: string; wouldReuseV3: boolean; actuallyLowered: boolean; reason: string;
