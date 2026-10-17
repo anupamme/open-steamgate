@@ -58,6 +58,8 @@ export interface FrontendClass extends Omit<Mutable<Class>, "methods" | "attribu
 }
 export interface FrontendProgram extends Omit<Mutable<Program>, "classes" | "structs" | "sigs" | "skipped" | "partial" | "frontendCounts" | "tables" | "consts" | "intfOwnAttrs" | "interfaceAttrs" | "exceptionSupers"> {
   reg: Registry;
+  locals?: Map<string, string>;
+  localInterfaces?: Map<string, {def: abaplint.IInterfaceDefinition; source: string}>;
   classes: FrontendClass[]; structs: Map<string, StructType>; sigs: Map<string, MethodSignature>;
   anonStructs: Map<abaplint.AbstractType, string>; badStructs: Map<string, string>; ddicOutputLen: Map<string, number>;
   dynamicDispatch?: {key: string; owner: string; method: string; defaults: {name: string; value: Expr}[]}[];

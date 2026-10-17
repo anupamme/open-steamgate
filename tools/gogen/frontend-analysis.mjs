@@ -20,7 +20,7 @@ const {Expressions, ExpressionsCDS, Nodes, Structures} = abaplint;
 /** @param {import("@abaplint/core").Nodes.StructureNode | undefined} body @returns {Set<string>} */ export function inlineTableLocals(body) {
   if (!body) return new Set();
   if (!inlineTables.has(body)) {
-    const names = new Set();
+    /** @type {Set<string>} */ const names = new Set();
     for (const st of body.findAllStatementNodes()) {
       for (const into of st.findAllExpressions(Expressions.SQLIntoTable)) {
         for (const inline of into.findAllExpressions(Expressions.InlineData)) {
@@ -35,8 +35,9 @@ const {Expressions, ExpressionsCDS, Nodes, Structures} = abaplint;
 }
 
 // The later folder wins each AMC channel name, as the runtime layers do.
+/** @param {readonly string[]} folders */
 export function samcOf(folders) {
-  const byName = new Map();
+  /** @type {Map<string, string>} */ const byName = new Map();
   const walk = (dir) => {
     let entries;
     try { entries = listEntries(dir); } catch { return; }
@@ -74,9 +75,9 @@ function sqlViewName(annotations) {
 }
 
 // A CDS view entity has no SQL view name and is left out.
-/** @param {readonly (string | {filename: string; source: string})[]} sources */ export function cdsSqlViews(sources) {
-  const out = {};
-  const failures = new Map();
+/** @param {readonly (string | {filename: string; source: string})[]} sources @returns {Record<string, string>} */ export function cdsSqlViews(sources) {
+  /** @type {Record<string, string>} */ const out = {};
+  /** @type {Map<string, string>} */ const failures = new Map();
   cdsFailures.set(out, failures);
   for (const [index, input] of sources.entries()) {
     const {filename, source} = typeof input === "string"

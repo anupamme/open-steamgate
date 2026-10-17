@@ -9,7 +9,7 @@ import {suppliedIndex, suppliedAnswer, suppliedSignature, localDiscovery, lockAn
 import {enumerateObjects, auditedBookkeeping, withRole, beginProvenanceCompile} from "./frontend-provenance.mjs";
 import {prepareArtifactDigests} from "./frontend-artifact-digests.mjs";
 import {withProvenance, expandProgramSelection, withArtifact, resolvedFunctionModule} from "./frontend-provenance.mjs";
-import {isSourceIdentity, readdirSync, readFileSync} from "./host-io-compat.mjs";
+import {isSourceIdentity, readdirEntries, readdirNames, readFileSync} from "./host-io-compat.mjs";
 import {append} from "./append.ts";
 import {lowerFindResults, inlineFindResultTypes} from "./frontend-find-results.ts";
 import {hoistLocalConstants} from "./frontend-local-constants.mjs";
@@ -78,7 +78,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   /** @type {string[]} */ let wanted = objects.map((o) => o.toLowerCase().replace(/#/g, "/"));
   /** @type {import("./frontend-cache-types.ts").CdsSource[]} */ const ddls = [];
   /** @param {string} dir @returns {void} */ const walk = (dir) => {
-    for (const e of readdirSync(dir, {withFileTypes: true}).sort((x, y) => x.name.localeCompare(y.name))) {
+    for (const e of readdirEntries(dir).sort((x, y) => x.name.localeCompare(y.name))) {
       const path = join(dir, e.name);
       if (e.isDirectory()) walk(path);
       else if (isSourceIdentity(e.name) || skip(path)) continue;
@@ -120,7 +120,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
     auditedBookkeeping("session-prepare", () => prepareSession(session, reg)); // Input guards only.
   }
   if (session) session.cdsInputs = cdsIdentity;
-  const compile = diskFrontend ? diskFrontend.compileDiskClass : compileClass;
+  /** @type {typeof compileClass} */ const compile = diskFrontend ? (...args) => diskFrontend.compileDiskClass.call(undefined, ...args) : compileClass;
   // abaplint's RAISE syntax checker only accepts ObjectReferenceType, not
   // its generic REF TO object sibling. The dynamic raise path below checks
   // the actual registered object; retain every other syntax diagnostic.
@@ -134,7 +134,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   // A literal CALL FUNCTION is a dependency on its function group. The
   // registry already knows each module's group; include it before signatures
   // are built, including calls made by a module in another group.
-  withRole("scheduling", () => expandProgramSelection(reg, wanted, abaplint));
+  withRole("scheduling", () => expandProgramSelection(reg, wanted, /** @type {import("./frontend-session-types.ts").SelectionCore} */ ({VirtualPosition: abaplint.VirtualPosition, MacroContent: abaplint.MacroContent, Objects: abaplint.Objects, Visibility: abaplint.Visibility, Statements: abaplint.Statements, Expressions: abaplint.Expressions, Tokens: abaplint.Tokens})));
 
   // Eager collections keep first writes inside the replay proxies. Anonymous
   // type identities use a Map so their ordered effects can be replayed too;
@@ -609,7 +609,7 @@ function functionGroupSignatures(ctx0, g) {
 
 /** kept for the numeric bench sample: one folder, every class in it */
 export function readClass(folder) {
-  const objects = [...new Set(readdirSync(folder).map((f) => f.split(".")[0]))];
+  const objects = [...new Set(readdirNames(folder).map((f) => f.split(".")[0]))];
   return compileProgram({folders: [folder], objects}).classes;
 }
 
@@ -1106,7 +1106,7 @@ function compiledFunctionCall(node, ctx, text, name) {
       // {fn, args}: the host function takes the places and values named
       // (attributes and parameters, "&" for a place it writes) instead of
       // the parameters in their order
-      /** @type {import("./frontend-types.ts").NativeContext | undefined} */ const nativeCtx = typeof native === "string" ? undefined : {program, reg, className, scopeName, method: name, sig, signatures, spaghetti, locals: new Map(), fieldSymbols: new Map()};
+      /** @type {import("./frontend-types.ts").NativeContext | undefined} */ const nativeCtx = typeof native === "string" ? undefined : {program, reg, className, scopeName, method: name, sig, signatures, spaghetti, locals: /** @type {Map<string, import("./ir.ts").Type>} */ (new Map()), fieldSymbols: /** @type {Map<string, import("./ir.ts").Type>} */ (new Map())};
       /** @type {import("./frontend-types.ts").FrontendStmt} */ const st = typeof native === "string" ? {s: "native", fn: native} : {s: "native", fn: native.fn, args: nativeArgs(native.args, nativeCtx)};
       cls.methods.push({...sig, locals: [], fieldSymbols: [], calls: [], body: [st],
         pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
@@ -3329,7 +3329,7 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
   const text = node.concatTokens();
   if (outer === undefined) throw new Unsupported(`arithmetic with a generic operand outside an assignment: ${text}`);
   if (hasBitOp(node)) throw new Unsupported(`bit operation with a generic operand: ${text}`);
-  const statics = [];
+  /** @type {string[]} */ const statics = [];
   for (const t of leafTypes(node, ctx)) {
     if (t.k === "data") continue;
     if (CALC_CODE[t.k] === undefined) throw new Unsupported(`calculation type with a ${t.k} operand: ${text}`);
@@ -3376,7 +3376,7 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
   return {e: "gen_arith", statics: statics.join(""), charTarget, target, leaves, branches: {I: branches.I, "8": branches["8"], P: branches.P, F: branches.F}, text, type: outer.k === "data" ? {k: "data"} : outer};
 }
 
-/** @param {import("./frontend-types.ts").FieldChain} n @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").ValueExpr} */ function fieldChain(n, ctx) {
+/** @param {import("@abaplint/core").Nodes.ExpressionNode} n @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").ValueExpr} */ function fieldChain(n, ctx) {
   const kids = isExpr(n, Expressions.SourceField) ? [n] : n.getChildren();
   const text = upper(n.concatTokens());
   if (SY_MESSAGES[text]) return {e: "sy", ...SY_MESSAGES[text]};
@@ -4750,7 +4750,7 @@ function selectSingle(sel, ctx, text) {
     const cls = upper(clsNode.concatTokens());
     if (!ctx.program.wanted.has(cls)) throw notInProgram(ctx, cls, `RAISE EXCEPTION TYPE ${cls}: the class is not compiled in this program`);
     const params = node.findDirectExpression(Expressions.ParameterListS);
-    const given = new Map();
+    /** @type {Map<string, import("@abaplint/core").Nodes.ExpressionNode>} */ const given = new Map();
     /** @type {string[]} */ const givenNames = [];
     for (const p of params?.findAllExpressions(Expressions.ParameterS) ?? []) {
       const name = upper(p.findDirectExpression(Expressions.ParameterName).concatTokens());
@@ -5908,7 +5908,7 @@ const FUNCTIONS = {
   if (!fc || !isExpr(te, Expressions.TableExpression)) throw new Unsupported(`line_exists form: ${chain.concatTokens()}`);
   /** @type {import("./frontend-types.ts").LineExistsHead} */ const head = {getChildren: () => fk.slice(0, -1), concatTokens: () => fk.slice(0, -1).map((k) => k.concatTokens()).join(""),
     findFirstExpression: (t) => fk.slice(0, -1).map((k) => (isExpr(k, t) ? k : k instanceof Nodes.ExpressionNode ? k.findFirstExpression(t) : undefined)).find(Boolean), get: () => fc.get()};
-  const table = fk.length === 2 ? sourceOperand(fk[0], ctx) : fieldChain(head, ctx);
+  const table = fk.length === 2 ? sourceOperand(fk[0], ctx) : fieldChain(/** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (head), ctx);
   if (table.type.k !== "table") throw new Unsupported("line_exists of a non-table");
   const inner = te.getChildren().filter((c) => !isTok(c, "[") && !isTok(c, "]"));
   /** @type {import("./ir.ts").TableKey[]} */ const keys = [];
