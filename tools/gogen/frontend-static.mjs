@@ -1,4 +1,4 @@
-/** @param {(name: string) => string} goName */
+/** @param {string} owner @param {string} name @param {import("./ir.ts").Type} type @param {(name: string) => string} goName @returns {import("./frontend-types.ts").StaticSlotExpr} */
 export const staticSlot = (owner, name, type, goName) => ({e: "static", owner, name, type, go: goName(`${owner}=>${name}`)});
 
 // Static attributes share storage in their declaring class, including inherited names.
