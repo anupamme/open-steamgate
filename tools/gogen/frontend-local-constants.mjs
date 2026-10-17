@@ -76,7 +76,7 @@ export function hoistLocalConstants(body, ctx, h) {
       }
       /** @type {Record<string, import("./frontend-types.ts").ConstantInitializer | undefined>} */ const folded = Object.fromEntries(Object.entries(inits).map(([f, v]) => [f, fold(v)]));
       if (Object.values(folded).every(Boolean)) add(name, type, {fieldInits: folded});
-      else ctx.localConstantFields.set(node, Object.entries(inits).map(([field, value]) => ({
+      else ctx.localConstantFields.set(node, Object.entries(inits).map(/** @returns {import("./frontend-types.ts").FrontendStmt} */ ([field, value]) => ({
         s: "assign", target: {e: "field", base: {e: "var", name, type}, name: field, type: fields.find((f) => f.name === field).type}, value,
       })));
       return;

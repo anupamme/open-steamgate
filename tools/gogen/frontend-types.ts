@@ -37,7 +37,7 @@ export type RefusedSignature = {readonly name: string; readonly unsupported: str
 export type MethodSignature = Signature | RefusedSignature;
 export interface SuppliedMethod { name: string; found: string[] }
 export interface RttiTable { classSupers: Map<string, string | null>; structs: Map<string, {name: string; kind: string}[]>; known: Set<string> }
-export interface LockObject { name: string; table: string; key: string[]; fields: {name: string; kind: string; length: number}[] }
+export type LockObject = import("./frontend-session-types.ts").LockDescriptor;
 export interface FrontendTable extends DatabaseTable { row?: Type; hidesClient?: string; why?: string }
 export interface LocalClass {
   name: string; owner: string; local: string; obj: abaplint.Objects.Class;
