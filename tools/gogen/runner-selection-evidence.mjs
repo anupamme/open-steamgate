@@ -1,9 +1,10 @@
 // Host-side discovery certificate. Only a method-local, explicitly string-typed
-// initializer may change value. No constant folding or dataflow discovery reads
+// initializer may change value at the same width. No constant folding or dataflow discovery reads
 // this value: its AST, type, references, supplied contributions and CATCH set
 // remain identical. Everything outside the one plain template is byte-bound.
 import {createHash} from "node:crypto";
 import {createRequire} from "node:module";
+import {localInterfaceNames, currentTypeNames, amcSource} from "./frontend-source-observations.mjs";
 const require = createRequire(import.meta.url);
 const digest = (text) => createHash("sha256").update(text).digest("hex");
 export function discoveryEvidence(name, source) {
@@ -30,13 +31,15 @@ export function discoveryEvidence(name, source) {
           || words[9] !== ")" || words[10] !== "." || !(tokens[8] instanceof core.Tokens.StringTemplate)) continue;
       const token = tokens[8], text = token.getStr();
       // Even escaped interpolation/control sequences are outside this proof.
-      if (text.includes("{") || text.includes("}") || text.includes("\\") || text.includes("\n")) continue;
+      if (text.includes("{") || text.includes("}") || text.includes("\\") || text.includes("\n") || text.includes("\r")) continue;
       const start = offsets[token.getStart().getRow() - 1] + token.getStart().getCol() - 1;
       if (source.slice(start, start + text.length) !== text) return digest(source);
       ranges.push([start, start + text.length]);
     }
+    // Keep all following token positions stable. SUBMIT normalization embeds
+    // source columns in generated local names; width changes are not certified.
     let result = source;
-    for (const [start, end] of ranges.reverse()) result = result.slice(0, start) + "|<local-string-value>|" + result.slice(end);
-    return digest(result);
+    for (const [start, end] of ranges.reverse()) result = result.slice(0, start) + `|<local-string-value:${end - start}>|` + result.slice(end);
+    return digest(JSON.stringify([result, localInterfaceNames(source), currentTypeNames(source), amcSource(source)]));
   } catch { return digest(source); }
 }

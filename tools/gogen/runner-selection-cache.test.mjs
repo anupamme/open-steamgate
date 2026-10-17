@@ -118,7 +118,7 @@ test("discovery evidence excludes only plain local string initializer values", (
   const before = source("z", "DATA(t5) = CONV string( |value 1| ).");
   const key = text => discoveryEvidence("z.clas.abap", text);
   assert.equal(key(before), key(before.replace("value 1", "value 2")));
-  for (const after of [before.replace("string", "zother"), before.replace("value 1", "{ zother=>run( ) }"),
+  for (const after of [before.replace("string", "zother"), before.replace("value 1", "{ zother=>run( ) }"), before.replace("value 1", "value 22"),
     before.replace("CONV string( |value 1| )", "zother=>run( )"), before.replace("DATA(t5)", "DATA(other)"),
     before.replace("value 1", "value\\n2"), before.replace("value 1", "value\n2")]) assert.notEqual(key(before), key(after));
   const constant = "CLASS z DEFINITION. PUBLIC SECTION. CONSTANTS c TYPE string VALUE 'one'. ENDCLASS.";
@@ -140,3 +140,19 @@ test("seed controller continues missing-class rounds and keeps explicit roots st
   put("zentry", source("zentry", "DATA x TYPE any."));
   assert.match(capture(input, undefined, {forceSelection: ["ZENTRY", "ZLEAF"]}).error, /cannot be generic/);
 }));
+
+for (const noline of [false, true]) test(`literal width changes restart discovery; noline=${noline}`, () => fixture(({input, cache, put}) => {
+  oracle(input, cache, {}, noline);
+  put("zentry", source("zentry", "DATA(t5) = CONV string( |value 22| ). zleaf=>run( )."));
+  const result = oracle(input, cache, {}, noline);
+  assert.equal(result.evidence, "discovery-from-roots");
+  assert.equal(result.rounds, 2);
+}));
+
+test("literal edits must preserve the frontend's actual raw-source probe answers", () => {
+  const key = text => discoveryEvidence("z.clas.abap", source("z", `DATA(t5) = CONV string( |${text}| ).`));
+  assert.notEqual(key("TYPES ztype1 TYPE i."), key("TYPES ztype2 TYPE i."));
+  assert.notEqual(key("INTERFACE lif_one."), key("INTERFACE lif_two."));
+  assert.notEqual(key("CL_AMC_CHANNEL_MANAGER"), key("ZL_AMC_CHANNEL_MANAGER"));
+  assert.equal(key("add 2 to lv_foo."), key("add 3 to lv_foo."));
+});

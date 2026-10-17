@@ -692,12 +692,16 @@ Supplied registries and sessions are conservatively ineligible.
 
 Unchanged inputs certify the previous selection directly. Across edits, this
 first implementation uses a deliberately narrow AST proof: only the plain,
-noninterpolated template in a method-local
+noninterpolated, equal-width template in a method-local
 `DATA(name) = CONV string( |literal| ).` initializer may change. The parser must
 recognize the complete statement and method context; macros, INCLUDEs, unknown
 statements, interpolation, escape sequences and multiline literals do not
 qualify. Raw text outside qualifying template values remains bound byte for
-byte. The initializer's string type, declaration, references and all other
+byte. Width is part of the certificate because source normalization can use
+columns in generated local names. The compiler's existing raw-source probes for local interfaces, local types
+and AMC markers are shared with the validator; their actual answers must also
+remain identical. No new lexical dependency approximation is introduced.
+The initializer's string type, declaration, references and all other
 statements therefore remain unchanged. Discovery does not propagate this local
 runtime value into class selection, supplied signatures or CATCH membership.
 This covers the proof's existing literal edit without claiming support for
@@ -721,11 +725,11 @@ negative control deliberately compiles a stale closed superset and requires
 its bytes to differ from discovery from roots.
 
 Pre-proof validation passed 264 focused cache, certificate, replay, provenance,
-closure and osabap tests (598.0 s), plus 20 fresh-process selection tests
-(77.5 s), with no failures or skips. The CI oracle inside that matrix exercised
+closure and osabap tests (598.0 s), plus 23 hardened fresh-process selection tests
+(80.2 s), with no failures or skips. The CI oracle inside that matrix exercised
 60 supported mutations in 62 attempts with zero mismatches (125.0 s). Both
 reverse-edge negative controls passed. Node suites used `--preserve-symlinks
 --test-concurrency=1`; the four host-boundary checks, TypeScript, the 153-budget
 size gate and the explicit ten-path leak-scan exit-code gate also passed.
-`frontend.mjs` is net zero lines and one byte smaller than `origin/main`
+`frontend.mjs` is net one line and 183 bytes smaller than `origin/main`
 `c9dad34f`.

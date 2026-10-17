@@ -11,6 +11,7 @@ import {prepareArtifactDigests} from "./frontend-artifact-digests.mjs";
 import {withProvenance, expandProgramSelection, withArtifact, resolvedFunctionModule} from "./frontend-provenance.mjs";
 import {isSourceIdentity, readdirEntries, readdirNames, readFileSync} from "./host-io-compat.mjs";
 import {append} from "./append.ts";
+import {localInterfaceNames, currentTypeNames, amcSource} from "./frontend-source-observations.mjs";
 import {lowerFindResults, inlineFindResultTypes} from "./frontend-find-results.ts";
 import {hoistLocalConstants} from "./frontend-local-constants.mjs";
 // ABAP -> IR, for the Go backend spike (tools/gogen/README.md).
@@ -42,7 +43,7 @@ import {join} from "./host-io.ts";
 import {caughtPresence, chainHas, caughtIndex} from "./frontend-hierarchy.mjs";
 import {typeKindOf, typeOf, rttiNamed, structOf, fieldOf, namedType} from "./frontend-types-signatures.mjs";
 
-import {TRANSPILER_MEANING, P_GENERIC, NATIVE, kernelOf, nativeArgs, AMC_HOST, AMC_CALLER, amcProgramOf, amcMethod, NATIVE_FM, DESTINATION_FM, NATIVE_ME, nativeMeSig, RUNTIME_CX, RUNTIME_CX_SUPER} from "./frontend-classes-native.mjs";
+import {TRANSPILER_MEANING, P_GENERIC, NATIVE, kernelOf, nativeArgs, AMC_HOST, amcProgramOf, amcMethod, NATIVE_FM, DESTINATION_FM, NATIVE_ME, nativeMeSig, RUNTIME_CX, RUNTIME_CX_SUPER} from "./frontend-classes-native.mjs";
 import {sqlIrType, writeIrType, irCheck, lowName, mandtPred, andIr, sqlHost, sqlValue, SQL_OPS} from "./frontend-sql.mjs";
 /** @typedef {Pick<typeof import("./frontend-base.mjs"), "Nodes" | "Structures" | "Statements" | "Expressions" | "isTok" | "isExpr" | "isStruct" | "isStmt" | "upper" | "goName" | "Unsupported"> & {initialValue: typeof initialValue}} LocalConstantHelpers */
 import {source, componentsOf, arith, sourceOperand, callMethodChain, excHolder,
@@ -158,8 +159,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
     if (LOCAL_CLASSES.has(upper(obj.getName()))) {
       const top = new abaplint.SyntaxLogic(reg, obj).run().spaghetti.getTop();
       for (const file of obj.getABAPFiles()) {
-        for (const match of file.getRaw().matchAll(/\bINTERFACE\s+(LIF_[A-Z0-9_]+)\s*\./gi)) {
-          const name = upper(match[1]);
+        for (const name of localInterfaceNames(file.getRaw())) {
           const def = top.getChildren().find((s) => s.findInterfaceDefinition(name))?.findInterfaceDefinition(name);
           if (def) program.localInterfaces.set(`${upper(obj.getName())}|${name}`, {def, source: file.getRaw()});
         }
@@ -879,8 +879,7 @@ function compiledFunctionCall(node, ctx, text, name) {
   program.currentOwner = upper(obj.owner ?? obj.getName());
   const file = obj.getMainABAPFile();
   // the type names this class declares itself (class and method TYPES)
-  program.currentTypes = new Set([...file.getRaw().matchAll(/\bTYPES\s*:?\s*(?:BEGIN\s+OF\s+)?([\w\/]+)/gi)].map((m) => upper(m[1])));
-  for (const m of file.getRaw().matchAll(/,\s*(?:BEGIN\s+OF\s+)?([\w\/]+)\s+TYPE\b/gi)) program.currentTypes.add(upper(m[1]));
+  program.currentTypes = new Set(currentTypeNames(file.getRaw()));
   const def = obj.getDefinition();
   // a local class (localClasses) is read in the scopes of its owner
   const spaghetti = new abaplint.SyntaxLogic(reg, obj.obj ?? obj).run().spaghetti;
@@ -1150,7 +1149,7 @@ function compiledFunctionCall(node, ctx, text, name) {
       // sent from a method that never names the type is this class's call
       // too (the critic on #263). The AMC classes are not callers, as Node's
       // callerProgram skips them
-      if (AMC_CALLER.test(file.getRaw()) && !/^(CL_AMC_|ZCL_AMC_)/.test(upper(ctx.owner))) ir.amcProgram = amcProgramOf(ctx.owner);
+      if (amcSource(file.getRaw()) && !/^(CL_AMC_|ZCL_AMC_)/.test(upper(ctx.owner))) ir.amcProgram = amcProgramOf(ctx.owner);
       if (name === "CONSTRUCTOR") cls.constructor = ir; else cls.methods.push(ir);
     } catch (e) {
       if (!(e instanceof Unsupported)) throw e;
