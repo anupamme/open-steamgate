@@ -5,7 +5,7 @@ import {require, abaplint, Rearranger, Nodes, Statements, Structures, Expression
   tokenStr, upper, goName, refuseSorted, sameSort, sameType, composite, byRef, numeric, charlike} from "./frontend-base.mjs";
 export {Unsupported, I, F, INT8, S, sameType, composite, byRef} from "./frontend-base.mjs";
 import {parseObserved, inputOrigin, rttiClassInventory, rttiLocalSupers} from "./frontend-inventory.mjs";
-import {suppliedIndex, suppliedAnswer, suppliedSignature, localDiscovery, lockAnswer, finalOutput, rttiProjection, selectionHas} from "./frontend-queries.mjs";
+import {suppliedIndex, suppliedAnswer, suppliedSignature, localDiscovery, lockAnswer, finalOutput, rttiProjection, selectionHas, indexFrozenSelection} from "./frontend-queries.mjs";
 import {enumerateObjects, auditedBookkeeping, withRole, beginProvenanceCompile} from "./frontend-provenance.mjs";
 import {prepareArtifactDigests} from "./frontend-artifact-digests.mjs";
 import {withProvenance, expandProgramSelection, withArtifact, resolvedFunctionModule} from "./frontend-provenance.mjs";
@@ -133,7 +133,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   // A literal CALL FUNCTION is a dependency on its function group. The
   // registry already knows each module's group; include it before signatures
   // are built, including calls made by a module in another group.
-  withRole("scheduling", () => expandProgramSelection(reg, wanted, /** @type {import("./frontend-session-types.ts").SelectionCore} */ ({VirtualPosition: abaplint.VirtualPosition, MacroContent: abaplint.MacroContent, Objects: abaplint.Objects, Visibility: abaplint.Visibility, Statements: abaplint.Statements, Expressions: abaplint.Expressions, Tokens: abaplint.Tokens}))); Object.freeze(wanted);
+  withRole("scheduling", () => expandProgramSelection(reg, wanted, /** @type {import("./frontend-session-types.ts").SelectionCore} */ ({VirtualPosition: abaplint.VirtualPosition, MacroContent: abaplint.MacroContent, Objects: abaplint.Objects, Visibility: abaplint.Visibility, Statements: abaplint.Statements, Expressions: abaplint.Expressions, Tokens: abaplint.Tokens}))); Object.freeze(wanted); indexFrozenSelection(wanted);
 
   // Eager collections keep first writes inside the replay proxies. Anonymous
   // type identities use a Map so their ordered effects can be replayed too;
