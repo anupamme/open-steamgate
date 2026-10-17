@@ -2,8 +2,9 @@
 // Erasable contracts for session reuse and observational provenance. Opaque
 // values below are identity/fingerprint payloads, never interpreted as IR here.
 import type * as Core from '@abaplint/core';
-import type {Class, Method, UnsupportedMethod} from './emit-go-types.ts';
+import type {Class} from './emit-go-types.ts';
 import type {FunctionModule as IRFunctionModule} from './ir.ts';
+import type {MethodSignature} from './frontend-types.ts';
 
 // The core's general overload erases the object kind; these two literal
 // lookups are the selection path used by the provenance module.
@@ -22,7 +23,7 @@ type CacheValue<T> = T extends {s: 'call_enq'} ? Omit<T, 'fields'> & {readonly f
     : T extends ReadonlyMap<infer K, infer V> ? ReadonlyMap<K, CacheValue<V>>
       : T extends object ? {[K in keyof T]: CacheValue<T[K]>} : T;
 export type ClassIR = CacheValue<Class>;
-export type Signature = Method | UnsupportedMethod;
+export type Signature = MethodSignature;
 export type Signatures = Map<string, Signature>;
 export type SignatureChanges = [string, Signature][];
 export interface ProgramSnapshot extends Map<string, unknown> {
@@ -49,12 +50,21 @@ export type ArtifactInput = ArtifactObject | {obj: ArtifactObject};
 export interface RegistryContext {reg: Registry}
 export interface LoweringContext extends RegistryContext {program: SessionProgram}
 export type ClassLowering = (ctx: LoweringContext, obj: ClassObject) => ClassIR;
-export interface FunctionModule extends Omit<IRFunctionModule, 'sig'> {sig: Signature}
+export interface FunctionModule {
+  owner: string;
+  group: Core.Objects.FunctionGroup;
+  module: IRFunctionModule['module'];
+  // The frontend retains both refused signatures and the public IR descriptor.
+  sig: Signature | IRFunctionModule['sig'];
+  updateTask: boolean;
+  spaghetti?: IRFunctionModule['spaghetti'];
+  top?: IRFunctionModule['top'];
+}
 export interface SessionProgram {
-  // Snapshot/unchanged compare every enumerable field, including future ones.
-  [key: string]: unknown;
+  // Explicit lowering subset; snapshot/unchanged still observe all own fields.
   reg: Registry;
   sigs: Signatures;
+  wanted: Set<string>;
   supplied: Map<string, Set<string>>;
   skipped: string[];
   partial: string[];
@@ -112,6 +122,7 @@ export interface CacheShadow {
 export interface CacheDisk {
   begin(): void;
   finish(program: SessionProgram): void;
+  promote(owner: string, value: CacheDiskEntry, program: SessionProgram): void;
   read(owner: string, key: string, program: SessionProgram): CacheDiskEntry | undefined;
   record(run: () => ClassIR): {value: ClassIR; reads: string[]};
   write(owner: string, value: CacheDiskEntry, reads: string[], program: SessionProgram): boolean | undefined;
