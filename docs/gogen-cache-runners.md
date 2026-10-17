@@ -90,15 +90,25 @@ immutable scalar arrays receive memoized set certificates. Tests cover body
 edits, added `IS SUPPLIED`, new implementors, dependency cycles, mutable answers
 and the existing mutation oracle.
 
-The real runner's closure rounds exposed another overbroad guard: CATCH
-memoization read the selected-set size and then walked the complete selection
-inside each class's tracking proxy. A growing closure invalidated otherwise
-unchanged catchers. CATCH now reads a prebuilt selected-subclass index. Its query
-guards the exact sorted matching names, including unnamed descendants and new
-selected subclasses. Hierarchy inputs with unknown observations refuse dependency
-reuse. The twenty-member ancestry limit, cycles, local names and runtime fallback
-parents retain their existing behavior. Exact CATCH-answer variant indexes are
-bounded and published atomically, so initial/final closure answers can both survive.
+The real runner's six closure rounds exposed another overbroad guard. An
+intermediate unchanged warm run still missed 57 initial classes: 42 CATCH-answer
+variant evictions, seven `wanted`/signature/structure-prefix guard changes, and
+the eight recording refusals. The CATCH caller consumes only whether a selected
+matching subclass exists. Recording the full matching list retained unnecessary
+contexts and thrashed the four-candidate index. It now records that boolean,
+computed from a prebuilt current hierarchy index. Unknown hierarchy observations
+still refuse dependency reuse. Tests exercise true/false transitions through
+unnamed descendants, while additions leaving the predicate true keep reusing.
+The twenty-member ancestry limit, cycles, local names and runtime fallback
+parents retain their existing behavior.
+
+Global entries are named by the logical program selection (sorted names); a
+bounded atomic index permits cross-context fallback. This preserves differences in
+ordered effects, such as which earlier class registered a shared structure.
+Full replay guards still validate each variant. Dependency trials let ordered
+replay fork the collections it writes, without first copying every growing map.
+Dependency keys bind the class's artifact/query closure and actual program
+observations.
 
 ## Reproduction and evidence
 
@@ -129,6 +139,77 @@ different build roots. The report records cache-off cold/warm controls,
 cache-on cold/warm, and edited warm/cold controls. Go compilation and execution
 are covered separately by the real runner and Unit tests.
 
+## Full-shard measurements
+
+Measured on 2026-10-17 with installed `zlnt-system` v0.5.2, implementation
+`8dc0b019`, copied inputs, separate build roots, and Go compilation disabled.
+The runner grows its class selection through six rounds: 3,010, 3,021, 3,037,
+3,051, 3,054 and 3,055 classes. Phase times below cover the complete invocation,
+not just its final round. The old 203.5-second frontend measurement used the
+earlier single-pass runner and is not a control for these measurements.
+
+| Run | Frontend (s) | Emit/gofmt (s) | Go build (s) | Total (s) |
+| --- | ---: | ---: | ---: | ---: |
+| Cold, cache disabled | 510.2 | 56.4 | 0 (skipped) | 568.7 |
+| Cold, cache enabled | 1,246.5 | 59.9 | 0 (skipped) | 1,308.5 |
+| Unchanged warm, cache disabled | 519.5 | 61.1 | 0 (skipped) | 582.9 |
+| Unchanged warm, cache enabled | 218.5 | 63.2 | 0 (skipped) | 283.8 |
+| Edited cold, cache disabled | 503.4 | 56.3 | 0 (skipped) | 561.9 |
+| Edited warm, cache enabled | 834.6 | 63.2 | 0 (skipped) | 900.1 |
+
+The unchanged warm invocation re-lowered eight distinct classes out of 3,055:
+**99.74% reuse** across the complete invocation. Every round exceeded 99%; the
+lowest was the initial round, 3,002/3,010 (99.73%). Its final round reused
+3,049/3,055 (99.80%). The eight initial misses were three borrowed-value mutation
+refusals, two nonportable replay arguments, one circular fingerprint, and two
+transcript-budget refusals. There were no misses of stored entries from key or
+replay instability.
+
+Warm-enabled total is 0.487 times warm-disabled total, meeting the 1.10-times
+limit. Its frontend phase is 58% shorter. Cold recording is expensive: its
+frontend takes 1,246.5 seconds versus 510.2 seconds without the cache.
+
+Warm diagnostic timestamps place the first class lookup at 91.1 seconds, with
+about 82 seconds between closure rounds. Class processing windows total about
+37 seconds, including conservative re-lowering. Emission takes another 63.2
+seconds. Class-IR replay alone cannot remove registry parsing, syntax/selection
+work between rounds, or emission.
+
+The edited invocation reaches content/cache setup at 76.7 seconds, the saved
+dependency-component index at 143.0 seconds, and its first class decision at
+189.8 seconds (process-elapsed diagnostic times). It must observe and revalidate
+dependencies after an input edit. This already exceeds the 100-second edited
+total target before the first decision or emission; that target is not met.
+
+Edited total is 900.1 seconds, including 834.6 seconds frontend and 63.2 seconds
+emission. Diagnostic class-processing windows, including dependency probes,
+replay and conservative lowering, total about 212 seconds. Gaps between closure
+rounds total about 378 seconds, and roughly
+55 seconds remain after the final class decision. This observation/validation
+path is more expensive than simply lowering with caching disabled; high IR
+reuse does not yet make the first edited invocation faster. Its 900.1-second
+total compares with 561.9 seconds for edited-cold with caching disabled.
+
+Across all six edited rounds, the only newly lowered classes beyond the eight
+unchanged refusal cases are `ZCL_LNT_ADD_MODULE`, `ZCL_LNT_P_STATEMENTS_DEL` and
+`ZCL_LNT_P_STATEMENTS_FAC`. Every one reports
+`dependency:CLAS ZCL_LNT_ADD_MODULE`, matching the saved graph's reverse closure.
+
+The unchanged warm and cold-enabled outputs are byte-identical to cold-disabled
+output for `zz_app.go`, `zz_generated.go`, `zz_db.json` and `symbols.json`. Their combined
+manifest SHA-256 is
+`f5beb3b9bf37a16a8eeb582c2eeb723de508599e0d4052266724701d39aab863`.
+The disabled warm control has the same manifest. Edited-warm and edited-cold
+are also byte-identical; their manifest is
+`7b4f5eb91ecc371caf45bb0421e78a68810fe4cf6fd5a8f861476edbe98a01d3`.
+The literal edit changes only `zz_generated.go`, and the proof asserts that
+edited output differs from the unchanged baseline.
+
+Machine-local evidence is retained at
+`/mnt/ssd-510/osg/stoker/tmp/c4b2-run/result/report.json`, with per-case logs,
+NDJSON diagnostics and generated artifacts beside it. The edited input copy is
+`/mnt/ssd-510/osg/stoker/tmp/c4b2-in/result`; the installed input was never edited.
+
 ## Changed files
 
 The implementation is based on `7503cdee`; it does not require the subsequent
@@ -144,4 +225,20 @@ parse-observation work on main.
 | Documentation and CI | `docs/gogen-cache-runners.md`, `docs/gogen-cache.md`, `.github/workflows/gogen.yml` |
 
 Filenames without a directory in this table share the preceding `tools/gogen/`
-prefix. `frontend.mjs` adds and removes six lines against the task base.
+prefix. `frontend.mjs` stays below the task base's line count.
+
+## Validation
+
+The final implementation passed 111 focused cache/query/replay/runner tests and
+82 oracle/exception/provenance/portable/binary tests. The CI mutation oracle ran
+60 mutations, including multi-edits and reverts, with zero mismatches. Tests ran
+with `--preserve-symlinks --test-concurrency=1`; concurrent fresh compilers shared
+a cache in both global and dependency modes, including a CATCH variant index.
+The binary suite also exercised simultaneous real `osd run` builds.
+
+`tsc -p tsconfig.gogen.json`, `osd-size-budget --changed origin/main`, and the
+changed-path `osd-leak-scan --paths` exit-code gate passed. The size gate checked
+153 budgets; the leak gate found zero matches across 36 changed paths.
+`frontend.mjs` is net -13 lines against `origin/main` (`b9e20a38`) at the final
+gate. Go compilation was skipped in the large phase matrix; the small binary
+tests compiled and executed reports.
