@@ -458,7 +458,13 @@ test("osd run builds a report once, keeps it and passes its arguments through", 
     const first = osdRun([report, "-db", file, "--add", "hello"], {OSABAP_TIMING: "1"});
     const timings = first.stderr.split("\n").filter((line) => line.startsWith("OSABAP_TIMING "))
       .map((line) => JSON.parse(line.slice("OSABAP_TIMING ".length)));
-    assert.deepEqual(timings.map((row) => row.phase), ["frontend", "emit", "goBuild", "total", "run"]);
+    assert.deepEqual(timings.filter((row) => !(row.round > 0)).map((row) => row.phase),
+      ["frontend", "emission", "gofmt", "emit", "goBuild", "total", "run"]);
+    const rounds = [...new Set(timings.filter((row) => row.round > 0).map((row) => row.round))];
+    assert.ok(rounds.length > 0);
+    assert.deepEqual(rounds, Array.from({length: rounds.length}, (_, i) => i + 1));
+    for (const round of rounds) assert.deepEqual(timings.filter((row) => row.round === round).map((row) => row.phase),
+      ["graphLoading", "certificateValidation", "observation", "replay", "finalization"]);
     assert.ok(timings.every((row) => Number.isFinite(row.ms) && row.ms >= 0));
     assert.equal(first.status, 0, first.stderr);
     assert.match(first.stderr, /osd run: building znotes\.prog\.abap/);

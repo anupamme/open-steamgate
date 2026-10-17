@@ -38,8 +38,9 @@ export function keyComputer(reg, namespace, program) {
   const inventory = inputSnapshot(reg), answers = new Map(), rawHashes = new Map();
   const sources = new Map([...inventory.objects.values()].flatMap((e) => e.sources).map((s) => [s.name, s]));
   const specifications = new WeakMap(), queryValues = new WeakMap(), guards = new WeakMap();
-  const evaluate = queryEvaluator(program);
-  const trace = provenanceGraph(reg), currentIssues = new Map();
+  let evaluate = queryEvaluator(program);
+  let trace = provenanceGraph(reg);
+  const currentIssues = new Map();
   const fault = process.env.GOGEN_CACHE_SHADOW_FAULT;
   const drop = fault?.startsWith("drop-dependency:") ? new RegExp(fault.slice(16)) : undefined;
   if (fault && !drop && !["ignore-miss", "unknown-complete"].includes(fault) && !fault.startsWith("ignore-query:"))
@@ -172,9 +173,10 @@ export function keyComputer(reg, namespace, program) {
       memo.set(number, result); return result;
     } catch (error) { memo.set(number, {error: error.message}); throw error; }
   };
-  return (graph, root, value, {current = false} = {}) => {
+  const compute = (graph, root, value, {current = false} = {}) => {
     try {
       const state = stateOf(graph);
+      if (sealed.has(graph)) { ownedStates.add(state); ownedGraphs.add(graph); }
       if (state.invalid[Number(current)]) throw new Error(state.invalid[Number(current)]);
       const roots = [...new Set([root, ...borrowedOwners(value)])];
       for (const id of roots) if (!graph.nodes[id]) throw new Error(`missing-artifact:${id}`);
@@ -188,6 +190,44 @@ export function keyComputer(reg, namespace, program) {
       return {complete: true, key: hashV3(["gogen-entry-key-4", namespace, parts]), parts, reason};
     } catch (error) { return {complete: false, reason: error.message}; }
   };
+  // Saved graph/SCC certificates are immutable. Current answers are strictly
+  // program/round-local; resetting them must never retain a prior selection.
+  const ownedStates = new Set();
+  const originalStateOf = stateOf;
+  compute.round = (next) => {
+    trace = provenanceGraph(reg);
+    evaluate = queryEvaluator(next); answers.clear(); currentIssues.clear();
+    for (const state of ownedStates) {
+      state.nodes[1].clear(); state.groups[1].clear(); state.observations[1].clear(); state.invalid[1] = undefined;
+      // Only saved SCC hashes need to survive. Retaining every per-node query
+      // map for every published round would multiply the large graph's memory.
+      state.nodes[0].clear(); state.observations[0].clear();
+    }
+    // Row materializations expire at the boundary; saved SCC hashes survive.
+    for (const graph of ownedGraphs) if (queryValues.has(graph)) queryValues.set(graph, [new WeakMap(), new WeakMap()]);
+  };
+  const ownedGraphs = new Set();
+  compute.certificates = (graph) => {
+    const state = originalStateOf(graph); ownedStates.add(state); ownedGraphs.add(graph);
+    const certificates = state.index.members.map((_, n) => {
+      try { return {hash: groupValue(graph, n, false, state).hash}; }
+      catch (error) { return {error: error.message}; }
+    });
+    return state.invalid[0] ? certificates.map(() => ({error: state.invalid[0]})) : certificates;
+  };
+  compute.seed = (graph, certificates, unchanged, revision) => {
+    const state = originalStateOf(graph); ownedStates.add(state); ownedGraphs.add(graph);
+    if (certificates.length !== state.index.members.length) return;
+    if (state.seedRevision === revision) return;
+    state.seedRevision = revision;
+    state.nodes[1].clear(); state.groups[1].clear(); currentIssues.clear(); answers.clear();
+    if (queryValues.has(graph)) queryValues.get(graph)[1] = new WeakMap();
+    certificates.forEach((value, n) => {
+      state.groups[0].set(n, value);
+      if (unchanged.has(n)) state.groups[1].set(n, value);
+    });
+  };
+  return compute;
 }
 
 export function mismatchReason(saved, current) {

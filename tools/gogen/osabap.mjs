@@ -16,11 +16,14 @@ import {libraryPath} from "../osd-lib-path.mjs";
 import {repairListPosition} from "./osabap-list.mjs";
 import {prepareF4} from "./osabap-f4.mjs";
 import {assertTableFieldsTyped} from "./frontend-ddic.mjs";
+import {cacheDiagnostic} from "./frontend-cache-diagnostics.mjs";
 
 const here = import.meta.dirname;
 const started = performance.now();
 const phase = (name, since, extra = {}) => {
-  if (process.env.OSABAP_TIMING === "1") console.error(`OSABAP_TIMING ${JSON.stringify({phase: name, ms: Math.round(performance.now() - since), ...extra})}`);
+  const row = {phase: name, round: 0, ms: Math.round(performance.now() - since), ...extra};
+  if (process.env.OSABAP_TIMING === "1") console.error(`OSABAP_TIMING ${JSON.stringify(row)}`);
+  cacheDiagnostic({event: "phase", ...row});
 };
 // node tools/gogen/osabap.mjs [report.prog.abap] [--lib <folder>]...
 // --lib adds a folder of ABAP classes and interfaces the report may use; the
@@ -313,7 +316,10 @@ var appF4 = map[string]bool{${f4Fields.map((name) => `${JSON.stringify(name)}: t
 func newReport(s *abap.Session) *${className} { return New_${className}(s) }
 `);
 
+phase("emission", emitStarted);
+const gofmtStarted = performance.now();
 execFileSync("gofmt", ["-w", dir], {stdio: "inherit"});
+phase("gofmt", gofmtStarted);
 phase("emit", emitStarted);
 const buildStarted = performance.now();
 if (process.env.OSABAP_EMIT_ONLY !== "1") execFileSync("go", ["build", ...(tables.length > 0 ? [] : ["-tags", "nodatabase"]), "-trimpath", "-ldflags=-s -w", "-o", bin, "./cmd/osabap"], {

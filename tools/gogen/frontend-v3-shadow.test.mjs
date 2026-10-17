@@ -11,7 +11,7 @@ import {tmpdir} from "node:os";
 import {compileProgram} from "./frontend.mjs";
 import {classSource, syntheticCorpus} from "./cache-oracle-corpus.mjs";
 import {compareArtifacts, artifactsOf} from "./cache-oracle-capture.mjs";
-import {provenanceOf, recordProvenance, withArtifact, semanticQuery} from "./frontend-provenance.mjs";
+import {provenanceOf, provenanceGraph, beginProvenanceCompile, recordProvenance, withArtifact, semanticQuery} from "./frontend-provenance.mjs";
 import {core} from "./frontend-inventory.mjs";
 import {keyComputer, sealDependencyGraph, hashV3} from "./frontend-v3-key.mjs";
 
@@ -276,3 +276,27 @@ test("an implementation body edit does not invalidate every reader of an interfa
   assert.ok(supplied.frontendCounts.loweredClasses.includes("ZREADER"));
   assert.equal(compareArtifacts(artifactsOf(supplied), artifactsOf(build(dir, names, {cacheDir: undefined}))).equal, true);
 }));
+
+for (const global of [false, true]) test(`key computer refreshes replaced ${global ? "global" : "artifact"} provenance maps between rounds`, () => {
+  const reg = new core.Registry(); reg.addFile(new core.MemoryFile("z.clas.abap", classSource("Z")));
+  const program = {reg, supplied: new Map()}, value = {name: "Z", replay: {ops: []}};
+  const graph = sealDependencyGraph({nodes: {"CLAS Z": {owner: "CLAS Z", digest: "saved", dependencies: [], rows: []}}});
+  let compute, before;
+  recordProvenance(() => {
+    beginProvenanceCompile(reg); parseObserved(reg);
+    compute = keyComputer(reg, "round-map-replacement", program); before = provenanceGraph(reg);
+    assert.equal(compute(graph, "CLAS Z", value, {current:true}).complete, true);
+  });
+  // Internal recording copies exposed state, replacing both provenance maps.
+  recordProvenance(() => {
+    beginProvenanceCompile(reg);
+    const after = provenanceGraph(reg);
+    assert.notEqual(after.global, before.global); assert.notEqual(after.artifacts, before.artifacts);
+    if (global) semanticQuery(reg, "unknown-scan", ["new-round-global"], []);
+    else withArtifact({reg}, reg.getObject("CLAS", "Z"), () =>
+      semanticQuery(reg, "unknown-scan", ["new-round-provider"], []), "syntax");
+    compute.round({...program});
+    const result = compute(graph, "CLAS Z", value, {current:true});
+    assert.equal(result.complete, false); assert.match(result.reason, /current-unknown-scan/);
+  }, {expose:false});
+});

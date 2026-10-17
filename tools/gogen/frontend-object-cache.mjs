@@ -1,5 +1,6 @@
 import {cacheDiagnostic, diagnosticCache} from "./frontend-cache-diagnostics.mjs";
-import {artifactLowering, storedProvenance, inheritStoredProvenance, recordingProvenance, auditedBookkeeping} from "./frontend-provenance.mjs";
+import {timedFrontend} from "./frontend-timing.mjs";
+import {withArtifact, withRole, scopedProvenance, storedProvenance, inheritStoredProvenance, recordingProvenance, auditedBookkeeping} from "./frontend-provenance.mjs";
 import {projectionMatches, readVariants, rememberVariant} from "./frontend-cache-variants.mjs";
 import {recordLowering, replayLowering, replayGuardKey, setProxyCheck} from "./frontend-replay.mjs";
 // Portable class lowerings. The registry still parses/checks normally; replay
@@ -260,12 +261,14 @@ export function objectCache(registry, root, dependencyCache = false) {
         if (entry.valueBytes) entry.value = {...deserialize(entry.valueBytes), ...entry.value};
         // The global content certificate validates IR independently. Load
         // provenance only when an observer will consume it.
-        if (entry.metadata?.graph && recordingProvenance()) {
+        if (entry.metadata?.graph && recordingProvenance() && !scopedProvenance()) {
           const id = entry.metadata.graph;
           if (!provenanceGraphs.has(id)) {
-            const graphBytes = readFileSync(join(root, version, `${id}.provenance`));
-            if (digest(graphBytes) !== id) continue;
-            provenanceGraphs.set(id, deserialize(inflateRawSync(graphBytes)));
+            timedFrontend("graphLoading", () => {
+              const graphBytes = readFileSync(join(root, version, `${id}.provenance`));
+              if (digest(graphBytes) !== id) throw new Error("bad global graph checksum");
+              provenanceGraphs.set(id, deserialize(inflateRawSync(graphBytes)));
+            });
           }
           const nodes = provenanceGraphs.get(id).nodes;
           const own = nodes[owner], lowering = nodes[entry.metadata.root];
@@ -319,6 +322,7 @@ export function objectCache(registry, root, dependencyCache = false) {
       } // Non-portable lowerings compile normally.
     },
     finish(program) {
+      return timedFrontend("finalization", () => {
       if (!pending.length) { diagnostic?.finish(); return; }
       const graph = dependencyGraph(registry, pending.map((e) => e.owner),
         shadow ? pending.flatMap((e) => [...borrowedOwners(deserialize(e.valueBytes))]) : []);
@@ -340,6 +344,7 @@ export function objectCache(registry, root, dependencyCache = false) {
         cache.persist(entry);
       }
       diagnostic?.finish();
+      });
     },
     persist({owner, value, valueBytes, reads, program, metadata, variant}) {
       // Repeated reads can exceed the budget before compaction. A transcript
@@ -365,7 +370,6 @@ export function objectCache(registry, root, dependencyCache = false) {
   return cache;
 }
 
-const current = new Set(["currentClass", "currentOwner", "currentTypes"]);
 /** @param {import("./frontend-session-types.ts").SessionInput} session @param {import("./frontend-session-types.ts").Registry} registry @returns {void} */
 export function prepareDiskSession(session, registry) {
   if (!session) return;
@@ -398,7 +402,7 @@ function suppliedKey(program, owner) {
   return JSON.stringify([...program.supplied].filter(([k]) => k.startsWith(`${owner}=>`)).map(([k, v]) => [k, [...v]]));
 }
 
-export const compileDiskClass = artifactLowering(/** @param {import('./frontend-session-types.ts').LoweringContext} ctx @param {import('./frontend-session-types.ts').ClassObject} obj @param {import('./frontend-session-types.ts').ClassLowering} lower @param {import('./frontend-session-types.ts').CacheSession | null | undefined} session @returns {import('./frontend-session-types.ts').ClassIR} */ function compileDiskClass(ctx, obj, lower, session) {
+export const compileDiskClass = /** @param {import('./frontend-session-types.ts').LoweringContext} ctx @param {import('./frontend-session-types.ts').ClassObject} obj @param {import('./frontend-session-types.ts').ClassLowering} lower @param {import('./frontend-session-types.ts').CacheSession | null | undefined} session @returns {import('./frontend-session-types.ts').ClassIR} */ function compileDiskClass(ctx, obj, lower, session) {
   const program = ctx.program;
   const counts = program.frontendCounts;
   const file = obj.getMainABAPFile();
@@ -413,7 +417,7 @@ export const compileDiskClass = artifactLowering(/** @param {import('./frontend-
   let fromDependency = false;
   let cached = session?.classes.get(key);
   const replay = (entry) => entry && entry.file === file && entry.structure === file.getStructure()
-    && entry.supplied === suppliedKey(program, key) && entry.replay && replayLowering(program, entry.replay, (row) => { miss = row; });
+    && entry.supplied === suppliedKey(program, key) && entry.replay && timedFrontend("replay", () => withRole("scheduling", () => replayLowering(program, entry.replay, (row) => { miss = row; })));
   let valid = replay(cached);
   if (!valid) {
     const stored = session?.disk?.read(owner, key, program);
@@ -431,7 +435,7 @@ export const compileDiskClass = artifactLowering(/** @param {import('./frontend-
     if (!valid && prediction?.row) miss = {reason: prediction.row.reason};
   }
   if (valid) {
-    inheritStoredProvenance(program.reg, obj, cached.provenance);
+    if (!scopedProvenance()) withArtifact(ctx, obj, () => inheritStoredProvenance(program.reg, obj, cached.provenance));
     Object.assign(program, cached.current);
     cacheDiagnostic({event: "class", owner, name: key, hit: true});
     counts.reused++;
@@ -456,7 +460,7 @@ export const compileDiskClass = artifactLowering(/** @param {import('./frontend-
   if (prediction) prediction.row.actuallyLowered = true;
   counts.loweredClasses.push(key);
   session?.classes.delete(key);
-  const run = () => {
+  const run = () => withArtifact(ctx, obj, () => {
     const recorded = session ? recordLowering(program, (tracked) => lower({...ctx, program: tracked}, obj)) : undefined;
     if (recorded && !recorded.replay) {
       cacheDiagnostic({event: "refused", name: key, reason: recorded.refusal});
@@ -465,9 +469,9 @@ export const compileDiskClass = artifactLowering(/** @param {import('./frontend-
     const ir = recorded ? recorded.ir : lower(ctx, obj);
     if (recorded?.replay) session.classes.set(key, {file, structure: file.getStructure(), ir,
       replay: recorded.replay, supplied: suppliedKey(program, key),
-      current: Object.fromEntries([...current].map((k) => [k, program[k]]))});
+      current: {currentClass: program.currentClass, currentOwner: program.currentOwner, currentTypes: program.currentTypes}});
     return ir;
-  };
+  });
   if (!session?.disk) return run();
   const {value, reads} = session.disk.record(run);
   const entry = session.classes.get(key);
@@ -482,4 +486,4 @@ export const compileDiskClass = artifactLowering(/** @param {import('./frontend-
     prediction.row.currentComplete = false; prediction.row.completenessReason = "unrecordable-lowering";
   }
   return value;
-});
+};

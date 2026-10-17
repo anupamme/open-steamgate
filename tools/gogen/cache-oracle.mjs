@@ -156,6 +156,7 @@ export function runOracle({classes = 300, seed = 719, real = false, scenarios,
             loweredClasses: warm.counts.loweredClasses, reusedClasses: warm.counts.reusedClasses,
             lowered: warm.counts.lowered, reused: warm.counts.reused, coldCounts: cold.counts,
             shadowV3: warm.counts.shadowV3,
+            scopedRecording: warm.counts.scopedRecording,
             differences: artifactDifferences(warm, cold), coldChange, ...(expected ? {expectedNoChange: expected} : {}), dependentChanges};
           previousCold = cold;
           rows.push(row); onResult(row); save();

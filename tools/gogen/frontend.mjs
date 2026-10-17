@@ -5,7 +5,7 @@ import {require, abaplint, Rearranger, Nodes, Statements, Structures, Expression
   tokenStr, upper, goName, refuseSorted, sameSort, sameType, composite, byRef, numeric, charlike} from "./frontend-base.mjs";
 export {Unsupported, I, F, INT8, S, sameType, composite, byRef} from "./frontend-base.mjs";
 import {parseObserved, inputOrigin, rttiClassInventory, rttiLocalSupers} from "./frontend-inventory.mjs";
-import {suppliedIndex, suppliedAnswer, suppliedSignature, localDiscovery, lockAnswer, finalOutput, rttiProjection} from "./frontend-queries.mjs";
+import {suppliedIndex, suppliedAnswer, suppliedSignature, localDiscovery, lockAnswer, finalOutput, rttiProjection, selectionHas} from "./frontend-queries.mjs";
 import {enumerateObjects, auditedBookkeeping, withRole, beginProvenanceCompile} from "./frontend-provenance.mjs";
 import {prepareArtifactDigests} from "./frontend-artifact-digests.mjs";
 import {withProvenance, expandProgramSelection, withArtifact, resolvedFunctionModule} from "./frontend-provenance.mjs";
@@ -61,7 +61,7 @@ const HOST_REPLACED = new Set(["ZCL_OSD_ENQ_KERNEL"]);
  */
 // skip(path): a file not to load, for a layered build where a later folder
 // hides an object an earlier one holds (osg-build.mjs; ultra/packs)
-export const compileProgram = withProvenance(/** @param {import("./frontend-session-types.ts").CompileOptions} options */ function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry, session, cacheDir, dependencyCache = false}) {
+export const compileProgram = withProvenance(/** @param {import("./frontend-session-types.ts").CompileOptions} options */ function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry, session, cacheDir, dependencyCache = false, closureContext}) {
   const config = abaplint.Config.getDefault().get();
   config.syntax = {...config.syntax, version: "v758", errorNamespace: "."};
   // only the syntax check and parser errors are read below (parser_error is a
@@ -72,7 +72,6 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   FAE_N = 0;
   PERSIST_LOWERING = !!cacheDir;
   /** @type {import("./frontend-session-types.ts").Registry} */ const reg = registry ?? /** @type {import("./frontend-session-types.ts").Registry} */ (new abaplint.Registry(new abaplint.Config(JSON.stringify(config))));
-  beginProvenanceCompile(reg);
   // Load every file for resolution; lower and report diagnostics for selected objects.
   /** @param {string} fn @returns {string} */ const objName = (fn) => fn.split("/").pop().split(".")[0].toLowerCase().replace(/#/g, "/");
   /** @type {string[]} */ let wanted = objects.map((o) => o.toLowerCase().replace(/#/g, "/"));
@@ -96,8 +95,8 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
     }
   };
   for (const folder of folders) walk(folder);
-  if (!registry) parseObserved(reg);
   /** @type {typeof import("./frontend-inventory.mjs")} */ (require("./frontend-inventory.mjs")).prepareCdsRegistry(reg, ddls, !registry || folders.length > 0, cdsViewsByRegistry);
+  beginProvenanceCompile(reg); if (!registry) parseObserved(reg);
   REG = reg;
   // Load cache code and its module state only for an explicit opt-in.
   // Only the three entry points, not the module namespace, are held.
@@ -124,9 +123,9 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   // abaplint's RAISE syntax checker only accepts ObjectReferenceType, not
   // its generic REF TO object sibling. The dynamic raise path below checks
   // the actual registered object; retain every other syntax diagnostic.
-  const diagnostics = syntaxDiagnostics(reg, (fn) => wanted.includes(objName(fn)), objName, session)
+  const diagnostics = syntaxDiagnostics(reg, (fn) => selectionHas(wanted, objName(fn)), objName, session)
     .filter((d) => !d.message.endsWith("RAISE EXCEPTION, must be object reference, got GenericObjectReferenceType"));
-  prepareArtifactDigests(reg, !!session);
+  prepareArtifactDigests(reg, !!session, closureContext);
   if (diagnostics.length && !tolerant) throw new Error(diagnostics.map((d) => d.message).join("\n"));
   const broken = new Set(diagnostics.map((d) => d.object.toLowerCase()));
   if (broken.size > 0) wanted = wanted.filter((w) => !broken.has(w));
@@ -134,7 +133,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   // A literal CALL FUNCTION is a dependency on its function group. The
   // registry already knows each module's group; include it before signatures
   // are built, including calls made by a module in another group.
-  withRole("scheduling", () => expandProgramSelection(reg, wanted, /** @type {import("./frontend-session-types.ts").SelectionCore} */ ({VirtualPosition: abaplint.VirtualPosition, MacroContent: abaplint.MacroContent, Objects: abaplint.Objects, Visibility: abaplint.Visibility, Statements: abaplint.Statements, Expressions: abaplint.Expressions, Tokens: abaplint.Tokens})));
+  withRole("scheduling", () => expandProgramSelection(reg, wanted, /** @type {import("./frontend-session-types.ts").SelectionCore} */ ({VirtualPosition: abaplint.VirtualPosition, MacroContent: abaplint.MacroContent, Objects: abaplint.Objects, Visibility: abaplint.Visibility, Statements: abaplint.Statements, Expressions: abaplint.Expressions, Tokens: abaplint.Tokens}))); Object.freeze(wanted);
 
   // Eager collections keep first writes inside the replay proxies. Anonymous
   // type identities use a Map so their ordered effects can be replayed too;
@@ -154,7 +153,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   program.localInterfaces = new Map();
   LOCAL_DEFS.clear();
   /** @type {import("./frontend-types.ts").LocalClass[]} */ const localDefs = [];
-  for (const obj of enumerateObjects(reg, "local-dispatch", [], "scheduling", (o) => o instanceof abaplint.Objects.Class && wanted.includes(o.getName().toLowerCase()) && (includeTests || LOCAL_CLASSES.has(upper(o.getName()))))) {
+  for (const obj of enumerateObjects(reg, "local-dispatch", [], "scheduling", (o) => o instanceof abaplint.Objects.Class && selectionHas(wanted, o.getName().toLowerCase()) && (includeTests || LOCAL_CLASSES.has(upper(o.getName()))))) {
     localDiscovery(reg, obj, includeTests === true || (includeTests instanceof Set && includeTests.has(upper(obj.getName()))), () => {
     if (LOCAL_CLASSES.has(upper(obj.getName()))) {
       const top = new abaplint.SyntaxLogic(reg, obj).run().spaghetti.getTop();
@@ -179,7 +178,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   // signatures are known before any class compiles, so a CALL FUNCTION of
   // one of their modules is a call (functionGroupSignatures, callFunction)
   program.functionModules = new Map();
-  const groups = enumerateObjects(reg, "selected-groups", wanted, "scheduling", (o) => o instanceof abaplint.Objects.FunctionGroup && wanted.includes(o.getName().toLowerCase()));
+  const groups = enumerateObjects(reg, "selected-groups", wanted, "scheduling", (o) => o instanceof abaplint.Objects.FunctionGroup && selectionHas(wanted, o.getName().toLowerCase()));
   // a group the front end cannot even read (an error that is not a refusal)
   // is left out whole, named in skipped, and its modules stay refused
   const readable = groups.filter((g) => {
@@ -199,7 +198,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
     PROGRAM = ctx.program; // Global type helpers must use the tracked program too.
     try { return classIr(ctx, obj); } finally { PROGRAM = saved; }
   };
-  for (const obj of enumerateObjects(reg, "selected-classes", wanted, "scheduling", (o) => o instanceof abaplint.Objects.Class && wanted.includes(o.getName().toLowerCase()))) program.classes.push(compile(ctx0, obj, lowerClass, session));
+  for (const obj of enumerateObjects(reg, "selected-classes", wanted, "scheduling", (o) => o instanceof abaplint.Objects.Class && selectionHas(wanted, o.getName().toLowerCase()))) program.classes.push(compile(ctx0, obj, lowerClass, session));
   for (const l of localDefs) program.classes.push(compile(ctx0, l, lowerClass, session));
   for (const g of readable) program.classes.push(withArtifact(ctx0, g, () => functionGroupIr(ctx0, g)));
   // every interface used as a reference type: its methods whose signature
