@@ -1,15 +1,22 @@
 import {definitionFingerprint} from "./frontend-artifact-digests.mjs";
-import {types} from "node:util";
 import {isCaughtIndex} from "./frontend-hierarchy.mjs";
 // Record the program inputs a lowering actually reads and its ordered effects.
 // Registry/file identity is guarded by the enclosing immutable session.
+// Proxies this recorder creates are known here; any other Proxy can only come
+// from the host, which installs its own test (frontend-object-cache). Translated
+// builds have no foreign Proxy objects.
+const ownProxies = new WeakSet();
+let hostProxy = (/** @type {unknown} */ v) => false;
+const isProxy = (/** @type {unknown} */ v) => (typeof v === "object" && v !== null && ownProxies.has(v)) || hostProxy(v);
+/** @param {(v: unknown) => boolean} test */
+export function setProxyCheck(test) { hostProxy = test; }
 const context = new Set(["currentClass", "currentOwner", "currentTypes"]);
 const ignored = new Set(["reg", "frontendCounts"]);
 // Definitions borrow their owning artifact's resolved semantics as well as location.
 const definitions = new Set(["ClassDefinition", "InterfaceDefinition"]);
 const definition = (v) => {
   const proto = Object.getPrototypeOf(v);
-  if (!proto || types.isProxy(proto)) return false;
+  if (!proto || isProxy(proto)) return false;
   const ctor = Object.getOwnPropertyDescriptor(proto, "constructor")?.value;
   return definitions.has(ctor?.name) && typeof v.getName === "function"
     && typeof v.getFilename === "function" && typeof v.getStart === "function";
@@ -41,7 +48,7 @@ function fingerprint(value, registry) {
     if (kind === "string") return ["string", text(v)];
     if (kind === "number") return ["number", Object.is(v, -0) ? "-0" : String(v)];
     if (kind === "bigint") return ["bigint", text(String(v))];
-    if (kind !== "object" || types.isProxy(v)) throw new TypeError("unsupported replay value");
+    if (kind !== "object" || isProxy(v)) throw new TypeError("unsupported replay value");
     if (seen.has(v)) return ["reference", seen.get(v)];
     const id = seen.size;
     seen.set(v, id);
@@ -180,6 +187,7 @@ export function recordLowering(program, lower) {
             return typeof member === "function" ? member.bind(collection) : member;
           },
         }));
+        ownProxies.add(wrappers.get(value));
         return wrappers.get(value);
       }
       return read(key, undefined, [], value);
@@ -196,6 +204,7 @@ export function recordLowering(program, lower) {
       return true;
     },
   });
+  ownProxies.add(proxy);
   const ir = lower(proxy);
   // Nested changes cannot be represented by collection effects. Retry those
   // lowerings, rather than replaying an incomplete mutation transcript.

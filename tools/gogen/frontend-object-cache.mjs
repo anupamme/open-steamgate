@@ -1,7 +1,7 @@
 import {cacheDiagnostic, diagnosticCache} from "./frontend-cache-diagnostics.mjs";
 import {artifactLowering, storedProvenance, inheritStoredProvenance, recordingProvenance, auditedBookkeeping} from "./frontend-provenance.mjs";
 import {projectionMatches, readVariants, rememberVariant} from "./frontend-cache-variants.mjs";
-import {recordLowering, replayLowering, replayGuardKey} from "./frontend-replay.mjs";
+import {recordLowering, replayLowering, replayGuardKey, setProxyCheck} from "./frontend-replay.mjs";
 // Portable class lowerings. The registry still parses/checks normally; replay
 // verifies the program inputs and ordering before applying cached IR effects.
 import {createHash, randomUUID} from "node:crypto";
@@ -11,11 +11,15 @@ import {execFileSync} from "node:child_process";
 import {join, resolve, extname} from "node:path";
 import {serialize, deserialize} from "node:v8";
 import {deflateRawSync, inflateRawSync} from "node:zlib";
+import {types} from "node:util";
 import {dependencyGraph} from "./frontend-provenance-metadata.mjs";
 import {inputSnapshot, cdsInputDigest} from "./frontend-inventory.mjs";
 import {sourceKeys} from "./frontend-source-key.mjs";
 import {shadowCache, borrowedOwners} from "./frontend-v3-shadow.mjs";
 import {hashV3, graphRawFiles} from "./frontend-v3-key.mjs";
+// This module is the cache host, outside the compiler closure: give replay
+// Node's exact Proxy test for values the recorder did not create itself.
+setProxyCheck(types.isProxy);
 
 const here = import.meta.dirname, home = resolve(here, "../..");
 const automatic = new WeakMap();
