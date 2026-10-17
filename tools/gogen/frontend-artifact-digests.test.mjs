@@ -14,6 +14,7 @@ import {compileProgram} from "./frontend.mjs";
 import {artifactDigestsOf, artifactDigestStats, prepareArtifactDigests, definitionFingerprint, canonical} from "./frontend-artifact-digests.mjs";
 import {objectCache} from "./frontend-object-cache.mjs";
 import {cacheDigestMetadata} from "./frontend-artifact-digests-cli.mjs";
+import {borrowedOwners} from "./frontend-v3-key.mjs";
 import {recordLowering, replayLowering} from "./frontend-replay.mjs";
 import {provenanceOf, recordProvenance} from "./frontend-provenance.mjs";
 import {orderedRegistry, artifactsOf, compareArtifacts} from "./cache-oracle-capture.mjs";
@@ -109,6 +110,8 @@ test("borrowed global definition checks semantics at the same coordinates and me
   assert.equal(artifactDigestStats(first), undefined, "uncached compile does no digest work");
   const cached = recordLowering(a, (p) => p.definitions.get("borrowed").getAttributes().getConstants()[0].getValue());
   assert.ok(cached.replay);
+  assert.deepEqual([...borrowedOwners(cached)], ["CLAS ZCL_BORROW_PROVIDER"],
+    "typed fingerprints retain the borrowed definition's dependency owner");
   const stats = artifactDigestStats(first);
   assert.equal(stats.objects, 1, "only the borrowed definition owner was projected");
   for (let i = 0; i < 1000; i++) definitionFingerprint(first.reg, d);

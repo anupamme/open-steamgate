@@ -7,6 +7,8 @@ import {writeGo, reportSymbols} from "./symbols.ts";
 import {execFileSync} from "node:child_process";
 import {copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {basename, dirname, join, resolve} from "node:path";
+import {runnerCacheOptions} from "./runner-cache.mjs";
+import {prepareRunnerCache, finishRunnerCache} from "./runner-cache-recording.mjs";
 import {compileClosedProgram} from "./frontend-closure.mjs";
 import {home} from "./home.mjs";
 import {checkLibPins} from "./lib-pins.mjs";
@@ -15,6 +17,10 @@ import {prepareF4} from "./osabap-f4.mjs";
 import {assertTableFieldsTyped} from "./frontend-ddic.mjs";
 
 const here = import.meta.dirname;
+const started = performance.now();
+const phase = (name, since, extra = {}) => {
+  if (process.env.OSABAP_TIMING === "1") console.error(`OSABAP_TIMING ${JSON.stringify({phase: name, ms: Math.round(performance.now() - since), ...extra})}`);
+};
 // node tools/gogen/osabap.mjs [report.prog.abap] [--lib <folder>]...
 // --lib adds a folder of ABAP classes and interfaces the report may use; the
 // classes, interfaces and dictionary beside the report are always part of it.
@@ -237,12 +243,18 @@ const rttiObjects = readdirSync(join(core, "rtti"))
   .filter((file) => /^cl_abap_.*\.clas\.abap$/i.test(file))
   .map((file) => file.replace(/\.clas\.abap$/i, ""));
 const appRuntime = join(here, "apps", "runtime");
+const frontendStarted = performance.now();
+const folders = [...libs, appRuntime, join(gui, "framework"), join(gui, "src"), core, generated];
+const runnerCache = prepareRunnerCache(folders, runnerCacheOptions(home));
 const program = compileClosedProgram({
-  folders: [...libs, appRuntime, join(gui, "framework"), join(gui, "src"), core, generated],
+  ...runnerCache.options, folders,
   objects: [className.toLowerCase(), ...ownObjects, ...coreObjects, ...hostObjects, ...rttiObjects, "zcl_gg_workbench_utility",
     "cl_gui_control", "cl_gui_container", "cl_gui_cfw", "cl_gui_frontend_services", "zcl_osabap_runtime"],
   skip: (path) => /\.testclasses\.abap$/i.test(path),
 });
+finishRunnerCache(runnerCache.certificate);
+phase("frontend", frontendStarted, {dependencyRecording: runnerCache.options.dependencyCache ?? false, lowered: program.frontendCounts.lowered, reused: program.frontendCounts.reused});
+const emitStarted = performance.now();
 // (kept after rttiObjects: test/dsl-report.mjs evaluates the selections block alone)
 for (const parameter of [...readParams, ...readLists]) {
   const element = selections.find((element) => element.name.toUpperCase() === parameter);
@@ -301,8 +313,12 @@ func newReport(s *abap.Session) *${className} { return New_${className}(s) }
 `);
 
 execFileSync("gofmt", ["-w", dir], {stdio: "inherit"});
-execFileSync("go", ["build", ...(tables.length > 0 ? [] : ["-tags", "nodatabase"]), "-trimpath", "-ldflags=-s -w", "-o", bin, "./cmd/osabap"], {
+phase("emit", emitStarted);
+const buildStarted = performance.now();
+if (process.env.OSABAP_EMIT_ONLY !== "1") execFileSync("go", ["build", ...(tables.length > 0 ? [] : ["-tags", "nodatabase"]), "-trimpath", "-ldflags=-s -w", "-o", bin, "./cmd/osabap"], {
   cwd: join(buildRoot, "go"), stdio: "inherit",
 });
+phase("goBuild", buildStarted, {skipped: process.env.OSABAP_EMIT_ONLY === "1"});
+phase("total", started);
 console.log(`osabap: ${name}, ${program.classes.length} classes, ${program.partial.length} statement stubs` +
   `${tables.length ? `, tables ${tables.join(", ")} (-db)` : ""} -> ${bin}`);

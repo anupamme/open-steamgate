@@ -1,11 +1,13 @@
-// Observational candidates only. Production object-cache read() never consults
-// this namespace. A missing/corrupt/racing index is an ordinary shadow miss.
+// Dependency candidates. Ordinary object-cache lookup remains global; the
+// runner opt-in may replay a complete, revalidated candidate after a miss.
+// Missing/corrupt/racing indexes always fall back to ordinary lowering.
+import {cacheDiagnostic} from "./frontend-cache-diagnostics.mjs";
 import {mkdirSync, readFileSync, writeFileSync, renameSync, rmSync} from "node:fs";
 import {join} from "node:path";
 import {createHash, randomUUID} from "node:crypto";
 import {serialize, deserialize} from "node:v8";
 import {deflateRawSync, inflateRawSync} from "node:zlib";
-import {keyComputer, hashV3, mismatchReason, borrowedOwners} from "./frontend-v3-key.mjs";
+import {keyComputer, hashV3, mismatchReason, borrowedOwners, sealDependencyGraph} from "./frontend-v3-key.mjs";
 import {recordLowering, replayLowering, copyReplayProgram} from "./frontend-replay.mjs";
 import {auditedBookkeeping, auditBuiltArtifacts} from "./frontend-provenance.mjs";
 const checksum = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -45,7 +47,7 @@ export function shadowCache(reg, root, namespace, portable) {
     if (!graphs.has(id)) {
       const bytes = readFileSync(join(dir(), `${id}.provenance`));
       if (checksum(bytes) !== id) throw new Error("bad v3 graph checksum");
-      graphs.set(id, deserialize(inflateRawSync(bytes)));
+      graphs.set(id, sealDependencyGraph(deserialize(inflateRawSync(bytes))));
     }
     return graphs.get(id);
   };
@@ -82,10 +84,15 @@ export function shadowCache(reg, root, namespace, portable) {
           if (auditBuiltArtifacts(reg)) { refuse("audit-built-artifact"); break; }
           if (!current.complete) { refuse(current.reason); continue; }
           if (current.key !== key) { refuse(mismatchReason(saved, current)); continue; }
-          const trial = copyReplayProgram(program);
+          // Ordered replay already forks every collection it writes. A shallow
+          // trial isolates its effects without copying all growing maps first.
+          const trial = {...program};
           if (value.supplied !== suppliedGuard(program, name) || !auditedBookkeeping("v3-shadow-replay-validation", () => replayLowering(trial, value.replay))) {
             refuse("replay-refused"); continue;
           }
+          const own = graph.nodes[owner], lowering = graph.nodes[candidate.root];
+          value.provenance = {rows: [...own.rows, ...lowering.rows],
+            edges: [...new Set([...own.dependencies, ...lowering.dependencies].filter((k) => k !== owner))]};
           row.wouldReuseV3 = true; row.currentComplete = true; row.reason = "would-reuse-v3"; row.key = key;
           return {row, value, trial};
         }
@@ -116,6 +123,7 @@ export function shadowCache(reg, root, namespace, portable) {
       }
     },
     finish(graph, entries, program) {
+      sealDependencyGraph(graph);
       begin(program, false);
       if (auditBuiltArtifacts(reg)) {
         stats.persistenceRefused = "audit-built-artifact";
@@ -130,6 +138,7 @@ export function shadowCache(reg, root, namespace, portable) {
       for (const entry of entries) {
         const value = deserialize(entry.valueBytes), root = `lowering:${entry.owner}`;
         const result = computer(program)(graph, root, value);
+        cacheDiagnostic({event: "dependency-key", name: value.name, complete: result.complete, reason: result.reason, key: result.key});
         const row = stats.entries.findLast((r) => r.name === value.name);
         if (row) { row.currentComplete = result.complete; row.completenessReason = result.reason; }
         if (!result.complete) continue;

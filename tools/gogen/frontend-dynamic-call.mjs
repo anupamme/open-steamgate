@@ -60,6 +60,15 @@ export function dynamicStaticCall(node, ctx, {sourceOperand, source, convert, lv
  */
 export function prepareDynamicStatics(program, {defaultValue, aliasTarget}) {
   program.dynamicDispatch = [];
+  const classes = new Map(), statics = new Map();
+  for (const cls of program.classes) {
+    if (classes.has(cls.name)) continue;
+    classes.set(cls.name, cls);
+    const methods = new Map();
+    for (const method of [...cls.methods, ...cls.stubs])
+      if (method.static && !methods.has(method.name)) methods.set(method.name, method);
+    statics.set(cls.name, methods);
+  }
   for (const cls of program.classes) for (const method of program.dynStatics) {
     const name = aliasTarget(program.reg, cls.name, method) ?? method;
     let owner = cls.name;
@@ -67,8 +76,8 @@ export function prepareDynamicStatics(program, {defaultValue, aliasTarget}) {
     const seen = new Set();
     while (owner && !seen.has(owner)) {
       seen.add(owner);
-      const c = program.classes.find((c) => c.name === owner);
-      impl = [...(c?.methods ?? []), ...(c?.stubs ?? [])].find(/** @param {import("./frontend-types.ts").StaticMethodIdentity} m */ (m) => m.name === name && m.static);
+      const c = classes.get(owner);
+      impl = statics.get(owner)?.get(name);
       if (impl) break;
       owner = c?.super;
     }

@@ -44,9 +44,13 @@ applying effects; there is no source-text independence heuristic. Keys guard the
 complete ordered registry source set and configuration because parsed definitions
 can incorporate macro, INCLUDE and type-pool inputs resolved before lowering.
 Any registry source edit or addition therefore invalidates all disk entries.
-Keys also include actual registry lookups, the git tree of `tools/gogen`, OSG HEAD,
-actual generator sources and installed toolchain code. Whole-closure readers retain
-a variant per selection; membership-only readers can share entries across shards
+Keys also include actual registry lookups, tracked and untracked non-ignored
+production sources under `tools/`, lockfiles and installed toolchain code.
+Tests (`*.test.*`), benches (`*-bench.*`), `testdata*` directories and generated
+outputs are excluded. When Git fails, lists no tool files, or reports that home
+is inside another repository, a full directory walk retains the filename and
+generated-output exclusions. Repository commits alone do not change tool identity.
+Whole-closure readers retain a variant per selection; membership-only readers can share entries across shards
 with identical registry inputs. Local definitions and FOR ALL ENTRIES numbering
 are tracked program inputs too. Unsupported transcripts, nested mutations and
 nonportable abaplint identities lower normally. Parsing, type checking and emit
@@ -54,6 +58,28 @@ remain ordinary work. Missing/corrupt/unwritable entries fall back to lowering.
 Entries are atomically replaced; the caller owns cache cleanup.
 `program.frontendCounts` reports lowered/reused classes (including session reuse).
 Cold and warm emission must match byte for byte.
+
+Both recording and persistence compact reads with `replayGuardKey`, which tags
+scalar arguments by type and preserves undefined, null, nonfinite numbers and
+signed zero. Object arguments retain every guard. Guard values use recursive
+type tags, stable dictionary keys, ordered Map/Set entries and explicit references
+for sharing/cycles. Undefined, null, NaN, signed zero, bigint and Date values stay
+distinct. Unsupported prototypes, proxies, symbols, functions and accessors
+refuse replay without invoking user serialization. An artifact getter with no
+known registry during lowering records `unowned-artifact-read`; its dependency
+entry is incomplete and cannot be reused through the dependency cache.
+
+Argument-key audit: `frontend-queries.mjs` uses JSON only for the fixed
+`[className: string, includeTests: boolean]` local-discovery tuple;
+`frontend-hierarchy.mjs` uses ordered class-name string arrays. Supplied/selection
+keys contain method/parameter-name strings. The provenance recorder normalizes
+query arguments (undefined becomes null by contract); projection hashes contain
+provider/parameter names or boolean existence answers. These are semantic query
+contracts, rather than arbitrary JavaScript lookup arguments. V3 hashes of replay
+guards index candidates; the ordered `replayLowering` check still validates every
+candidate before reuse. `frontend-cache-variants.mjs` uses the same replay
+validator for caught-index answers. Other JSON encodings serialize source/config/IR
+data or diagnostics, rather than lookup-argument keys.
 
 Objects measurement (2026-10-13, 2,522 source files, two closure rounds):
 three serial runs per mode, alternating main and branch, same driver/input and

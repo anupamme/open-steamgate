@@ -3,22 +3,24 @@ import type {MethodSignature, FrontendParam} from './frontend-types.ts';
 import type {Registry, InputSnapshot, LockDescriptor} from './frontend-session-types.ts';
 
 export interface ChainEntry {reg: Registry; chain: string[]; done: boolean}
-export interface CaughtEntry {size: number; own: string[]}
 export interface SuppliedIndex {
   reg: Registry;
   providers: Map<string, Set<string>>;
+  providerLists: Map<string, readonly string[]>;
   declarations: Map<string, string>;
 }
 export interface QueryProgram {
   reg: Registry;
   supplied: Map<string, Set<string>>;
+  caught?: Map<string, boolean>;
   lockObjects?: Map<string, LockDescriptor>;
 }
 export interface QueryContext {reg: Registry; program: QueryProgram}
 export interface CurrentQueryAnswer {
-  result: (string | number | boolean | null | undefined)[];
-  providers: string[];
+  result: readonly (string | number | boolean | null | undefined)[];
+  providers: readonly string[];
   parameters?: string[];
+  complete?: boolean;
   descriptor?: LockDescriptor | 'MISSING';
 }
 export interface Replacement {

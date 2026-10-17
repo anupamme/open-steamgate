@@ -29,9 +29,21 @@ const exceptions = {
   "tools/gogen/frontend-object-cache.mjs": {
     "node:crypto": ["createHash", "randomUUID"], "node:module": ["createRequire"],
     "node:fs": ["existsSync", "mkdirSync", "readFileSync", "readdirSync", "renameSync", "rmSync", "statSync", "utimesSync", "writeFileSync"],
-    "node:path": ["join", "resolve"], "node:v8": ["serialize", "deserialize"],
+    "node:path": ["join", "resolve", "extname"], "node:v8": ["serialize", "deserialize"],
     "node:zlib": ["deflateRawSync", "inflateRawSync"],
+    // Tool identity asks git for tracked and untracked tool sources.
+    "node:child_process": ["execFileSync"],
+    // Supplies replay its Proxy test; frontend-replay itself imports no builtin.
+    "node:util": ["types"],
   },
+  // Same host-module rule as the object cache: runner-cache diagnostics, variant
+  // indexes, the query-contract digest and guard replay only run with a cacheDir.
+  "tools/gogen/frontend-cache-diagnostics.mjs": {
+    "node:fs": ["appendFileSync", "mkdirSync", "readFileSync", "renameSync", "rmSync", "writeFileSync"],
+    "node:path": ["join"], "node:crypto": ["randomUUID"],
+  },
+  "tools/gogen/frontend-cache-variants.mjs": {"node:fs": ["readFileSync", "writeFileSync", "renameSync", "rmSync"], "node:crypto": ["randomUUID"]},
+  "tools/gogen/frontend-query-contract.mjs": {"node:crypto": ["createHash"]},
   "tools/gogen/frontend-provenance.mjs": {"node:module": ["createRequire"]},
   "tools/gogen/frontend-provenance-recorder.mjs": {
     "node:module": ["createRequire"], "node:url": ["pathToFileURL"],

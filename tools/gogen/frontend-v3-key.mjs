@@ -1,10 +1,25 @@
+import {projectedQuery, projectionAnswer} from "./frontend-query-contract.mjs";
 // Schema v3 semantic keys. Only ARTIFACT closure nodes enter this format;
 // source words, scheduling inventories and final-output dispatch do not.
+import {graphComponents} from "./frontend-components.mjs";
+import {cacheDiagnostic} from "./frontend-cache-diagnostics.mjs";
 import {createHash} from "node:crypto";
 import {artifactDigestOf, canonical} from "./frontend-artifact-digests.mjs";
 import {inputSnapshot} from "./frontend-inventory.mjs";
 import {querySpec, queryAnswer, supportedQuery, queryEvaluator} from "./frontend-v3-queries.mjs";
 import {auditedBookkeeping, provenanceGraph} from "./frontend-provenance.mjs";
+// Cache-owned graphs are complete and never mutated after publication. Public
+// keyComputer callers may supply mutable graphs; they are recomputed each call.
+const sealed = new WeakSet();
+export function sealDependencyGraph(graph) {
+  const seen = new Set();
+  for (const node of Object.values(graph.nodes)) for (const row of node.rows) if (projectedQuery(row)) {
+    for (const values of [row.result, row.providers]) if (Array.isArray(values) && !seen.has(values)) {
+      seen.add(values); Object.freeze(values);
+    }
+  }
+  sealed.add(graph); return graph;
+}
 export const encoded = (v) => JSON.stringify(canonical(v));
 export const hashV3 = (v) => createHash("sha256").update(encoded(v)).digest("hex");
 export const replayGuards = (value) => value.replay.ops.filter((op) => ["read", "measure"].includes(op.kind));
@@ -58,7 +73,7 @@ export function keyComputer(reg, namespace, program) {
       answer = answers.get(id);
     }
     const providers = [], rawFiles = [];
-    for (const identity of [...answer.result, ...answer.providers ?? []]) {
+    for (const identity of projectedQuery(q) ? [] : [...answer.result, ...answer.providers ?? []]) {
       if (typeof identity !== "string") continue;
       if (inventory.objects.has(identity) || graph.nodes[identity]) {
         const d = digest(identity, current, graph);
@@ -70,68 +85,113 @@ export function keyComputer(reg, namespace, program) {
         rawFiles.push([identity, d]); providers.push(["raw-file", identity, d]);
       } else if (q.kind === "getFileByName" && answer.result.length) throw new Error(`missing-raw-hash:${identity}`);
     }
-    const result = {spec, id, rawFiles, hash: hashV3(["gogen-query-answer-3", spec,
-      answer.result.length ? answer : {...answer, missing: "MISSING"}, providers])};
+    const result = {spec, id, rawFiles, hash: projectedQuery(q)
+      ? hashV3(["gogen-projected-answer-4", spec, projectionAnswer(answer)])
+      : hashV3(["gogen-query-answer-3", spec, answer.result.length ? answer : {...answer, missing: "MISSING"}, providers])};
     cache.set(q, result);
     return result;
   };
-  return (graph, root, value, {current = false} = {}) => {
-    const dependencies = new Map(), queries = new Map(), rawFiles = new Map(), seen = new Set();
-    const fail = (reason) => { throw new Error(reason); };
-    const visit = (id) => {
-      if (seen.has(id)) return;
-      seen.add(id);
-      const node = graph.nodes[id];
-      if (!node) fail(`missing-artifact:${id}`);
-      if (drop?.test(node.owner)) return;
-      if (current && fault !== "unknown-complete") {
-        if (!currentIssues.has(node.owner)) {
-          const rows = [...trace?.global.queries.values() ?? [], ...trace?.artifacts.get(node.owner)?.queries.values() ?? []];
-          const unknown = rows.find((q) => q.role === "artifact" && q.kind === "unknown-scan");
-          currentIssues.set(node.owner, unknown ? `current-unknown-scan:${node.owner}:${unknown.args.join("/")}` : undefined);
-        }
-        if (currentIssues.get(node.owner)) fail(currentIssues.get(node.owner));
+  const states = new WeakMap();
+  const firstReason = (a, b) => a === undefined ? b : b === undefined ? a : a < b ? a : b;
+  const stateOf = (graph) => {
+    if (sealed.has(graph) && states.has(graph)) return states.get(graph);
+    const index = graphComponents(graph.nodes, drop);
+    const state = {index, nodes: [new Map(), new Map()], groups: [new Map(), new Map()],
+      observations: [new Map(), new Map()], invalid: [undefined, undefined]};
+    if (sealed.has(graph)) {
+      states.set(graph, state);
+      cacheDiagnostic({event: "dependency-components", nodes: Object.keys(graph.nodes).length,
+        components: index.members.length, largest: Math.max(0, ...index.members.map((m) => m.length))});
+    }
+    return state;
+  };
+  const nodeValue = (graph, id, current, state) => {
+    const memo = state.nodes[Number(current)];
+    if (memo.has(id)) return memo.get(id);
+    const node = graph.nodes[id];
+    if (!node) throw new Error(`missing-artifact:${id}`);
+    if (drop?.test(node.owner)) return {hash: hashV3(["dropped"]), queries: new Map(), rawFiles: new Map()};
+    if (current && fault !== "unknown-complete") {
+      if (!currentIssues.has(node.owner)) {
+        const rows = [...trace?.global.queries.values() ?? [], ...trace?.artifacts.get(node.owner)?.queries.values() ?? []];
+        const unknown = rows.find((q) => q.role === "artifact" && q.kind === "unknown-scan");
+        currentIssues.set(node.owner, unknown ? `current-unknown-scan:${node.owner}:${unknown.args.join("/")}` : undefined);
       }
-      const d = digest(node.owner, current, graph);
-      if (!d) fail(`missing-digest:${node.owner}`);
-      dependencies.set(node.owner, d);
-      for (const q of node.rows) {
-        if (q.role !== "artifact") continue;
-        if (fault === "unknown-complete" && q.kind === "unknown-scan") continue;
-        if (!supportedQuery(q)) fail(`${q.kind === "unknown-scan" ? "unknown-scan" : "unsupported-query"}:${q.args.join("/") || q.kind}`);
-        if (fault === "ignore-miss" && !q.result.length) continue;
-        const resolved = queryValue(graph, q, current);
-        if (queries.has(resolved.id) && queries.get(resolved.id).hash !== resolved.hash) fail(`unstable-query:${q.kind}`);
-        queries.set(resolved.id, resolved);
-        for (const [name, d] of resolved.rawFiles) rawFiles.set(name, d);
+      if (currentIssues.get(node.owner)) throw new Error(currentIssues.get(node.owner));
+    }
+    const d = digest(node.owner, current, graph);
+    if (!d) throw new Error(`missing-digest:${node.owner}`);
+    const queries = new Map(), rawFiles = new Map();
+    for (const q of node.rows) {
+      if (q.role !== "artifact" || fault === "unknown-complete" && q.kind === "unknown-scan") continue;
+      if (!supportedQuery(q)) throw new Error(`${q.kind === "unknown-scan" ? "unknown-scan" : "unsupported-query"}:${q.args.join("/") || q.kind}`);
+      if (fault === "ignore-miss" && !q.result.length) continue;
+      const resolved = queryValue(graph, q, current), observed = state.observations[Number(current)];
+      if (observed.has(resolved.id) && observed.get(resolved.id) !== resolved.hash) {
+        state.invalid[Number(current)] = `unstable-query:${q.kind}`;
+        throw new Error(state.invalid[Number(current)]);
       }
-      for (const edge of node.dependencies) visit(edge);
-    };
+      observed.set(resolved.id, resolved.hash); queries.set(resolved.id, resolved);
+      for (const [name, hash] of resolved.rawFiles) rawFiles.set(name, hash);
+    }
+    for (const edge of node.dependencies) if (!graph.nodes[edge]) throw new Error(`missing-artifact:${edge}`);
+    // Stream node tuples: large shared closures must not become a giant JSON
+    // tree again for every consumer. Sorted query IDs bind the same observations.
+    const hash = createHash("sha256").update(encoded(["gogen-component-node-4", id, node.owner, d]));
+    for (const [key, value] of [...queries].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0))
+      hash.update(encoded([key, value.hash]));
+    const result = {hash: hash.digest("hex"), digest: d, queries, rawFiles};
+    memo.set(id, result); return result;
+  };
+  const groupValue = (graph, number, current, state) => {
+    const memo = state.groups[Number(current)];
+    if (memo.has(number)) {
+      const value = memo.get(number); if (value.error) throw new Error(value.error); return value;
+    }
     try {
-      visit(root);
-      for (const owner of borrowedOwners(value)) {
-        visit(owner);
+      const children = state.index.dependencies[number].map((n) => groupValue(graph, n, current, state));
+      const nodes = state.index.members[number].map((id) => [id, nodeValue(graph, id, current, state)]);
+      let dependencyReason, rawReason, queryReason, queryId;
+      if (current) for (const [id, now] of nodes) {
+        const before = nodeValue(graph, id, false, state), owner = graph.nodes[id].owner;
+        if (before.digest !== now.digest) dependencyReason = firstReason(dependencyReason, `dependency:${owner}`);
+        for (const [name, hash] of before.rawFiles) if (now.rawFiles.get(name) !== hash) rawReason = firstReason(rawReason, `raw-file:${name}`);
+        for (const [key, q] of before.queries) if (now.queries.get(key)?.hash !== q.hash && (queryId === undefined || key < queryId)) {
+          queryId = key; queryReason = `query:${q.spec.kind}(${q.spec.args.join(",")})`;
+        }
       }
-      const sort = (m) => [...m].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+      for (const child of children) {
+        dependencyReason = firstReason(dependencyReason, child.dependencyReason);
+        rawReason = firstReason(rawReason, child.rawReason);
+        if (child.queryId !== undefined && (queryId === undefined || child.queryId < queryId)) {
+          queryId = child.queryId; queryReason = child.queryReason;
+        }
+      }
+      const result = {hash: hashV3(["gogen-dependency-component-4", nodes.map(([id, n]) => [id, n.hash]),
+        children.map((c) => c.hash).sort()]), dependencyReason, rawReason, queryReason, queryId};
+      memo.set(number, result); return result;
+    } catch (error) { memo.set(number, {error: error.message}); throw error; }
+  };
+  return (graph, root, value, {current = false} = {}) => {
+    try {
+      const state = stateOf(graph);
+      if (state.invalid[Number(current)]) throw new Error(state.invalid[Number(current)]);
+      const roots = [...new Set([root, ...borrowedOwners(value)])];
+      for (const id of roots) if (!graph.nodes[id]) throw new Error(`missing-artifact:${id}`);
+      const groups = [...new Set(roots.map((id) => state.index.component.get(id)))].map((n) => groupValue(graph, n, current, state));
       if (!guards.has(value)) guards.set(value, hashV3(["gogen-replay-guards-3", replayGuards(value)]));
-      const parts = {owner: graph.nodes[root].owner, name: value.name,
-        dependencies: sort(dependencies), rawFiles: sort(rawFiles), queries: sort(queries).map(([id, v]) => [id, v.hash]),
+      const parts = {owner: graph.nodes[root].owner, name: value.name, components: groups.map((g) => g.hash).sort(),
         supplied: value.supplied ?? null, guards: guards.get(value)};
-      return {complete: true, key: hashV3(["gogen-entry-key-3", namespace, parts]), parts, queries};
+      const reason = groups.reduce((r, g) => firstReason(r, g.dependencyReason), undefined)
+        ?? groups.reduce((r, g) => firstReason(r, g.rawReason), undefined)
+        ?? groups.filter((g) => g.queryId !== undefined).sort((a, b) => a.queryId < b.queryId ? -1 : a.queryId > b.queryId ? 1 : 0)[0]?.queryReason;
+      return {complete: true, key: hashV3(["gogen-entry-key-4", namespace, parts]), parts, reason};
     } catch (error) { return {complete: false, reason: error.message}; }
   };
 }
 
 export function mismatchReason(saved, current) {
-  const before = saved.parts, after = current.parts;
-  for (const kind of ["dependencies", "rawFiles"]) {
-    const now = new Map(after[kind]);
-    for (const [id, digest] of before[kind]) if (now.get(id) !== digest) return `${kind === "dependencies" ? "dependency" : "raw-file"}:${id}`;
-  }
-  for (let i = 0; i < before.queries.length; i++) if (encoded(before.queries[i]) !== encoded(after.queries[i])) {
-    const q = saved.queries.get(before.queries[i][0]).spec; return `query:${q.kind}(${q.args.join(",")})`;
-  }
-  return "key-mismatch";
+  return current.reason ?? "key-mismatch";
 }
 
 export function graphRawFiles(graph, reg) {

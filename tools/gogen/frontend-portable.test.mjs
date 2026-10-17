@@ -8,9 +8,39 @@ import {createRequire} from "node:module";
 import {serialize, deserialize} from "node:v8";
 import {deflateRawSync, inflateRawSync} from "node:zlib";
 import {portable, compactLowering, objectCache, compileDiskClass} from "./frontend-object-cache.mjs";
-import {recordLowering} from "./frontend-replay.mjs";
+import {recordLowering, replayLowering} from "./frontend-replay.mjs";
+
+import {recordProvenance} from "./frontend-provenance.mjs";
+import {core} from "./frontend-inventory.mjs";
 
 const budget = 1 << 20;
+
+for (const recording of [false, true]) test(`typed lookup guards survive compaction and disk persistence (recording=${recording})`, () => {
+  const root = mkdtempSync(join(tmpdir(), "gogen-typed-persistence-"));
+  const run = () => {
+    const registry = new core.Registry();
+    const disk = objectCache(registry, root);
+    const lower = (p) => [p.m.get(null), p.m.get(undefined)].join(",");
+    const program = (second) => ({reg: registry, wanted: new Set(["REPEATED"]), m: new Map([[null, "A"], [undefined, second]])});
+    const first = program("A"), recorded = recordLowering(first, lower);
+    assert.equal(recorded.replay.ops.length, 2);
+    const compacted = compactLowering(recorded);
+    disk.write("CLAS REPEATED", {name: "REPEATED", ...recorded}, [], first);
+    disk.finish(first);
+    const stored = objectCache(registry, root).read("CLAS REPEATED", "REPEATED", program("A"));
+    assert.ok(stored, "read a fresh disk-cache instance");
+    assert.equal(replayLowering(program("A"), stored.replay), true);
+    const edited = program("B");
+    assert.equal(lower(edited), "A,B");
+    assert.equal(stored.ir, "A,A");
+    assert.equal(replayLowering(edited, stored.replay), false, "disk replay must reject the edited undefined-key answer");
+    assert.equal(stored.replay.ops.length, 2);
+    assert.equal(compacted.replay.ops.length, 2);
+    assert.equal(replayLowering(program("B"), compacted.replay), false);
+  };
+  try { if (recording) recordProvenance(run); else run(); }
+  finally { rmSync(root, {recursive: true, force: true}); }
+});
 
 test("portable retains primitive, prototype, Map-key and cyclic/shared verdicts", () => {
   const cycle = {}; cycle.self = cycle;

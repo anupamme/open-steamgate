@@ -7,7 +7,7 @@ import {join} from "node:path";
 import {tmpdir} from "node:os";
 import {core, freshRegistry} from "./frontend-inventory.mjs";
 import {classSource} from "./cache-oracle-corpus.mjs";
-import {recordProvenance, auditedBookkeeping, provenanceOf, semanticQuery, beginProvenanceCompile} from "./frontend-provenance.mjs";
+import {recordProvenance, auditedBookkeeping, provenanceOf, semanticQuery, beginProvenanceCompile, enumerateObjects} from "./frontend-provenance.mjs";
 import {prepareArtifactDigests, artifactDigestOf, artifactDigestStats} from "./frontend-artifact-digests.mjs";
 import {dependencyGraph} from "./frontend-provenance-metadata.mjs";
 import {objectCache, compileDiskClass} from "./frontend-object-cache.mjs";
@@ -66,6 +66,40 @@ for (const validate of [false, true]) test(`lazy type-pool C1–C4 refuses inter
   assert.equal(c4.row.wouldReuseV3, false);
   assert.equal(c4.row.reason, "dependency:INTF ZIF_TYPES");
   assert.equal(c4.ir.value, 7); assert.equal(c4.report.disagreements, 0);
+}));
+
+test("an artifact borrowed outside recording refuses dependency reuse after its definition changes", () => scratch(false, (dir) => {
+  const build = (type) => {
+    // Build trusted artifacts in an earlier recording, then obtain the provider
+    // through the raw inventory while hooks are absent. A new recorder has no
+    // owners entry for it, even though the registry's provenance is complete.
+    const reg = recordProvenance(() => {
+      const reg = registry({"zreader.clas.abap": classSource("ZREADER"),
+        "zprovider.clas.abap": classSource("ZPROVIDER").replace("TYPE i", `TYPE ${type}`)});
+      reg.findIssues(); return reg;
+    });
+    const provider = enumerateObjects(reg, "test-provider").find((o) => o.getName() === "ZPROVIDER");
+    return recordProvenance(() => {
+      beginProvenanceCompile(reg); prepareArtifactDigests(reg);
+      const p = {reg, supplied: new Map(), wanted: new Set(["ZREADER"]),
+        frontendCounts: {reused: 0, lowered: 0, reusedClasses: [], loweredClasses: []}};
+      const disk = auditedBookkeeping("test-cache-inventory", () => objectCache(reg, dir, true));
+      disk.begin();
+      const ir = compileDiskClass({reg, program: p}, reg.getObject("CLAS", "ZREADER"), () => ({name: "ZREADER",
+        value: provider.getDefinition().getMethodDefinitions().getByName("RUN").getParameters().getReturning().getType().constructor.name}),
+      {disk, classes: new Map()});
+      disk.finish(p);
+      return {ir, counts: p.frontendCounts, row: p.frontendCounts.shadowV3.entries[0], manifest: provenanceOf(reg)};
+    });
+  };
+  const first = build("i"), edited = build("int8");
+  assert.notEqual(edited.ir.value, first.ir.value, "the edited definition changes lowering instead of reusing stale IR");
+  assert.ok(first.manifest.get("CLAS ZREADER").unknownScans.some((q) => q.args[0] === "unowned-artifact-read"));
+  assert.equal(first.row.currentComplete, false);
+  assert.match(first.row.completenessReason, /unknown-scan:unowned-artifact-read/);
+  assert.equal(edited.row.wouldReuseV3, false);
+  assert.equal(edited.counts.reused, 0);
+  assert.equal(edited.counts.lowered, 1);
 }));
 
 test("same corpus saves identical graph after different digest probe orders", () => {

@@ -118,6 +118,7 @@ export interface CacheDisk {
   shadow?: CacheShadow;
 }
 export interface CacheSession {
+  dependencyCache?: boolean;
   // Preparation clears all own fields, including disk-cache extensions.
   [key: string]: unknown;
   registry: Registry;
@@ -130,7 +131,7 @@ export interface CacheSession {
 export type SessionInput = Partial<CacheSession> | null | undefined;
 // The three disk-cache entry points compileProgram holds when cacheDir is set.
 export interface DiskFrontend {
-  cacheSession(session: SessionInput, registry: Registry, cacheDir: string | undefined): SessionInput;
+  cacheSession(session: SessionInput, registry: Registry, cacheDir: string | undefined, dependencyCache?: boolean): SessionInput;
   prepareDiskSession(session: SessionInput, registry: Registry): void;
   compileDiskClass(ctx: LoweringContext, obj: ClassObject, lower: ClassLowering, session: CacheSession | null | undefined): ClassIR;
 }
@@ -143,6 +144,7 @@ export interface CompileOptions {
   [key: string]: unknown;
   provenance?: boolean;
   cacheDir?: string;
+  dependencyCache?: boolean;
   registry?: Registry;
   session?: Partial<CacheSession> | null;
 }
@@ -151,11 +153,11 @@ export type Role = 'artifact' | 'scheduling' | 'final-output';
 export type QueryScalar = string | number | boolean | null | undefined;
 export interface QueryBase {
   args: QueryScalar[];
-  result: QueryScalar[];
+  result: readonly QueryScalar[];
   role?: Role;
   phase?: string;
   artifact?: string;
-  providers?: string[];
+  providers?: readonly string[];
   scan?: string;
   complete?: boolean;
   policy?: string;
@@ -184,7 +186,7 @@ export type ObservationKind =
   | 'supplied-index' | 'locals' | 'local-dispatch' | 'selected-groups'
   | 'selected-classes' | 'ownership-dispatch' | 'table-inventory'
   | 'lock-inventory' | 'rtti-inventory' | 'rtti' | 'exception-supers'
-  | 'tables' | 'locks';
+  | 'tables' | 'locks' | 'caught';
 export type Query = QueryBase & (
   | {kind: ObservationKind}
   | {kind: 'supplied'; parameters: string[]}
@@ -197,6 +199,7 @@ export interface QueryEntry {queries: Map<string, QueryRow>; edges: Set<string>}
 // Leaves contain true; intermediate nodes are Maps indexed by scalar tuples.
 export interface QueryTrie extends Map<QueryScalar, QueryTrie | true> {}
 export interface RegistryState {
+  unknownVersion: number;
   reg: Registry;
   config: ReturnType<Registry['getConfig']> | undefined;
   entries: Map<string, QueryEntry>;
@@ -232,6 +235,8 @@ export interface StoredProvenance {rows: QueryRow[]; edges: string[]}
 export interface Manifest {hits: QueryRow[]; misses: QueryRow[]; scans: QueryRow[]; unknownScans: QueryRow[]}
 export type ProvenanceInput = Registry | {reg?: Registry; registry?: Registry};
 export interface ProvenanceGraph {
+  // Observer-only safety memo revision; never serialized or hashed as input.
+  unknownVersion: number;
   artifacts: Map<string, QueryEntry>;
   lowerings: Map<string, QueryEntry>;
   global: QueryEntry;

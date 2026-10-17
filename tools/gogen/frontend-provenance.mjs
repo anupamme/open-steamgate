@@ -23,7 +23,7 @@ function loadRecorder() {
       finishInputs(program.reg);
       return program;
     };
-    /** @type {boolean | string | undefined} */ const record = expose || (options.cacheDir && options.provenance !== false);
+    /** @type {boolean | string | undefined} */ const record = expose || (options.cacheDir && (options.provenance !== false || options.dependencyCache === true));
     return record ? recordProvenance(run, {expose}) : run();
   };
 }
@@ -135,7 +135,7 @@ function loadRecorder() {
   return recorder ? recorder.enumerateObjects(reg, kind, args, role, predicate) : [...core.Registry.prototype.getObjects.call(reg)].filter(predicate);
 }
 
-/** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').Query['kind']} kind @param {import('./frontend-session-types.ts').QueryScalar[]} args @param {import('./frontend-session-types.ts').QueryScalar[]} result @param {Partial<import('./frontend-session-types.ts').Query>} details @returns {void} */ export function semanticQuery(reg, kind, args, result, details = {}) {
+/** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').Query['kind']} kind @param {import('./frontend-session-types.ts').QueryScalar[]} args @param {readonly import('./frontend-session-types.ts').QueryScalar[]} result @param {Partial<import('./frontend-session-types.ts').Query>} details @returns {void} */ export function semanticQuery(reg, kind, args, result, details = {}) {
   recorder?.semanticQuery(reg, kind, args, result, details);
 }
 

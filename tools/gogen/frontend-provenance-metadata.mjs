@@ -1,3 +1,4 @@
+import {projectedQuery} from "./frontend-query-contract.mjs";
 // Store the artifact graph once. Entries reference their own root; inspection
 // alone expands closures. No class serializes another class's lowering trace.
 import {provenanceGraph} from "./frontend-provenance.mjs";
@@ -16,7 +17,12 @@ export function dependencyGraph(reg, roots, extraArtifacts = []) {
     if (lowering) node.dependencies.push(build(key));
     const dependencies = new Set(entry?.edges);
     for (const row of [...entry?.queries.values() ?? [], ...trace.global.queries.values()]) {
+      // Scheduling and final-output observations are rebuilt by the program.
+      // They are not class dependencies, even when a caller supplies a graph
+      // containing observations from several roles.
+      if (row.role !== "artifact") continue;
       node.rows.push(row);
+      if (projectedQuery(row)) continue;
       for (const result of [...row.result, ...row.providers ?? []]) {
         const provider = identity(result);
         if (provider && provider !== key) dependencies.add(provider);
