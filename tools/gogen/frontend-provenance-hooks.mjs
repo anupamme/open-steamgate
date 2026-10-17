@@ -37,13 +37,13 @@ export function installHooks(core, requireCore, r) {
   };
   const coreClass = (path, name) => requireCore(`@abaplint/core/build/src/${path}`)[name];
   const contextual = (proto, name, kind) => patch(proto, name, (fn) => function(...args) {
-    if (!r.enabled || r.auditDepth) return fn.apply(this, args);
+    if (r.auditDepth || !r.enabled && r.stack.length) return fn.apply(this, args);
     return r.context(kind, args.map((a) => typeof a === "string" ? a.toUpperCase() : null), () => fn.apply(this, args));
   });
   // Named queries include their actual ordered result, including absence.
   for (const method of ["getObject", "getFileByName", "findObjectForFile", "getFirstObject"]) {
     patch(regProto, method, (fn) => function(...args) {
-      if (!r.enabled || r.auditDepth) return fn.apply(this, args);
+      if (r.auditDepth || !r.enabled && r.stack.length) return fn.apply(this, args);
       const state = r.state(this);
       if (method === "getObject") {
         const found = fn.apply(this, args), key = objectKey(found);
@@ -68,7 +68,7 @@ export function installHooks(core, requireCore, r) {
   }
   for (const method of ["getObjects", "getObjectsByType"]) {
     patch(regProto, method, (fn) => function(...args) {
-      if (!r.enabled || r.auditDepth || r.suppressed) return fn.apply(this, args);
+      if (r.auditDepth || r.suppressed || !r.enabled && r.stack.length) return fn.apply(this, args);
       const reg = this, state = r.state(reg), context = r.contexts.at(-1);
       const owner = r.current(state)?.key, phase = r.current(state)?.phase ?? "registry";
       const site = String(new Error().stack ?? "").split("\n").slice(2, 5).map(portableSite);
@@ -128,7 +128,8 @@ export function installHooks(core, requireCore, r) {
         return function observedArtifact(...args) {
           const reg = owners.get(this) ?? (args.find((a) => a instanceof core.Registry));
           if (!r.enabled && r.auditDepth) return reg ? r.auditArtifact(reg, this, () => fn.apply(this, args)) : fn.apply(this, args);
-          if (!r.enabled) return r.observe(reg, this, () => r.enabled ? observedArtifact.apply(this, args) : fn.apply(this, args));
+          if (!r.enabled) return r.observe(reg, this, () => r.enabled ? observedArtifact.apply(this, args)
+            : reg ? r.artifact(reg, this, phase, () => fn.apply(this, args)) : fn.apply(this, args));
           if (!reg) {
             // A borrowed artifact may have escaped through a raw inventory.
             // Its registry cannot be inferred, so refuse the enclosing lowering.
@@ -173,7 +174,7 @@ export function installHooks(core, requireCore, r) {
   // Semantic queries surround the whole resolution, preserving names even for
   // scans which return no candidates, and distinguish implicit pool prefixes.
   const semantic = (proto, method, kind, argsOf = (args) => args.map(scalar)) => patch(proto, method, (fn) => function(...args) {
-    if (!r.enabled || r.auditDepth) return fn.apply(this, args);
+    if (r.auditDepth || !r.enabled && r.stack.length) return fn.apply(this, args);
     const state = r.state(this.reg);
     return r.context(kind, argsOf(args), () => {
       const value = fn.apply(this, args);

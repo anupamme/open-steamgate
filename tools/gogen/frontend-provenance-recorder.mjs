@@ -32,6 +32,7 @@ class Recorder {
     this.expose = expose;
     this.cacheDir = cacheDir;
     this.enabled = true;
+    /** @type {Map<string, import('./frontend-session-types.ts').QueryEntry>} */ this.selections = new Map();
     /** @type {Set<string> | undefined} */ this.refresh = undefined;
     /** @type {WeakSet<object>} */ this.completedBuilds = new WeakSet();
     /** @type {import('./frontend-session-types.ts').ArtifactFrame[]} */ this.stack = [];
@@ -141,6 +142,7 @@ class Recorder {
   // tuple before allocating argument/result arrays, a row or its public key.
   /** @param {import('./frontend-session-types.ts').RegistryState} state @param {import('./frontend-session-types.ts').Query['kind']} kind @param {import('./frontend-session-types.ts').QueryScalar[]} args @param {string | undefined} result @returns {void} */ namedQuery(state, kind, args, result) {
     const frame = this.current(state), owner = frame?.key;
+    if (!this.enabled && (frame || this.role(state) !== "artifact")) return;
     let node = frame?.named;
     if (!node) {
       const role = this.role(state), phase = frame?.phase ?? "registry";
@@ -157,14 +159,17 @@ class Recorder {
     this.query(state, {kind, args: args.map(scalar), result: result ? [result] : []});
   }
   /** @param {import('./frontend-session-types.ts').RegistryState} state @param {import('./frontend-session-types.ts').Query} query @param {string | undefined} owner @returns {void} */ query(state, query, owner = this.current(state)?.key) {
-    if (!this.enabled || this.auditDepth) return;
+    if (this.auditDepth) return;
     const role = query.role ?? this.role(state), frame = this.current(state);
+    if (!this.enabled && (frame || role !== "artifact")) return;
     const phase = query.phase ?? frame?.phase ?? "registry";
     const entry = role === "scheduling" ? state.scheduling : role === "final-output" ? state.finalOutput : this.own(state, owner);
     const id = queryIdentity(role, phase, owner, query);
     if (entry.queries.has(id)) return;
     const row = {role, artifact: owner ?? "<registry>", phase, ...query};
     entry.queries.set(id, row);
+    if (!this.enabled && role === "artifact" && !owner && row.kind !== "unknown-scan")
+      this.query(state, {kind: "unknown-scan", args: ["idle-global-artifact"], result: []});
     if (role === "artifact" && row.kind === "unknown-scan") state.unknownVersion++;
     if (role === "artifact" && owner && !row.scan && !projectedQuery(row)) for (const key of [...row.result, ...row.providers ?? []]) {
       if (key !== owner && state.entries.has(key)) entry.edges.add(key);
@@ -245,7 +250,17 @@ class Recorder {
   }
   /** @template T @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').ArtifactObject} obj @param {string} phase @param {() => T} run @returns {T} */ artifact(reg, obj, phase, run) {
     if (this.auditDepth) return this.auditArtifact(reg, obj, run);
-    if (!this.enabled) return this.observe(reg, obj, () => this.enabled ? this.artifact(reg, obj, phase, run) : run(), phase === "lowering" || phase === "local-definitions");
+    if (!this.enabled) return this.observe(reg, obj, () => {
+      if (this.enabled) return this.artifact(reg, obj, phase, run);
+      // Retained provider preparation is framed even while its proven rows
+      // are skipped. Its reads must not masquerade as new global reads.
+      this.stack.push({state: this.state(reg), key: keyOf(obj), obj, phase});
+      try { return run(); } finally { this.stack.pop(); }
+    }, phase === "lowering" || phase === "selection" || phase === "local-definitions");
+    if (phase === "lowering" && this.selections.has(keyOf(obj))) {
+      this.state(reg).lowerings.set(keyOf(obj), this.selections.get(keyOf(obj)));
+      this.selections.delete(keyOf(obj));
+    }
     const entered = this.enterArtifact(reg, obj, phase);
     let complete = false;
     try { const value = run(); complete = true; return value; } finally { if (entered) this.leaveArtifact(complete); }
@@ -335,7 +350,7 @@ class Recorder {
   // Compile-wide refusal expires; provider unknown-scan markers remain in entries.
   state.auditBuilt = false;
   // Retain provider-building observations, never a previous entry's transcript.
-  state.lowerings.clear();
+  state.lowerings.clear(); active.selections.clear();
   state.finalOutput = empty();
   // Lowering/final-output entries are replaced above; scheduling keeps its
   // entry, so expire its interned tuples along with the pruned query rows.
@@ -382,7 +397,7 @@ class Recorder {
 // lowering lookup, including the signature owner's cached DDIC provenance.
 /** @param {import('./frontend-session-types.ts').LoweringContext} ctx @param {string} name @returns {import('./frontend-session-types.ts').FunctionModule | undefined} */ export function resolvedFunctionModule(ctx, name) {
   const value = ctx.program.functionModules.get(name);
-  if (active?.enabled) {
+  if (active) {
     const state = active.state(ctx.reg);
     if (value) active.link(state, value.group);
     active.query(state, {kind: "function-module-owner", args: [name],
@@ -433,7 +448,7 @@ class Recorder {
 // grant an exemption to other calls from the same file or an enclosing pass.
 /** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').Query['kind']} kind @param {import('./frontend-session-types.ts').QueryScalar[]} args @param {import('./frontend-session-types.ts').Role} role @param {(obj: import('./frontend-session-types.ts').ArtifactObject) => boolean} predicate @returns {import('./frontend-session-types.ts').ArtifactObject[]} */ export function enumerateObjects(reg, kind, args = [], role = "scheduling", predicate = () => true) {
   const objects = [...registryObjects.call(reg)].filter(predicate);
-  if (active?.enabled) {
+  if (active && (active.enabled || role === "artifact")) {
     const state = active.state(reg);
     for (const obj of objects) active.entry(state, keyOf(obj));
     active.query(state, {kind, args, role, scan: "getObjects", result: objects.map(keyOf), complete: true});
@@ -441,10 +456,10 @@ class Recorder {
   return objects;
 }
 /** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').Query['kind']} kind @param {readonly import('./frontend-session-types.ts').QueryScalar[]} args @param {readonly import('./frontend-session-types.ts').QueryScalar[]} result @param {Partial<import('./frontend-session-types.ts').Query>} details @returns {void} */ export function semanticQuery(reg, kind, args, result, details = {}) {
-  if (active?.enabled) active.query(active.state(reg), {kind, args, result, ...details});
+  if (active) active.query(active.state(reg), {kind, args, result, ...details});
 }
 /** @template T @param {import('./frontend-session-types.ts').Role} role @param {() => T} run @returns {T} */ export function withRole(role, run) {
-  if (!active?.enabled) return run();
+  if (!active) return run();
   active.roles.push(role);
   try { return run(); } finally { active.roles.pop(); }
 }
@@ -506,5 +521,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (active) active.inventory(reg, [...registryObjects.call(reg)]);
 }
 /** @template T @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').ArtifactObject | undefined} obj @param {() => T} run @returns {T} */ export function withSelection(reg, obj, run) {
-  return active?.enabled && obj ? active.artifact(reg, obj, "selection", run) : run();
+  if (!active || !obj) return run();
+  try { return active.artifact(reg, obj, "selection", run); } finally {
+    if (active.refresh) {
+      const state = active.state(reg), key = keyOf(obj), entry = state.lowerings.get(key);
+      if (entry) { active.selections.set(key, entry); state.lowerings.delete(key); }
+    }
+  }
 }

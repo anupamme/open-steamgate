@@ -139,12 +139,16 @@ The program-level observations that remain necessary are:
 | Supplied-signature preparation | Affected providers' declaration-owner lookups. The complete current supplied index is still rebuilt without observing unrelated providers. Its named contribution answers are recorded when a missing class consumes them, and previous answers are checked by certificate validation. |
 | Local-definition discovery | Each selected discovery frame. Its answer depends on selection and test inclusion as well as source bytes, so it must refresh even without an owner edit. Provider syntax observations survive retained closure rounds. |
 | Ownership safety | Affected providers' expanded-statement answer. This can change with macros and belongs in their refreshed provider metadata. Unchanged answers are retained under the provider proof. |
-| Actual class lowering | Every miss, including conservative replay refusals, opens a complete lowering frame. All nested provider and named-answer reads are observed. Hits open no lowering frame and merge no old lowering transcript. |
+| Selection and actual class lowering | Selection records a temporary transcript per candidate, including function-module ownership and static-attribute lookups. Every miss, including conservative replay refusals, adopts that transcript into its complete lowering frame. All nested provider and named-answer reads are observed. Hits discard the temporary transcript, open no lowering frame and merge no old lowering transcript. |
 
-Selection/closure discovery, frontend preparation for other owners, certificate
-query evaluation, replay, RTTI and final-output passes run with the observer
-idle. The existing host adapters retain their synchronous invocation lifetime;
-idle registry reads bypass their observation work. No compiler-module
+Closure discovery, frontend preparation for other owners, certificate query
+evaluation, replay, RTTI and final-output passes run with the observer idle.
+Retained provider preparation keeps an idle owner frame; its proven reads
+bypass recording. Replay guards and closure discovery are explicitly scheduling.
+Unframed artifact queries remain observable while idle: a named or semantic
+read adds a global unknown marker, and an unclassified scan retains its own
+unknown marker. Both refuse current certificate reuse and make the next plan
+full-only. The existing host adapters retain their synchronous invocation lifetime. No compiler-module
 initialization hooks or new builtin imports are introduced. Full graph/key/index
 publication still runs for newly recorded lowerings and retains validated
 provider closure rows. The recording plan is atomically replaced after a
@@ -169,6 +173,15 @@ both line modes with byte-identical cold output. Focused tests also cover a
 newly introduced provider edge followed by an edit of that provider and a
 revert, retained closure-round syntax, stateless DDIC typing, corrupt plans and
 both reverse-edge negative controls.
+
+The key computer re-reads the live provenance maps at each closure round, so
+replaced maps and new unknown markers cannot be hidden by its invocation
+lifetime. Immutable graph indexes remain cached across rounds. A small
+eight-owner selection estimate (two simulated misses, 15 paired samples of
+100 iterations) captured 16 selection rows, adopted four into the two missing
+lowerings, and added about 0.03 ms per eight-owner scan (0.037 vs 0.007 ms).
+This measures the selection seam, not whole-corpus build time; no new full
+zlnt proof was run for these fixes.
 
 The serial proof accepts `--baseline <source-copy>`. It primes an independent
 cache for that copy, then runs baseline warm immediately before candidate warm.

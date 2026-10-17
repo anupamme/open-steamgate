@@ -39,7 +39,8 @@ export function keyComputer(reg, namespace, program) {
   const sources = new Map([...inventory.objects.values()].flatMap((e) => e.sources).map((s) => [s.name, s]));
   const specifications = new WeakMap(), queryValues = new WeakMap(), guards = new WeakMap();
   let evaluate = queryEvaluator(program);
-  const trace = provenanceGraph(reg), currentIssues = new Map();
+  let trace = provenanceGraph(reg);
+  const currentIssues = new Map();
   const fault = process.env.GOGEN_CACHE_SHADOW_FAULT;
   const drop = fault?.startsWith("drop-dependency:") ? new RegExp(fault.slice(16)) : undefined;
   if (fault && !drop && !["ignore-miss", "unknown-complete"].includes(fault) && !fault.startsWith("ignore-query:"))
@@ -194,6 +195,7 @@ export function keyComputer(reg, namespace, program) {
   const ownedStates = new Set();
   const originalStateOf = stateOf;
   compute.round = (next) => {
+    trace = provenanceGraph(reg);
     evaluate = queryEvaluator(next); answers.clear(); currentIssues.clear();
     for (const state of ownedStates) {
       state.nodes[1].clear(); state.groups[1].clear(); state.observations[1].clear(); state.invalid[1] = undefined;

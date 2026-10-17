@@ -1,6 +1,6 @@
 import {cacheDiagnostic, diagnosticCache} from "./frontend-cache-diagnostics.mjs";
 import {timedFrontend} from "./frontend-timing.mjs";
-import {withArtifact, scopedProvenance, storedProvenance, inheritStoredProvenance, recordingProvenance, auditedBookkeeping} from "./frontend-provenance.mjs";
+import {withArtifact, withRole, scopedProvenance, storedProvenance, inheritStoredProvenance, recordingProvenance, auditedBookkeeping} from "./frontend-provenance.mjs";
 import {projectionMatches, readVariants, rememberVariant} from "./frontend-cache-variants.mjs";
 import {recordLowering, replayLowering, replayGuardKey, setProxyCheck} from "./frontend-replay.mjs";
 // Portable class lowerings. The registry still parses/checks normally; replay
@@ -417,7 +417,7 @@ export const compileDiskClass = /** @param {import('./frontend-session-types.ts'
   let fromDependency = false;
   let cached = session?.classes.get(key);
   const replay = (entry) => entry && entry.file === file && entry.structure === file.getStructure()
-    && entry.supplied === suppliedKey(program, key) && entry.replay && timedFrontend("replay", () => replayLowering(program, entry.replay, (row) => { miss = row; }));
+    && entry.supplied === suppliedKey(program, key) && entry.replay && timedFrontend("replay", () => withRole("scheduling", () => replayLowering(program, entry.replay, (row) => { miss = row; })));
   let valid = replay(cached);
   if (!valid) {
     const stored = session?.disk?.read(owner, key, program);

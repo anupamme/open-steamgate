@@ -10,10 +10,11 @@ import {compileProgram} from "./frontend.mjs";
 import {compileClosedProgram} from "./frontend-closure.mjs";
 import {compareArtifacts, artifactsOf} from "./cache-oracle-capture.mjs";
 import {runOracle, syntheticCorpus} from "./cache-oracle.mjs";
-import {queryCoverage, recordingPlan} from "./frontend-certificates.mjs";
+import {queryCoverage, recordingPlan, certificateValidator} from "./frontend-certificates.mjs";
+import {hashV3} from "./frontend-v3-key.mjs";
 import {toolIdentity} from "./frontend-object-cache.mjs";
 import {provenanceGraph, recordProvenance, compilationProvenanceOf, inheritStoredProvenance,
-  beginProvenanceCompile, withArtifact, semanticQuery, auditedBookkeeping, auditBuiltArtifacts, scopedProvenance} from "./frontend-provenance.mjs";
+  beginProvenanceCompile, withArtifact, withRole, enumerateObjects, semanticQuery, auditedBookkeeping, auditBuiltArtifacts, scopedProvenance} from "./frontend-provenance.mjs";
 import {rttiProjection, selectionHas} from "./frontend-queries.mjs";
 import {core, parseObserved, finishInputs} from "./frontend-inventory.mjs";
 import {readRecordingPlan, writeRecordingPlan} from "./frontend-v3-shadow.mjs";
@@ -52,6 +53,56 @@ test("scoped misses publish complete new dependencies across a later edit and re
   equalCold(build(), build);
 }));
 
+test("scoped miss lowering rows include the same selection dependencies as full recording", () => fixture(({dir, put, build, options}) => {
+  writeFileSync(join(dir, "zother.clas.abap"), source("ZOTHER", "rv = 3.")
+    .replace("PUBLIC SECTION.", "PUBLIC SECTION. CLASS-DATA value TYPE i."));
+  put("ZBASE", "rv = zother=>value."); build();
+  put("ZBASE", "rv = zother=>value + 1.");
+  let scoped;
+  recordProvenance(() => { scoped = build(); assert.equal(scopedProvenance(), true); }, {expose:false, cacheDir:options.cacheDir});
+  const full = build({cacheDir: undefined, provenance: true});
+  assert.ok(scoped.frontendCounts.loweredClasses.includes("ZBASE"));
+  const rows = (p) => [...provenanceGraph(p.reg).lowerings.get("CLAS ZBASE").queries.values()];
+  assert.ok(rows(scoped).some((q) => q.phase === "selection" && q.kind === "getObject"
+    && q.result.includes("CLAS ZOTHER")), "static attribute selection must contribute its provider");
+  assert.deepEqual(rows(scoped), rows(full));
+  assert.deepEqual([...provenanceGraph(scoped.reg).lowerings.get("CLAS ZBASE").edges].sort(),
+    [...provenanceGraph(full.reg).lowerings.get("CLAS ZBASE").edges].sort());
+}));
+
+for (const kind of ["named", "semantic", "scan", "enumeration"]) test(`idle scoped global ${kind} read refuses reuse and the next recording plan`, () => fixture(({build, options}) => {
+  const prime = build();
+  const reg = prime.reg;
+  const namespace = readdirSync(join(options.cacheDir, "v3"))[0], directory = join(options.cacheDir, "v3", namespace);
+  const unpack = (path) => deserialize(inflateRawSync(readFileSync(path).subarray(65)));
+  const index = unpack(join(directory, readdirSync(directory).find((n) => n.endsWith(".certificates"))));
+  const key = Object.keys(index.roots).find((k) => index.roots[k].root === "lowering:CLAS ZBASE");
+  const candidate = unpack(join(directory, hashV3(["CLAS ZBASE", "ZBASE"]), `${key}.bin`));
+  const value = deserialize(candidate.valueBytes);
+  recordProvenance(() => {
+    beginProvenanceCompile(reg);
+    assert.equal(scopedProvenance(), true);
+    const validator = certificateValidator(index, reg), program = {...prime, reg};
+    validator.round(program);
+    assert.equal(validator.entry(key, candidate.root, value, namespace), true);
+    const before = provenanceGraph(reg).unknownVersion;
+    if (kind === "named") reg.getObject("CLAS", "ZNEW_GLOBAL_MISS");
+    if (kind === "semantic") semanticQuery(reg, "function-module-owner", ["ZNEW_GLOBAL"], []);
+    if (kind === "scan") [...reg.getObjects()];
+    if (kind === "enumeration") enumerateObjects(reg, "test-global-enumeration", [], "artifact");
+    const trace = provenanceGraph(reg);
+    assert.ok(trace.unknownVersion > before);
+    validator.round(program);
+    assert.equal(validator.entry(key, candidate.root, value, namespace), false);
+    assert.ok([...trace.global.queries.values()].some((q) => q.kind === "unknown-scan"));
+  }, {expose:false, cacheDir:options.cacheDir});
+  assert.equal(readRecordingPlan(options.cacheDir).fullOnly, true);
+  recordProvenance(() => {
+    beginProvenanceCompile(reg);
+    assert.equal(scopedProvenance(), false);
+  }, {expose:false, cacheDir:options.cacheDir});
+}));
+
 test("retained closure rounds preserve provider syntax when local discovery is refreshed", () => fixture(({put, options}) => {
   const run = (extra = {}) => compileClosedProgram({...options, objects: ["ZREADER"], includeTests: true, ...extra});
   put("ZBASE", "rv = zother=>run( ).");
@@ -83,7 +134,7 @@ test("idle scoped validation preserves unknown markers from audited provider bui
   recordProvenance(() => {
     beginProvenanceCompile(reg); parseObserved(reg);
     assert.equal(scopedProvenance(), true);
-    const obj = reg.getObject("CLAS", "ZBASE");
+    const obj = withRole("scheduling", () => reg.getObject("CLAS", "ZBASE"));
     auditedBookkeeping("test-idle-build", () => new core.SyntaxLogic(reg, obj).run());
     assert.equal(auditBuiltArtifacts(reg), true);
     assert.ok([...provenanceGraph(reg).artifacts.get("CLAS ZBASE").queries.values()].some((q) => q.kind === "unknown-scan" && q.args[0] === "untraced-artifact"));
