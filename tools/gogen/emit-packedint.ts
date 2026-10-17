@@ -1,4 +1,4 @@
-import type {Expr, Type} from './ir.ts';
+import type {Expr, Type} from './emit-go-types.ts';
 import type {OwnershipContext, PackedRenderers, AttributeProbe} from './emit-ownership.ts';
 import {someExpression} from './ir-children.ts';
 

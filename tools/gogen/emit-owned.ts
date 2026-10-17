@@ -1,4 +1,6 @@
-import type {Expr, Stmt, ConcatBytesParts, ConcatBytesTable} from './ir.ts';
+import type {Expr, Stmt} from './emit-go-types.ts';
+type ConcatBytesParts = Extract<Stmt, {s: 'concat_bytes'; parts: readonly Expr[]}>;
+type ConcatBytesTable = Extract<Stmt, {s: 'concat_bytes'; table: Expr}>;
 import type {OwnershipContext, OwnedExpressionRenderers, OwnedRenderers, ByteRenderers} from './emit-ownership.ts';
 import {someExpression} from './ir-children.ts';
 import {packedChecksum} from "./emit-packedint.ts";
