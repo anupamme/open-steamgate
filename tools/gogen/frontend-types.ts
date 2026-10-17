@@ -17,6 +17,7 @@ type StatementShape<T> = T extends {readonly s: "call_enq"} ? Omit<T, "fields"> 
   : T extends {readonly s: "select_single" | "select_loop" | "select_aggregate"} ? Omit<T, "target"> & {readonly target: Expr | null}
   : T extends {readonly s: "call_dyn_static"} ? Omit<T, "cls"> & {readonly cls: Expr | string} : T;
 type FrontendIR<T> = T extends SqlPredicate ? FrontendSqlPredicate
+  : T extends readonly [unknown, ...unknown[]] ? {readonly [K in keyof T]: FrontendIR<T[K]>}
   : T extends readonly (infer Item)[] ? readonly FrontendIR<Item>[]
   : T extends object ? {readonly [K in keyof StatementShape<T>]: FrontendIR<StatementShape<T>[K]>} : T;
 export type FrontendStmt = FrontendIR<Stmt> & {readonly pos?: import("./ir.ts").Position};
