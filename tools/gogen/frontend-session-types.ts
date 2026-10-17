@@ -85,6 +85,27 @@ export interface SessionEntry {
   replay?: Replay;
   provenance?: StoredProvenance;
 }
+export type CacheDiskEntry = Omit<SessionEntry, 'file' | 'structure'> & {name: string};
+export interface CachePrediction {
+  row: {
+    name: string; wouldReuseV3: boolean; actuallyLowered: boolean; reason: string;
+    complete?: boolean; currentComplete?: boolean; completenessReason?: string; key?: string;
+  };
+  value?: CacheDiskEntry;
+  trial?: SessionProgram;
+}
+export interface CacheShadow {
+  probe(owner: string, key: string, program: SessionProgram): CachePrediction;
+  validate(prediction: CachePrediction, ctx: LoweringContext, obj: ClassObject, lower: ClassLowering): void;
+}
+export interface CacheDisk {
+  begin(): void;
+  finish(program: SessionProgram): void;
+  read(owner: string, key: string, program: SessionProgram): CacheDiskEntry | undefined;
+  record(run: () => ClassIR): {value: ClassIR; reads: string[]};
+  write(owner: string, value: CacheDiskEntry, reads: string[], program: SessionProgram): boolean | undefined;
+  shadow?: CacheShadow;
+}
 export interface CacheSession {
   // Preparation clears all own fields, including disk-cache extensions.
   [key: string]: unknown;
@@ -92,6 +113,8 @@ export interface CacheSession {
   config: ReturnType<Registry['getConfig']> | undefined;
   files: SourceFile[];
   classes: Map<string, SessionEntry>;
+  ownershipSafety?: import("./frontend-types.ts").OwnershipSafetyMap;
+  disk?: CacheDisk;
 }
 export type SessionInput = Partial<CacheSession> | null | undefined;
 export interface CompileOptions {
