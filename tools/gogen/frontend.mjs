@@ -909,7 +909,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     }
     return false;
   };
-  const excInto = new Set();
+  /** @type {Set<string>} */ const excInto = new Set();
   for (const file of obj.getABAPFiles?.() ?? []) {
     for (const st of file.getStatements()) {
       if (!(st.get() instanceof Statements.Catch) || !/\bINTO\b/i.test(st.concatTokens())) continue;
@@ -1693,7 +1693,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     const path = kids[0].concatTokens().split("-");
     if (rowType.k !== "struct") {
       if (path.length !== 1 || upper(path[0]) !== "TABLE_LINE") throw new Unsupported("WHERE over a table not of structures");
-      const fx = {e: "lrow", type: rowType};
+      /** @type {import("./ir.ts").Expr} */ const fx = {e: "lrow", type: rowType};
       if (initial) {
         where.push({fx, op: kids.length === 4 ? "notinitial" : "initial"});
         continue;
@@ -4717,7 +4717,7 @@ function selectSingle(sel, ctx, text) {
   const cls = ctx.program.locals?.get(`${ctx.owner ?? ctx.className}|${written}`) ?? written;
   if (!ctx.program.wanted.has(cls)) throw notInProgram(ctx, cls, `CREATE OBJECT ${cls}: the class is not compiled in this program`);
   const sig = constructorSignature(ctx, cls);
-  const given = new Map();
+  /** @type {Map<string, import("@abaplint/core").Nodes.ExpressionNode | undefined>} */ const given = new Map();
   for (const p of params?.findAllExpressions(Expressions.ParameterS) ?? []) {
     given.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), p.findDirectExpression(Expressions.Source));
   }
@@ -4929,7 +4929,7 @@ function eventInfo(ctx, owner, evName) {
  * told by its class, which a RAISE EXCEPTION obj only knows then.
  */
 /** @param {import("@abaplint/core").IRegistry} reg @param {import("./frontend-types.ts").FrontendProgram} program @returns {Record<string, string>} */ function exceptionSupers(reg, program) {
-  const out = {};
+  /** @type {Record<string, string>} */ const out = {};
   for (const c of program.classes) {
     const chain = [c.name, ...ancestors(reg, c.name)];
     if (!chain.includes("CX_ROOT")) continue;

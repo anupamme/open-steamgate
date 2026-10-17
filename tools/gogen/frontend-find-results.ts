@@ -1,5 +1,5 @@
 import type * as abaplint from '@abaplint/core';
-import type {Type, Expr, Stmt, Program, Field, FindFields, TypedExpr} from './ir.ts';
+import type {Type, Expr, Stmt, Field, FindFields, TypedExpr} from './ir.ts';
 // Inline RESULTS uses the same registry DDIC types as explicit declarations.
 // abaplint's inferred result has an untyped SUBMATCHES table.
 export function inlineFindResultTypes(body: abaplint.Nodes.StructureNode | undefined, ctx: FindContext, h: InlineHelpers): Map<string, Type> {
@@ -68,8 +68,8 @@ export function lowerFindResults(node: abaplint.Nodes.StatementNode, ctx: FindCo
   return {s: "find_results", all, bytes, mode: kind === "PCRE" ? "P" : kind === "REGEX" ? "R" : "", pattern: convert(patX, bytes ? XS : S), subject: convert(subjX, bytes ? XS : S),
     icase: node.findDirectTokenByText("IGNORING") !== undefined, target, table, row, sub, f};
 }
-interface FindContext { readonly reg: abaplint.IRegistry; readonly program: Program }
-interface InlineHelpers { readonly Statements: typeof abaplint.Statements; readonly Expressions: typeof abaplint.Expressions; readonly typeOf: (type: abaplint.AbstractType, where: string, program: Program) => Type; readonly Unsupported: new (message: string) => Error }
+interface FindContext { readonly reg: abaplint.IRegistry; readonly program: import("./frontend-types.ts").FrontendProgram }
+interface InlineHelpers { readonly Statements: typeof abaplint.Statements; readonly Expressions: typeof abaplint.Expressions; readonly typeOf: (type: abaplint.AbstractType, where: string, program: import("./frontend-types.ts").FrontendProgram) => Type; readonly Unsupported: new (message: string) => Error }
 interface LowerHelpers {
   readonly Expressions: typeof abaplint.Expressions;
   readonly upper: (text: string) => string;
