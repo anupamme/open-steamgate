@@ -140,9 +140,3 @@ export interface MethodContextState extends Omit<MethodContext, "fieldSymbols" |
 
 // The registry kinds TABL/VIEW/TTYP/DTEL each implement parseType.
 export type DataTypeObject = abaplint.Objects.Table | abaplint.Objects.View | abaplint.Objects.TableType | abaplint.Objects.DataElement;
-
-export interface FrontendSelectStar { readonly star: true; readonly fn?: undefined; readonly col?: undefined }
-export interface FrontendSelectField { readonly fn: string; readonly col: string; readonly star?: undefined }
-export interface FrontendSelectColumn { readonly name: string; readonly type: Type; readonly sql?: string; readonly named?: boolean; readonly agg?: FrontendSelectStar | FrontendSelectField }
-export interface FrontendSelectColumns extends Array<FrontendSelectColumn> { grouped?: boolean; groupBy?: string[] }
-export interface FrontendSelectFae { name: string; row: StructType; n: number; table: TypedExpr }

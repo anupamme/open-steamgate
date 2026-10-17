@@ -3900,7 +3900,7 @@ function lowerOrRefuse(verb, rel) {
 }
 
 /** the field list of a SELECT: * or plain columns */
-/** @param {import("@abaplint/core").Nodes.ExpressionNode} sel @param {ReturnType<typeof selectTable>} tb @param {string} text @returns {import("./frontend-types.ts").FrontendSelectColumns} */ function selectColumns(sel, tb, text) {
+function selectColumns(sel, tb, text) {
   const fl = sel.findDirectExpression(Expressions.SQLFieldList);
   const names = /^\s*\*\s*$/.test(fl?.concatTokens() ?? "") ? [...tb.columns.keys()]
     : (fl?.findAllExpressions(Expressions.SQLField) ?? []).map((f) => {
@@ -3921,7 +3921,7 @@ function lowerOrRefuse(verb, rel) {
  * field does not take: refused, as are AVG, COUNT( col ), DISTINCT inside
  * and SUM of other types (not measured).
  */
-/** @param {import("@abaplint/core").Nodes.ExpressionNode} sel @param {ReturnType<typeof selectTable>} tb @param {string} text @returns {import("./frontend-types.ts").FrontendSelectColumns} */ function groupedColumns(sel, tb, text) {
+function groupedColumns(sel, tb, text) {
   const gb = sel.findDirectExpression(Expressions.SQLGroupBy);
   if (!gb && !/^SELECT\s+(?:MAX|MIN|SUM|COUNT)\s*\(/i.test(text)) throw new Unsupported(`SELECT with an aggregate and no GROUP BY: ${text}`);
   // the first column is an SQLField, the ones after it bare SQLFieldNames
@@ -3935,7 +3935,7 @@ function lowerOrRefuse(verb, rel) {
   });
   if (gb && groupBy.length === 0) throw new Unsupported(`GROUP BY form: ${text}`);
   const fl = sel.findDirectExpression(Expressions.SQLFieldList);
-  /** @type {import("./frontend-types.ts").FrontendSelectColumns} */ const cols = [];
+  const cols = [];
   for (const f of fl?.findDirectExpressions(Expressions.SQLField) ?? []) {
     const agg = f.findDirectExpression(Expressions.SQLAggregation);
     const as = f.findDirectExpression(Expressions.SQLAsName);
@@ -3969,7 +3969,7 @@ function lowerOrRefuse(verb, rel) {
   return cols;
 }
 
-/** @param {import("@abaplint/core").Nodes.ExpressionNode} sel @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text */ function selectTable(sel, ctx, text) {
+function selectTable(sel, ctx, text) {
   const from = sel.findDirectExpression(Expressions.SQLFrom)?.findAllExpressions(Expressions.DatabaseTable) ?? [];
   if (from.length !== 1) throw new Unsupported(`SELECT FROM form: ${text}`);
   return dbTable(ctx, upper(from[0].concatTokens()), "SELECT FROM");
@@ -4070,7 +4070,7 @@ function selectShape(sel) {
  * [WHERE ...] [ORDER BY f ...]: the form the gateway's DPCs use. sy-subrc 0
  * with rows, 4 without; sy-dbcnt the rows.
  */
-/** @param {import("@abaplint/core").Nodes.StatementNode} node @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").FrontendStmt} */ function selectStatement(node, ctx, text) {
+function selectStatement(node, ctx, text) {
   const sel = node.findDirectExpression(Expressions.Select);
   if (sel && isDynamicSelect(sel)) return dynamicSelect(sel, ctx, text);
   if (sel && /^SELECT\s+SINGLE\b/i.test(text)) return selectSingle(sel, ctx, text);
@@ -4083,10 +4083,10 @@ function selectShape(sel) {
   // empty driving table ignores the whole WHERE, the client aside. With
   // GROUP BY, aggregates or ORDER BY it is refused (not measured)
   const faeNode = sel.findFirstExpression(Expressions.SQLForAllEntries);
-  /** @type {import("./frontend-types.ts").FrontendSelectFae | null} */ let fae = null;
+  let fae = null;
   if (faeNode) {
     const drvSrc = faeNode.findDirectExpression(Expressions.SQLSource);
-    const drv = drvSrc ? /** @type {import("./ir.ts").TypedExpr} */ (sqlHost(drvSrc, [], ctx, text)) : null;
+    const drv = drvSrc ? sqlHost(drvSrc, [], ctx, text) : null;
     if (!drv || drv.type.k !== "table" || drv.type.row.k !== "struct") throw new Unsupported(`FOR ALL ENTRIES IN a ${drv?.type.k === "table" ? `table of ${drv.type.row.k}` : drv?.type.k ?? "?"}: ${text}`);
     if (sel.findDirectExpression(Expressions.SQLGroupBy) || sel.findFirstExpression(Expressions.SQLAggregation) || sel.findDirectExpression(Expressions.SQLOrderBy)) {
       throw new Unsupported(`FOR ALL ENTRIES with GROUP BY, an aggregate or ORDER BY: not measured: ${text}`);
@@ -4112,7 +4112,7 @@ function selectShape(sel) {
   if (inline) {
     const name = upper(inline[1]);
     const go = goName(`${ctx.className}=>${ctx.method}~${name}`);
-    /** @type {import("./frontend-types.ts").StructType} */ const row = {k: "struct", go};
+    const row = {k: "struct", go};
     ctx.program.structs.set(go, {...row, fields: cols.map((c) => ({name: c.name, type: c.type}))});
     ctx.locals.set(name, {k: "table", row});
   }
@@ -4147,36 +4147,36 @@ function selectShape(sel) {
     if ((c.type.k === "i") !== (f.type.k === "i")) throw new Unsupported(`SELECT: column ${c.name} (${c.type.k}) into ${f.name} (${f.type.k})`);
     return {field: f.name, type: f.type};
   });
-  /** @type {{hosts: import("./ir.ts").Expr[], ranges: import("./frontend-types.ts").FrontendSqlPredicate[]}} */ const acc = {hosts: [], ranges: []};
+  const acc = {hosts: [], ranges: []};
   const pred = (() => {
     const saved = ctx.fae;
     ctx.fae = fae ?? undefined;
     try { return wherePred(sel, ctx, tb, acc); } finally { ctx.fae = saved; }
   })();
   const order = orderByOf(sel, tb);
-  /** @type {import("../sqlscript-types.ts").SqlRelation} */ let rel = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.scan(lowName(tb.name)));
-  if (pred !== null) rel = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.filter(rel, pred));
+  let rel = RIR.scan(lowName(tb.name));
+  if (pred !== null) rel = RIR.filter(rel, pred);
   if (cols.grouped) {
     // GROUP BY keys and aggregates, then a projection back into the order of
     // the field list: the rows are scanned by position
     const aggs = cols.filter((c) => c.agg).map((c) => ({as: lowName(c.name), expr: c.agg.star
       ? {...RIR.call("COUNT", [], RIR.T.int), star: true} : RIR.call(c.agg.fn, [RIR.col(lowName(c.agg.col), sqlIrType(c.type))], sqlIrType(c.type))}));
-    rel = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.aggregate(rel, cols.groupBy.map(lowName), aggs));
-    rel = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.project(rel, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))}))));
+    rel = RIR.aggregate(rel, cols.groupBy.map(lowName), aggs);
+    rel = RIR.project(rel, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))})));
   } else {
-    rel = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.project(rel, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))}))));
+    rel = RIR.project(rel, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))})));
   }
-  if (order.length > 0) rel = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.order(rel, order.map((o) => ({col: lowName(o.col), desc: o.desc}))));
+  if (order.length > 0) rel = RIR.order(rel, order.map((o) => ({col: lowName(o.col), desc: o.desc})));
   const up = sel.findDirectExpression(Expressions.SQLUpTo);
   if (up) {
     const src = up.findDirectExpression(Expressions.SQLSource);
     if (!src) throw new Unsupported(`UP TO form: ${text}`);
-    const count = /** @type {import("./ir.ts").TypedExpr} */ (sqlHost(src, [], ctx, text));
+    const count = sqlHost(src, [], ctx, text);
     if (count.type.k !== "i") throw new Unsupported(`UP TO a ${count.type.k} value: ${text}`);
-    if (count.e === "int") rel = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.limit(rel, count.value));
+    if (count.e === "int") rel = RIR.limit(rel, count.value);
     else {
       acc.hosts.push(count);
-      rel = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.limit(rel, RIR.param(`@@host:${acc.hosts.length - 1}@@`, RIR.T.int)));
+      rel = RIR.limit(rel, RIR.param(`@@host:${acc.hosts.length - 1}@@`, RIR.T.int));
     }
   }
   const lowered = lowerOrRefuse("SELECT", rel);
@@ -4190,24 +4190,24 @@ function selectShape(sel) {
     }
     // the same columns without the WHERE, for an empty driving table
     const accAll = {hosts: [], ranges: []};
-    /** @type {import("../sqlscript-types.ts").SqlRelation} */ let relAll = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.scan(lowName(tb.name)));
-    if (tb.client) relAll = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.filter(relAll, mandtPred()));
-    relAll = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.project(relAll, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))}))));
+    let relAll = RIR.scan(lowName(tb.name));
+    if (tb.client) relAll = RIR.filter(relAll, mandtPred());
+    relAll = RIR.project(relAll, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))})));
     const all = lowerOrRefuse("SELECT", relAll);
     return {s: "select_table", table: tb.name, cols, assign, target, sql: lowered.sql, ...loweredArgs(lowered, acc),
       fae: {n: fae.n, table: fae.table, sql: all.sql, ...loweredArgs(all, accAll)}};
   }
   return {s: "select_table", table: tb.name, cols, assign, target, appending, sql: lowered.sql, ...loweredArgs(lowered, acc)};
 }
-/** @param {import("@abaplint/core").Nodes.ExpressionNode} sel @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @param {ReturnType<typeof selectTable>} tb @param {import("./frontend-types.ts").FrontendSelectColumn} col @returns {import("./frontend-types.ts").FrontendStmt} */ function selectAggregateScalar(sel, ctx, text, tb, col) {
+function selectAggregateScalar(sel, ctx, text, tb, col) {
   const {assign, target} = intoWorkArea(sel, ctx, text, [col], "SELECT aggregate");
-  /** @type {{hosts: import("./ir.ts").Expr[], ranges: import("./frontend-types.ts").FrontendSqlPredicate[]}} */ const acc = {hosts: [], ranges: []};
-  /** @type {import("../sqlscript-types.ts").SqlRelation} */ let rel = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.scan(lowName(tb.name)));
+  const acc = {hosts: [], ranges: []};
+  let rel = RIR.scan(lowName(tb.name));
   const pred = wherePred(sel, ctx, tb, acc);
-  if (pred !== null) rel = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.filter(rel, pred));
+  if (pred !== null) rel = RIR.filter(rel, pred);
   const agg = col.agg.star ? {...RIR.call("COUNT", [], RIR.T.int), star: true}
     : RIR.call(col.agg.fn, [RIR.col(lowName(col.agg.col), sqlIrType(col.type))], sqlIrType(col.type));
-  rel = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.aggregate(rel, [], [{as: lowName(col.name), expr: agg}]));
+  rel = RIR.aggregate(rel, [], [{as: lowName(col.name), expr: agg}]);
   const lowered = lowerOrRefuse("SELECT", rel);
   return {s: "select_aggregate", table: tb.name, cols: [col], assign, target, sql: lowered.sql, ...loweredArgs(lowered, acc)};
 }
@@ -4245,12 +4245,12 @@ function dynamicTokens(dyn, ctx, what, text) {
  * condition with the port of tools/ir-osql-where.mjs, adds the client and
  * fills the table through its descriptor.
  */
-/** @param {import("@abaplint/core").Nodes.ExpressionNode} sel @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").FrontendStmt} */ function dynamicSelect(sel, ctx, text) {
+function dynamicSelect(sel, ctx, text) {
   if (/^SELECT\s+SINGLE\b/i.test(text)) throw new Unsupported(`dynamic SELECT SINGLE: ${text}`);
   if (/\b(UP\s+TO|DISTINCT|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|CONNECTION|OFFSET)\b/i.test(selectShape(sel))) throw new Unsupported(`dynamic SELECT form: ${text}`);
   const from = sel.findDirectExpression(Expressions.SQLFrom)?.findAllExpressions(Expressions.DatabaseTable) ?? [];
   if (from.length !== 1) throw new Unsupported(`dynamic SELECT FROM form: ${text}`);
-  /** @type {import("./frontend-types.ts").ValueExpr} */ let table;
+  let table;
   const tdyn = from[0].findDirectExpression(Expressions.Dynamic);
   if (tdyn) {
     const v = dynamicTokens(tdyn, ctx, "FROM", text);
@@ -4266,7 +4266,7 @@ function dynamicTokens(dyn, ctx, what, text) {
   }
   // the field list: * (null), (x), or plain column names
   const fl = sel.findDirectExpression(Expressions.SQLFieldList);
-  /** @type {import("./ir.ts").Expr | null} */ let fields = null;
+  let fields = null;
   const fdyn = fl?.findDirectExpression(Expressions.Dynamic);
   if (fdyn) fields = dynamicTokens(fdyn, ctx, "field list", text);
   else if (!/^\s*\*\s*$/.test(fl?.concatTokens() ?? "")) {
@@ -4281,7 +4281,7 @@ function dynamicTokens(dyn, ctx, what, text) {
   // WHERE (x) alone: a static condition over a table named at run time has
   // no columns to be typed against here
   const cond = sel.findDirectExpression(Expressions.SQLCond);
-  /** @type {import("./frontend-types.ts").ValueExpr | null} */ let where = null;
+  let where = null;
   if (cond) {
     const kids = cond.getChildren();
     const cmp = kids.length === 1 && isExpr(kids[0], Expressions.SQLCompare) ? kids[0] : undefined;
@@ -4291,7 +4291,7 @@ function dynamicTokens(dyn, ctx, what, text) {
     if (where.type.k === "table") throw new Unsupported(`WHERE of a table of lines (how the lines join is not measured): ${text}`);
     where = convert(where, S);
   }
-  /** @param {import("@abaplint/core").Nodes.ExpressionNode | undefined} node @param {string} what @returns {import("./ir.ts").Expr | null} */ const listOf = (node, what) => {
+  const listOf = (node, what) => {
     if (!node) return null;
     const d = node.findDirectExpression(Expressions.Dynamic);
     if (d) return dynamicTokens(d, ctx, what, text);
@@ -4322,7 +4322,7 @@ function dynamicTokens(dyn, ctx, what, text) {
  * SELECT COUNT(*) FROM table INTO n [WHERE ...]: the count into n, sy-dbcnt
  * the count (A4H, ANORMALIES select-count-dbcnt), sy-subrc 4 when it is 0.
  */
-/** @param {import("@abaplint/core").Nodes.ExpressionNode} sel @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").FrontendStmt} */ function selectCount(sel, ctx, text) {
+function selectCount(sel, ctx, text) {
   if (/\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|TABLE)\b/i.test(selectShape(sel))) throw new Unsupported(`SELECT COUNT form: ${text}`);
   const fl = sel.findDirectExpression(Expressions.SQLFieldList);
   if (!/^COUNT\s*\(\s*\*\s*\)$/i.test(fl?.concatTokens() ?? "")) throw new Unsupported(`SELECT COUNT form: ${text}`);
@@ -4332,17 +4332,17 @@ function dynamicTokens(dyn, ctx, what, text) {
   if (!into || !tnode || into.findDirectExpressions(Expressions.SQLTarget).length !== 1) throw new Unsupported(`SELECT COUNT INTO form: ${text}`);
   const target = lvalue(tnode, ctx);
   if (target.type.k !== "i") throw new Unsupported(`SELECT COUNT INTO a ${target.type.k}: ${text}`);
-  /** @type {{hosts: import("./ir.ts").Expr[], ranges: import("./frontend-types.ts").FrontendSqlPredicate[]}} */ const acc = {hosts: [], ranges: []};
+  const acc = {hosts: [], ranges: []};
   const pred = wherePred(sel, ctx, tb, acc);
-  /** @type {import("../sqlscript-types.ts").SqlRelation} */ let rel = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.scan(lowName(tb.name)));
-  if (pred !== null) rel = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.filter(rel, pred));
-  rel = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.aggregate(rel, [], [{as: "n", expr: {...RIR.call("COUNT", [], RIR.T.int), star: true}}]));
+  let rel = RIR.scan(lowName(tb.name));
+  if (pred !== null) rel = RIR.filter(rel, pred);
+  rel = RIR.aggregate(rel, [], [{as: "n", expr: {...RIR.call("COUNT", [], RIR.T.int), star: true}}]);
   const lowered = lowerOrRefuse("SELECT COUNT", rel);
   return {s: "select_count", table: tb.name, target, sql: lowered.sql, ...loweredArgs(lowered, acc)};
 }
 
 /** Narrow scalar SUM of an i column, into an i field. */
-/** @param {import("@abaplint/core").Nodes.ExpressionNode} sel @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").FrontendStmt} */ function selectSum(sel, ctx, text) {
+function selectSum(sel, ctx, text) {
   if (/\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|TABLE)\b/i.test(selectShape(sel))) throw new Unsupported(`SELECT SUM form: ${text}`);
   const fl = sel.findDirectExpression(Expressions.SQLFieldList);
   const field = /^SUM\s*\(\s*([\w]+)\s*\)$/i.exec(fl?.concatTokens() ?? "")?.[1];
@@ -4354,11 +4354,11 @@ function dynamicTokens(dyn, ctx, what, text) {
   if (!tnode || into.findDirectExpressions(Expressions.SQLTarget).length !== 1) throw new Unsupported(`SELECT SUM INTO form: ${text}`);
   const target = lvalue(tnode, ctx);
   if (target.type.k !== "i") throw new Unsupported(`SELECT SUM INTO a ${target.type.k}: ${text}`);
-  /** @type {{hosts: import("./ir.ts").Expr[], ranges: import("./frontend-types.ts").FrontendSqlPredicate[]}} */ const acc = {hosts: [], ranges: []};
+  const acc = {hosts: [], ranges: []};
   const pred = wherePred(sel, ctx, tb, acc);
-  /** @type {import("../sqlscript-types.ts").SqlRelation} */ let rel = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.scan(lowName(tb.name)));
-  if (pred !== null) rel = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.filter(rel, pred));
-  rel = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.aggregate(rel, [], [{as: "n", expr: RIR.call("SUM", [RIR.col(lowName(field), RIR.T.int)], RIR.T.int)}]));
+  let rel = RIR.scan(lowName(tb.name));
+  if (pred !== null) rel = RIR.filter(rel, pred);
+  rel = RIR.aggregate(rel, [], [{as: "n", expr: RIR.call("SUM", [RIR.col(lowName(field), RIR.T.int)], RIR.T.int)}]);
   const lowered = lowerOrRefuse("SELECT SUM", rel);
   return {s: "select_sum", table: tb.name, target, sql: lowered.sql, ...loweredArgs(lowered, acc)};
 }
@@ -4561,17 +4561,17 @@ function intoWorkArea(sel, ctx, text, cols, verb) {
  * others keep theirs. A host value is converted to the column's type and
  * bound; MANDT is the logon client, as for a table.
  */
-/** @param {import("@abaplint/core").Nodes.ExpressionNode} sel @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").FrontendStmt} */ function selectSingle(sel, ctx, text) {
+function selectSingle(sel, ctx, text) {
   if (/\b(UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|FOR\s+UPDATE)\b/i.test(selectShape(sel))) throw new Unsupported(`SELECT form: ${text}`);
   const tb = selectTable(sel, ctx, text);
   const cols = selectColumns(sel, tb, text);
   const {assign, target} = intoWorkArea(sel, ctx, text, cols, "SELECT SINGLE");
-  /** @type {{hosts: import("./ir.ts").Expr[], ranges: import("./frontend-types.ts").FrontendSqlPredicate[]}} */ const acc = {hosts: [], ranges: []};
+  const acc = {hosts: [], ranges: []};
   const pred = wherePred(sel, ctx, tb, acc);
-  /** @type {import("../sqlscript-types.ts").SqlRelation} */ let rel = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.scan(lowName(tb.name)));
-  if (pred !== null) rel = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.filter(rel, pred));
-  rel = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.project(rel, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))}))));
-  rel = /** @type {import("../sqlscript-types.ts").SqlRelation} */ (RIR.limit(rel, 1));
+  let rel = RIR.scan(lowName(tb.name));
+  if (pred !== null) rel = RIR.filter(rel, pred);
+  rel = RIR.project(rel, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))})));
+  rel = RIR.limit(rel, 1);
   const lowered = lowerOrRefuse("SELECT", rel);
   return {s: "select_single", table: tb.name, cols, assign, target, sql: lowered.sql, ...loweredArgs(lowered, acc)};
 }
@@ -5386,8 +5386,8 @@ const FUNCTIONS = {
     exceptions, receiving, callee: qualified};
 }
 
-/** @param {import("./frontend-types.ts").FrontendParam} p @param {import("./frontend-types.ts").NamedContext} ctx @returns {import("./frontend-types.ts").ValueExpr} */ function defaultValue(p, ctx) {
-  let t = /** @type {string} */ (p.default);
+/** @param {import("./frontend-types.ts").FrontendParam & {default: string}} p @param {import("./frontend-types.ts").NamedContext} ctx @returns {import("./frontend-types.ts").ValueExpr} */ function defaultValue(p, ctx) {
+  let t = p.default;
   // A system field in a signature default is read when the call is made.
   // ASSERT_SUBRC's ACT defaults to sy-subrc.
   if (SY_MESSAGES[upper(t)]) return convert({e: "sy", ...SY_MESSAGES[upper(t)]}, p.type);
