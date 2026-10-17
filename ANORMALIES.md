@@ -30,6 +30,76 @@ Format adapted from `larshp/hithub` (MIT).
 
 ## Open anomalies
 
+### ANOMALY-2026-10-17-list-position -- Converted ULINE adds positioning absent from the direct Node oracle
+
+- Status: `open`; measurement only, no runtime workaround.
+- Discovery date: `2026-10-17`.
+- Affected versions: pinned transpiler `f34e9bf4947daaf6464566b42b1e3ef1eaeb369c`
+  (`@abaplint/runtime` 2.14.3), open-abap-core `84125c41`, and open-abap-gui
+  `b65c4431`. Repository base: `c2a809a1`; the reported base `11565829` has
+  the same GUI/core/transpiler pins.
+- Minimal ABAP reproducer: `REPORT zprobe. WRITE / 'a'. ULINE. WRITE / 'b'.`
+  The related cases and executable oracle are in `tools/gogen/list-position-oracle.mjs`.
+- Exact command: `TMPDIR=/mnt/ssd-510/osg/stoker/tmp GOCACHE=/mnt/ssd-510/osg/go-build OSD_HEAVY_TMP=/mnt/ssd-510/osg/stoker/tmp OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh node tools/gogen/list-position-oracle.mjs --native`.
+  No SAP connection, fetch, or library modification is involved.
+- Expected SAP behavior: **unmeasured; measure on A4H** for all cases below.
+  No list-positioning rule was found in the existing `docs/` or this log.
+  The mirrored keyword documentation says [WRITE /](https://eduardocopat.github.io/abap-docs/7.54/abapwrite-/)
+  ignores the slash immediately after explicit positioning; [NEW-LINE](https://eduardocopat.github.io/abap-docs/7.54/abapnew-line/)
+  ignores a cursor already positioned by NEW-LINE or SKIP;
+  [SKIP](https://eduardocopat.github.io/abap-docs/7.54/abapskip/) distinguishes
+  a cursor set by output from one set by positioning; bare
+  [ULINE](https://eduardocopat.github.io/abap-docs/7.54/abapuline/) positions
+  the cursor at the first column of the next line. These are documentation
+  claims, not new kernel measurements. In particular, do not infer a SKIP
+  correction solely from the number of newline characters in console output.
+- Actual behavior: the direct abaplint Node runtime writes a 50-character
+  rule, while the GUI list processor used by converted reports writes 132.
+  Let `H50 = "-".repeat(50)` and `H132 = "-".repeat(132)`. The table gives
+  exact direct-Node console strings and exact converted-Node list arrays.
+  For each measured row, native Go stdout is `lines.join("\n") + "\n"`.
+
+  | Case (after `REPORT zprobe.`) | Direct Node console | Converted Node list |
+  | --- | --- | --- |
+  | `WRITE / 'a'. ULINE. WRITE / 'b'.` | `"a\n" + H50 + "\nb"` | `["a", H132, "    b"]` |
+  | `ULINE. WRITE / 'b'.` | `H50 + "\nb"` | `[H132, "    b"]` |
+  | `ULINE. ULINE. WRITE / 'b'.` | `H50 + "\n" + H50 + "\nb"` | `[H132, "", H132, "    b"]` |
+  | `WRITE / 'a'. ULINE. WRITE 'b'.` | `"a\n" + H50 + "b"` | `["a", H132, "    b"]` |
+  | `WRITE / 'a'. ULINE.` | `"a\n" + H50` | `["a", H132, ""]` |
+  | `WRITE / 'a'. SKIP. WRITE / 'b'.` | `"a\n\nb"` | `["a", "", "b"]` |
+  | `WRITE / 'a'. NEW-LINE. WRITE / 'b'.` | Refused: `Statement NewLine not supported, NEW-LINE.` | `["a", "b"]` |
+  | `TOP-OF-PAGE. ULINE. WRITE / 'h'. START-OF-SELECTION. WRITE / 'b'.` | Refused: `TOP-OF-PAGE, not supported, transpiler` | `[H132, "    h", "b"]` |
+
+- Isolation: the original report has **no extra blank line after ULINE** on
+  this base, on either converted Node or Go; both instead indent `b` by four
+  spaces. Repeated ULINE and trailing ULINE expose empty lines on both hosts.
+  In the pinned GUI converter, `converter/src/passes/lower-statements.mjs`
+  emits `uline( ... )`, `new_line( )`, and `set_position( 5 )`, and separately
+  strips the slash from an immediately following WRITE. The ABAP
+  `framework/host/zcl_gg_host_list.clas.abap` method `end_line` flushes an
+  empty current line when the column is greater than one. Go compiles this
+  same list processor; there is no independent Go ULINE implementation to
+  correct for these measurements.
+- Impact: converted reports gain unwanted indentation and, in the repeated
+  or trailing ULINE cases, empty lines. Direct Node also fails to advance
+  after ULINE followed by plain WRITE, so it is not a complete positioning
+  oracle. The requested Go-only correction was stopped because the related
+  empty-line behavior reproduces on Node and the original report's claimed
+  extra blank line does not reproduce with the current pins.
+- Smallest safe workaround: none applied. Preserve these observations and
+  measure the list cursor contract on A4H before changing the shared converter
+  or list writer. Before/after outputs are identical; no runtime was changed.
+- Upstream issue: none sent; this needs an open-abap-gui converter/list-writer
+  investigation, with the direct Node limitations distinguished from it.
+- Regression-test location: the diagnostic runner measures the cases without
+  asserting anomalous output as an ABAP contract. No semantics expectation
+  or Go/IR-JS behavior was changed.
+- Colors: FORMAT metadata already belongs to the GUI list model. Any future
+  FORMAT COLOR to ANSI rendering would belong at the terminal output loop
+  in `tools/gogen/go/cmd/osabap/main.go`, using the model's formatting/fragments;
+  no colors were implemented.
+- Upstream version containing a fix: unknown.
+
 ### ANOMALY-2026-10-15-tabl-elementary-builtins -- TABL field with COMPTYPE E and no ROLLNAME
 
 - Status: `refused` -- no workaround. On the osabap and osgo build paths gogen names the field and stops before the transpiler's DatabaseSetup (`tools/gogen/frontend-ddic.mjs`, called by `osabap.mjs` and `osg-build.mjs`, transparent tables only). `unit.mjs` and `semantics.mjs` still reach DatabaseSetup unchecked and get its message.
