@@ -1,3 +1,4 @@
+import {createGoTestDir} from "./go-test-module.mjs";
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {spawnSync} from "node:child_process";
@@ -10,7 +11,6 @@ import {emitGo} from "./emit-go.mjs";
 import {CmpNumericData, Component, DataString, MoveData, cell, TP, TI, TF, TX} from "./js/abap.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-
 test("nested string builder loops do not retain deferred buffers", () => {
   const sourceDir = mkdtempSync(join(tmpdir(), "gogen-builder-loop-"));
   try {
@@ -71,7 +71,7 @@ ENDCLASS.
 
 test("numeric generic SUBTRACTSECS reaches its Go native", () => {
   const sourceDir = mkdtempSync(join(tmpdir(), "gogen-tstmp-native-"));
-  const goDir = mkdtempSync(join(here, "go", "cmd", "gogen-tstmp-test-"));
+  const {dir: goDir, goRoot} = createGoTestDir("gogen-tstmp-test-");
   try {
     writeFileSync(join(sourceDir, "cl_abap_tstmp.clas.abap"), `
 CLASS cl_abap_tstmp DEFINITION PUBLIC FINAL CREATE PUBLIC.
@@ -97,11 +97,11 @@ ENDCLASS.
     const go = emitGo(compileProgram({folders: [sourceDir], objects: ["ZCL_GOGEN_TSTMP_NATIVE", "CL_ABAP_TSTMP"]}));
     assert.match(go, /hTstmpsecs\.SubtractSecs/);
     writeFileSync(join(goDir, "zz_generated.go"), go);
-    const build = spawnSync("go", ["test", "-vet=off", `./cmd/${basename(goDir)}`], {cwd: join(here, "go"), encoding: "utf8", timeout: 120000});
+    const build = spawnSync("go", ["test", "-vet=off", `./cmd/${basename(goDir)}`], {cwd: goRoot, encoding: "utf8", timeout: 120000});
     assert.equal(build.status, 0, build.stderr || build.stdout);
   } finally {
     rmSync(sourceDir, {recursive: true, force: true});
-    rmSync(goDir, {recursive: true, force: true});
+    rmSync(goRoot, {recursive: true, force: true});
   }
 });
 
@@ -191,7 +191,7 @@ ENDCLASS.
 
 test("a source literal naming datearith does not add an unused Go import", () => {
   const sourceDir = mkdtempSync(join(tmpdir(), "gogen-import-source-"));
-  const goDir = mkdtempSync(join(here, "go", "cmd", "gogen-import-test-"));
+  const {dir: goDir, goRoot} = createGoTestDir("gogen-import-test-");
   try {
     writeFileSync(join(sourceDir, "zcl_gogen_import_test.clas.abap"), `
 CLASS zcl_gogen_import_test DEFINITION PUBLIC FINAL CREATE PUBLIC.
@@ -210,19 +210,19 @@ ENDCLASS.
     assert.doesNotMatch(generated, /"osg\/gogen\/datearith"/);
     writeFileSync(join(goDir, "zz_generated.go"), generated);
     const build = spawnSync("go", ["test", `./cmd/${basename(goDir)}`], {
-      cwd: join(here, "go"), encoding: "utf8", timeout: 120000,
+      cwd: goRoot, encoding: "utf8", timeout: 120000,
     });
     assert.equal(build.error, undefined, build.stderr);
     assert.equal(build.status, 0, build.stderr || build.stdout);
   } finally {
     rmSync(sourceDir, {recursive: true, force: true});
-    rmSync(goDir, {recursive: true, force: true});
+    rmSync(goRoot, {recursive: true, force: true});
   }
 });
 
 test("an ABAP parameter named like a helper package does not shadow it", () => {
   const sourceDir = mkdtempSync(join(tmpdir(), "gogen-shadow-source-"));
-  const goDir = mkdtempSync(join(here, "go", "cmd", "gogen-shadow-test-"));
+  const {dir: goDir, goRoot} = createGoTestDir("gogen-shadow-test-");
   try {
     // `charsearch` is both the parameter and the package CS compiles to;
     // without an alias the parameter hides the package (stoker's tstmp case)
@@ -244,19 +244,19 @@ ENDCLASS.
     assert.match(generated, /hCharsearch "osg\/gogen\/charsearch"/);
     writeFileSync(join(goDir, "zz_generated.go"), generated);
     const build = spawnSync("go", ["vet", `./cmd/${basename(goDir)}`], {
-      cwd: join(here, "go"), encoding: "utf8", timeout: 120000,
+      cwd: goRoot, encoding: "utf8", timeout: 120000,
     });
     assert.equal(build.error, undefined, build.stderr);
     assert.equal(build.status, 0, build.stderr || build.stdout);
   } finally {
     rmSync(sourceDir, {recursive: true, force: true});
-    rmSync(goDir, {recursive: true, force: true});
+    rmSync(goRoot, {recursive: true, force: true});
   }
 });
 
 test("another class's public static attribute is read in expressions after its constructor", () => {
   const sourceDir = mkdtempSync(join(tmpdir(), "gogen-static-source-"));
-  const goDir = mkdtempSync(join(here, "go", "cmd", "gogen-static-test-"));
+  const {dir: goDir, goRoot} = createGoTestDir("gogen-static-test-");
   try {
     writeFileSync(join(sourceDir, "zcl_gogen_static_owner.clas.abap"), `
 CLASS zcl_gogen_static_owner DEFINITION PUBLIC FINAL CREATE PUBLIC.
@@ -304,17 +304,17 @@ ENDCLASS.
     assert.match(body, /Ensure_ZCL_GOGEN_STATIC_OWNER\(s\)/);
     writeFileSync(join(goDir, "zz_generated.go"), generated);
     writeFileSync(join(goDir, "zz_generated_test.go"), `package main\nimport ("testing"; "osg/gogen/abap")\nfunc TestRead(t *testing.T) { if got := ZCL_GOGEN_STATIC_READER_RUN(&abap.Session{}); got != 9 { t.Fatalf("got %d", got) } }\n`);
-    const run = spawnSync("go", ["test", `./cmd/${basename(goDir)}`], {cwd: join(here, "go"), encoding: "utf8", timeout: 120000});
+    const run = spawnSync("go", ["test", `./cmd/${basename(goDir)}`], {cwd: goRoot, encoding: "utf8", timeout: 120000});
     assert.equal(run.status, 0, run.stderr || run.stdout);
   } finally {
     rmSync(sourceDir, {recursive: true, force: true});
-    rmSync(goDir, {recursive: true, force: true});
+    rmSync(goRoot, {recursive: true, force: true});
   }
 });
 
 test("an inline SELECT table name in one method does not hide a local of another method", () => {
   const sourceDir = mkdtempSync(join(tmpdir(), "gogen-inline-source-"));
-  const goDir = mkdtempSync(join(here, "go", "cmd", "gogen-inline-test-"));
+  const {dir: goDir, goRoot} = createGoTestDir("gogen-inline-test-");
   try {
     copyFileSync(join(here, "apps", "notes", "znotes.tabl.xml"), join(sourceDir, "znotes.tabl.xml"));
     writeFileSync(join(sourceDir, "zcl_gogen_inline_scope.clas.abap"), `
@@ -339,12 +339,12 @@ ENDCLASS.
     assert.doesNotMatch(generated, /NOT_COMPILED in ZCL_GOGEN_INLINE_SCOPE/);
     writeFileSync(join(goDir, "zz_generated.go"), generated);
     const build = spawnSync("go", ["test", `./cmd/${basename(goDir)}`], {
-      cwd: join(here, "go"), encoding: "utf8", timeout: 120000,
+      cwd: goRoot, encoding: "utf8", timeout: 120000,
     });
     assert.equal(build.status, 0, build.stderr || build.stdout);
   } finally {
     rmSync(sourceDir, {recursive: true, force: true});
-    rmSync(goDir, {recursive: true, force: true});
+    rmSync(goRoot, {recursive: true, force: true});
   }
 });
 
@@ -373,7 +373,7 @@ ENDCLASS.`;
 
 test("declared interface membership works across core and app layers", () => {
   const sourceDir = mkdtempSync(join(tmpdir(), "gogen-interface-source-"));
-  const goDir = mkdtempSync(join(here, "go", "cmd", "gogen-interface-layers-"));
+  const {dir: goDir, goRoot} = createGoTestDir("gogen-interface-layers-");
   try {
     writeFileSync(join(sourceDir, "zif_layer.intf.abap"), `
 INTERFACE zif_layer PUBLIC.
@@ -434,19 +434,19 @@ func TestMembership(t *testing.T) {
 }
 `);
     const run = spawnSync("go", ["test", `./cmd/${basename(goDir)}/...`], {
-      cwd: join(here, "go"), encoding: "utf8", timeout: 120000,
+      cwd: goRoot, encoding: "utf8", timeout: 120000,
     });
     assert.equal(run.error, undefined, run.stderr);
     assert.equal(run.status, 0, run.stderr || run.stdout);
   } finally {
     rmSync(sourceDir, {recursive: true, force: true});
-    rmSync(goDir, {recursive: true, force: true});
+    rmSync(goRoot, {recursive: true, force: true});
   }
 });
 
 test("MOVE of flat character components rejoins surrogate halves", () => {
   const sourceDir = mkdtempSync(join(tmpdir(), "gogen-flat-string-"));
-  const goDir = mkdtempSync(join(here, "go", "cmd", "gogen-flat-string-"));
+  const {dir: goDir, goRoot} = createGoTestDir("gogen-flat-string-");
   try {
     writeFileSync(join(sourceDir, "zcl_gogen_flat_string.clas.abap"), `
 CLASS zcl_gogen_flat_string DEFINITION PUBLIC FINAL CREATE PUBLIC.
@@ -473,11 +473,11 @@ func TestFlatString(t *testing.T) {
  if got!="😀" {t.Fatalf("MOVE bytes=%x, want F09F9880",got)}
 }
 `);
-    const run = spawnSync("go", ["test", `./cmd/${basename(goDir)}`], {cwd: join(here, "go"), encoding: "utf8", timeout: 120000});
+    const run = spawnSync("go", ["test", `./cmd/${basename(goDir)}`], {cwd: goRoot, encoding: "utf8", timeout: 120000});
     assert.equal(run.status, 0, run.stderr || run.stdout);
   } finally {
     rmSync(sourceDir, {recursive: true, force: true});
-    rmSync(goDir, {recursive: true, force: true});
+    rmSync(goRoot, {recursive: true, force: true});
   }
 });
 
@@ -930,7 +930,7 @@ export let calls = 0; export function ParseF(s) { calls++; return original(s); }
 test("local owners and interface method segments remain distinct in both backends", async () => {
   const {emitJs} = await import("./emit-js.mjs");
   const sourceDir = mkdtempSync(join(tmpdir(), "gogen-local-owner-"));
-  const goDir = mkdtempSync(join(here, "go", "cmd", "gogen-local-owner-"));
+  const {dir: goDir, goRoot} = createGoTestDir("gogen-local-owner-");
   try {
     writeFileSync(join(sourceDir, "zif_probe.intf.abap"), `INTERFACE zif_probe PUBLIC. METHODS meth RETURNING VALUE(rv) TYPE i. ENDINTERFACE.`);
     writeFileSync(join(sourceDir, "cl_abap_zip.clas.abap"), `CLASS cl_abap_zip DEFINITION PUBLIC FINAL CREATE PUBLIC. PUBLIC SECTION. ENDCLASS. CLASS cl_abap_zip IMPLEMENTATION. ENDCLASS.`);
@@ -972,7 +972,7 @@ func TestConcurrentFirstCalls(t *testing.T){var wg sync.WaitGroup;start:=make(ch
     const race = spawnSync("go", ["test", "-race", "-run", "^TestConcurrentFirstCalls$", "."], {cwd: goDir, encoding: "utf8"});
     assert.equal(race.status, 0, race.stdout + race.stderr);
 
-  } finally { rmSync(sourceDir, {recursive: true, force: true}); rmSync(goDir, {recursive: true, force: true}); }
+  } finally { rmSync(sourceDir, {recursive: true, force: true}); rmSync(goRoot, {recursive: true, force: true}); }
 });
 
 test("a remaining generated local-constant collision fails loudly", async () => {

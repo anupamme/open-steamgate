@@ -1,3 +1,4 @@
+import {createGoTestDir} from "./go-test-module.mjs";
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {spawnSync} from "node:child_process";
@@ -14,7 +15,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const core = libraryPath(home, "open-abap-core");
 
 test("KERNEL_LOCK hooks receive SAP-shaped requests and map results", {timeout: 120000}, () => {
-  const goDir = mkdtempSync(join(here, "go", "cmd", `gogen-enqseam-test-${process.pid}-`));
+  const {dir: goDir, goRoot} = createGoTestDir(`gogen-enqseam-test-${process.pid}-`);
   try {
     const program = compileProgram({folders: [core, join(here, "testdata-enq-seam")], objects: ["ZCL_GOGEN_ENQ_SEAM"]});
     writeFileSync(join(goDir, "zz_generated.go"), emitGo(program));
@@ -127,12 +128,12 @@ func init() {
 }
 `);
     const run = spawnSync("go", ["test", "-vet=off", "-timeout=10s", `./cmd/${basename(goDir)}`], {
-      cwd: join(here, "go"), encoding: "utf8", timeout: 110000,
+      cwd: goRoot, encoding: "utf8", timeout: 110000,
       env: {...process.env, GOFLAGS: "-buildvcs=false", GOCACHE: process.env.GOCACHE ?? join(home, ".local/enqseam/go-cache")},
     });
     assert.equal(run.status, 0, run.stderr || run.stdout);
   } finally {
-    rmSync(goDir, {recursive: true, force: true});
+    rmSync(goRoot, {recursive: true, force: true});
   }
 });
 
@@ -158,7 +159,7 @@ test("lock key widths match Node for every DDIC key kind", () => {
 
 test("an omitted DATS key blocks another session's specific date", {timeout:120000}, () => {
  const dir = mkdtempSync(join(here, ".out", "enq-date-"));
- const goDir = mkdtempSync(join(here,"go","cmd","gogen-enq-date-"));
+ const {dir: goDir, goRoot} = createGoTestDir("gogen-enq-date-");
  try {
   cpSync(join(here,"testdata-enq-seam"),dir,{recursive:true});
   const tablePath=join(dir,"zgogen_enq_tab.tabl.xml");
@@ -181,7 +182,7 @@ func TestDateWildcard(t *testing.T) {
  if sb.Sy.Subrc!=1 {t.Fatalf("specific date subrc = %d, want FOREIGN_LOCK",sb.Sy.Subrc)}
 }
 `);
-  const run=spawnSync("go",["test","-vet=off",`./cmd/${basename(goDir)}`],{cwd:join(here,"go"),encoding:"utf8",env:{...process.env,GOFLAGS:"-buildvcs=false",GOCACHE:process.env.GOCACHE ?? join(home,".local/enqseam/go-cache")}});
+  const run=spawnSync("go",["test","-vet=off",`./cmd/${basename(goDir)}`],{cwd:goRoot,encoding:"utf8",env:{...process.env,GOFLAGS:"-buildvcs=false",GOCACHE:process.env.GOCACHE ?? join(home,".local/enqseam/go-cache")}});
   assert.equal(run.status,0,run.stderr||run.stdout);
- } finally {rmSync(dir,{recursive:true,force:true}); rmSync(goDir,{recursive:true,force:true});}
+ } finally {rmSync(dir,{recursive:true,force:true}); rmSync(goRoot,{recursive:true,force:true});}
 });

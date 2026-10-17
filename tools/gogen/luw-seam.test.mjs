@@ -1,7 +1,8 @@
+import {createGoTestDir} from "./go-test-module.mjs";
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {spawnSync} from "node:child_process";
-import {mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {rmSync, writeFileSync} from "node:fs";
 import {basename, dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {compileProgram} from "./frontend.mjs";
@@ -10,7 +11,7 @@ import {emitJs} from "./emit-js.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 test("generated LUW statements notify the host with session-local update state", {timeout: 120000}, () => {
-  const dir = mkdtempSync(join(here, "go/cmd/gogen-luw-seam-"));
+  const {dir, goRoot} = createGoTestDir("gogen-luw-seam-");
   try {
     const program = compileProgram({folders: [join(here, "testdata-luw-seam")], objects: ["ZCL_GOGEN_LUW_SEAM"]});
     assert.deepEqual(program.skipped, []);
@@ -113,11 +114,11 @@ func TestDatabaseBeforeGeneratedHook(t *testing.T) {
 }
 `);
     const run = spawnSync("go", ["test", "-timeout=20s", `./cmd/${basename(dir)}`], {
-      cwd: join(here, "go"), encoding: "utf8", timeout: 110000,
-      env: {...process.env, GOFLAGS: "-buildvcs=false", GOCACHE: join(here, ".out/go-cache")},
+      cwd: goRoot, encoding: "utf8", timeout: 110000,
+      env: {...process.env, GOFLAGS: "-buildvcs=false", GOCACHE: process.env.GOCACHE ?? join(here, ".out/go-cache")},
     });
     assert.equal(run.status, 0, run.stdout + run.stderr);
-  } finally { rmSync(dir, {recursive: true, force: true}); }
+  } finally { rmSync(goRoot, {recursive: true, force: true}); }
 });
 
 test("the JS emitter accepts an update-task module's LUW mark", () => {

@@ -1,7 +1,8 @@
+import {copyGoTestModule} from "./go-test-module.mjs";
 import {copyJsRuntime} from "./copy-js-runtime.mjs";
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {mkdtempSync, writeFileSync, rmSync, cpSync, mkdirSync, readFileSync} from "node:fs";
+import {mkdtempSync, writeFileSync, rmSync, mkdirSync, readFileSync} from "node:fs";
 import {join} from "node:path";
 import {execFileSync} from "node:child_process";
 import {compileProgram} from "./frontend.mjs";
@@ -193,7 +194,7 @@ for (const staticMemory of [false, true]) test(`generated owned ${staticMemory ?
   assert.ok(analyzeOwnership(stores).declarations.has(stores.classes[0].attributes[0]));
   const dir = mkdtempSync(join(import.meta.dirname, ".out", "owned-allocation-"));
   try {
-    cpSync(join(import.meta.dirname, "go"), dir, {recursive: true});
+    copyGoTestModule(dir);
     mkdirSync(join(dir, "ownedcheck"));
     writeFileSync(join(dir, "ownedcheck", "generated.go"), emitGo(stores).replace("package main", "package ownedcheck"));
     writeFileSync(join(dir, "ownedcheck", "generated_test.go"), `package ownedcheck
@@ -264,7 +265,7 @@ test("generated single-byte reads, integer moves, padding and snapshots agree wi
   const dir = mkdtempSync(join(import.meta.dirname, ".out", "owned-parity-"));
   const want = "255/-2147483648/254/255/FE7FFF80";
   try {
-    cpSync(join(import.meta.dirname, "go"), dir, {recursive: true});
+    copyGoTestModule(dir);
     mkdirSync(join(dir, "ownedcheck"));
     writeFileSync(join(dir, "ownedcheck/generated.go"), emitGo(program).replace("package main", "package ownedcheck"));
     writeFileSync(join(dir, "ownedcheck/generated_test.go"), `package ownedcheck
@@ -291,7 +292,7 @@ test("owned-memory checksum addition keeps exact packed fallbacks and JS parity"
   const cases = [["0", 255, "255"], ["12", -20, "-8"], ["9223372036854775807", 1, "9223372036854775808"],
     ["-9223372036854775808", -1, "-9223372036854775809"], ["9999999999999999999999999999999", -1, "9999999999999999999999999999998"]];
   try {
-    cpSync(join(import.meta.dirname, "go"), dir, {recursive: true});
+    copyGoTestModule(dir);
     mkdirSync(join(dir, "check"));
     writeFileSync(join(dir, "check/generated.go"), emitGo(p).replace("package main", "package check"));
     writeFileSync(join(dir, "check/generated_test.go"), `package check
