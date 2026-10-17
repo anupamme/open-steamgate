@@ -89,6 +89,7 @@ export function lowerByteFind(node, ctx, text, kids, words, tw, h) {
 }
 
 // Match alternatives of direct keyword tokens; operands never enter these forms.
+/** @param {string} text @param {...(string | string[])} parts @returns {boolean} */
 function keywordForm(text, ...parts) {
   return parts.reduce(/** @param {string[]} forms */ (forms, part) => forms.flatMap((form) =>
     (Array.isArray(part) ? part : [part]).map((p) => [form, p].filter(Boolean).join(" "))), [""]).includes(text);

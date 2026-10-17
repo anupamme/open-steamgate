@@ -50,6 +50,7 @@ export function hoistLocalConstants(body, ctx, h) {
     const src = val?.getChildren().find((c) => !isTok(c));
     return src && isExpr(src, Expressions.Constant);
   };
+  /** @param {string} name @param {import("./ir.ts").Type} type @param {Pick<import("./frontend-types.ts").FrontendConstant, "value" | "init" | "fieldInits">} init */
   const add = (name, type, init) => {
     // Keep the class prefix: layered builds and frontend caches use it.
     const go = `${owner}_${segment(name)}`;
@@ -73,7 +74,7 @@ export function hoistLocalConstants(body, ctx, h) {
         if (!ft || !literalValue(st)) throw new Unsupported(`CONSTANTS ${name}-${field}: nonliteral VALUE`);
         inits[field] = initialValue(st, {...ctx, locals: new Map([[field, ft]])}).value;
       }
-      const folded = Object.fromEntries(Object.entries(inits).map(([f, v]) => [f, fold(v)]));
+      /** @type {Record<string, import("./frontend-types.ts").ConstantInitializer | undefined>} */ const folded = Object.fromEntries(Object.entries(inits).map(([f, v]) => [f, fold(v)]));
       if (Object.values(folded).every(Boolean)) add(name, type, {fieldInits: folded});
       else ctx.localConstantFields.set(node, Object.entries(inits).map(([field, value]) => ({
         s: "assign", target: {e: "field", base: {e: "var", name, type}, name: field, type: fields.find((f) => f.name === field).type}, value,

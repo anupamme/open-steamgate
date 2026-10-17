@@ -163,10 +163,10 @@ describe("gogen compiler host boundary", () => {
     assert.deepEqual(readFileSync(path.join(dir, "z.txt")), Buffer.from("é😀\n", "utf8"));
     assert.deepEqual(host.listDir(dir), readdirSync(dir));
     assert.deepEqual(host.listEntries(dir), readdirSync(dir, {withFileTypes: true}).map((e) => [e.name, e.isDirectory()]));
-    assert.deepEqual(compat.readdirSync(dir), readdirSync(dir));
-    assert.deepEqual(compat.readdirSync(dir, {withFileTypes: true}).map((e) => [e.name, e.isDirectory()]), host.listEntries(dir));
+    assert.deepEqual(compat.readdirNames(dir), readdirSync(dir));
+    assert.deepEqual(compat.readdirEntries(dir).map((e) => [e.name, e.isDirectory()]), host.listEntries(dir));
     assert.equal(host.listEntries(dir).find(([name]) => name === "link")[1], false);
-    for (const fn of [host.readText, host.listDir, host.listEntries]) assert.throws(() => fn(path.join(dir, "missing")), {code: "ENOENT"});
+    for (const fn of [host.readText, host.listDir, host.listEntries, compat.readdirNames, compat.readdirEntries]) assert.throws(() => fn(path.join(dir, "missing")), {code: "ENOENT"});
     assert.throws(() => host.writeText(path.join(dir, "missing/file"), ""), {code: "ENOENT"});
     for (const file of ["", SOURCE, `a/${SOURCE}`, `a/${SOURCE}/`, `${SOURCE}.bak`, "a/../file", `a\\${SOURCE}`]) {
       assert.equal(compat.isSourceIdentity(file), isSourceIdentity(file));

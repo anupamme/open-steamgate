@@ -73,7 +73,7 @@ export function prepareDynamicStatics(program, {defaultValue, aliasTarget}) {
     const name = aliasTarget(program.reg, cls.name, method) ?? method;
     let owner = cls.name;
     let impl;
-    const seen = new Set();
+    /** @type {Set<string>} */ const seen = new Set();
     while (owner && !seen.has(owner)) {
       seen.add(owner);
       const c = classes.get(owner);
