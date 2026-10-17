@@ -1,4 +1,5 @@
-import type {Context, Expr, Type, Ownership as RuntimeOwnership} from './emit-go-types.ts';
+import type {Context, Ownership as RuntimeOwnership} from './emit-go-types.ts';
+import type {Expr, Type} from './ir.ts';
 
 export type OwnershipContext = Context;
 // Attribute probes intentionally carry only identity, without expression type.

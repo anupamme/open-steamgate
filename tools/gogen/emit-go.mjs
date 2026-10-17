@@ -164,7 +164,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   ctx.lrow = row;
   try {
     if (w.op === "initial" || w.op === "notinitial") {
-      const c = cond({c: "initial", x: /** @type {import("./emit-go-types.ts").TypedExpr} */ (w.fx)}, ctx);
+      const c = cond({c: "initial", x: (w.fx)}, ctx);
       return w.op === "initial" ? c : `!(${c})`;
     }
     const lhs = w.fx ? expr(w.fx, ctx) : `${row}.${ident(/** @type {string} */ (/** @type {Exclude<import("./emit-go-types.ts").Where, {op: "initial" | "notinitial"}>} */ (w).name))}`;
@@ -329,7 +329,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   for (const cls of /** @type {readonly import("./emit-go-types.ts").Class[]} */ (program.classes ?? program)) for (const method of cls.methods ?? []) collectStable(method.body);
   exportedFields = Boolean(layers);
   HELPER_IMPORTS = new Set();
-  OWNERSHIP = (/** @type {import("./emit-go-types.ts").AnalyzeOwnership} */ (analyzeOwnership))(program);
+  OWNERSHIP = ((analyzeOwnership))(program);
   const classes = layers?.classes ?? (Array.isArray(program) ? program : program.classes);
   /** @type {import("./emit-go-types.ts").StructDefinitions} */ const structs = layers?.structs ?? (Array.isArray(program) ? new Map() : program.structs);
   CLONES = new Map();
@@ -458,7 +458,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   if (!layers) append(out, dispatcher(classes));
   append(out, staticRegistry(program, classes));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_NAME"))) append(out, nativeRtti(program));
-  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_GET_TEXT_FOR_MESSAGE"))) append(out, (/** @type {import("./emit-go-types.ts").NativeMessageText} */ (nativeMessageText))(program, {goType, ident, classes: CLASSES, poly: POLY, ancestorsOf}));
+  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_GET_TEXT_FOR_MESSAGE"))) append(out, ((nativeMessageText))(program, {goType, ident, classes: CLASSES, poly: POLY, ancestorsOf}));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_DATA"))) append(out, nativeRttiData(program));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_JSON_PARSE"))) append(out, nativeJsonParse());
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_AJSON_ENCODE"))) {
@@ -834,7 +834,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
 }
 
 /** @param {import("./emit-go-types.ts").Class} cls @param {readonly import("./emit-go-types.ts").Attribute[]} inst @returns {string[]} */ function attrAccessors(cls, inst) {
-  const out = inst.filter((a) => a.fromIntf).map((a) => `func (me *${typeName(cls.name)}) ${accessorName(a.name)}() *${goType(a.type)} { return &${(/** @type {import("./emit-go-types.ts").ExceptionClass} */ (exceptionClass))(cls, CLASSES) ? `abap.ExceptionRead(me, ${JSON.stringify(a.name)})` : "me"}.${ident(a.name)} }`);
+  const out = inst.filter((a) => a.fromIntf).map((a) => `func (me *${typeName(cls.name)}) ${accessorName(a.name)}() *${goType(a.type)} { return &${((exceptionClass))(cls, CLASSES) ? `abap.ExceptionRead(me, ${JSON.stringify(a.name)})` : "me"}.${ident(a.name)} }`);
   return out.length ? [...out, ""] : [];
 }
 
@@ -946,8 +946,8 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   const lines = [...(LINES && m.pos ? [`//line ${m.pos.file}:${m.pos.row}`] : []), `${signature(cls, m)} {`, "\t_ = s"];
   if (m.static && m.name !== "CLASS_CONSTRUCTOR" && chainCctor(cls)) lines.push(`\tEnsure_${typeName(cls.name)}(s)`);
   if (!m.static) lines.push("\t_ = me");
-  if (m.name === "IF_MESSAGE~GET_TEXT" && (/** @type {import("./emit-go-types.ts").ExceptionClass} */ (exceptionClass))(cls, CLASSES)) lines.push("\tif me.KernelException != nil { return me.KernelException.Text() }");
-  if (m.name === "IF_MESSAGE~GET_LONGTEXT" && (/** @type {import("./emit-go-types.ts").ExceptionClass} */ (exceptionClass))(cls, CLASSES)) lines.push(`\tif me.KernelException != nil { panic(abap.NotCompiled("exception method GET_LONGTEXT", "kernel long texts are not implemented")) }`);
+  if (m.name === "IF_MESSAGE~GET_TEXT" && ((exceptionClass))(cls, CLASSES)) lines.push("\tif me.KernelException != nil { return me.KernelException.Text() }");
+  if (m.name === "IF_MESSAGE~GET_LONGTEXT" && ((exceptionClass))(cls, CLASSES)) lines.push(`\tif me.KernelException != nil { panic(abap.NotCompiled("exception method GET_LONGTEXT", "kernel long texts are not implemented")) }`);
   if (cls.hostReplaced) append(lines, hostMethod(cls, m));
   // a method that calls the AMC API: its class pool is who is calling while
   // it runs, for the SAMC authorities (go/amc Enter/Caller)
@@ -992,7 +992,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   // Inspect actual generated Go before adding any ABAP local declarations.
   // Method-wide bindings deliberately include descendants and enclosing
   // constructs: sinking must not change which slot generated code refers to.
-  const bindings = ctx.sinkSites.length ? (/** @type {import("./emit-go-types.ts").GeneratedBindings} */ (generatedBindings))(lines.join("\n")) : new Set();
+  const bindings = ctx.sinkSites.length ? ((generatedBindings))(lines.join("\n")) : new Set();
   /** @type {Set<import("./emit-go-types.ts").Local>} */ const sunk = new Set();
   for (const site of ctx.sinkSites) {
     site.locals = site.locals.filter(l => bindings && !bindings.has(ident(l.name)));
@@ -1102,7 +1102,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
 /** @param {import("./emit-go-types.ts").Expr} p @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function place(p, ctx) {
   switch (p.e) {
     case "var": return p.ref && !ctx.valueOutputs?.has(p.name) ? `(*${ident(p.name)})` : ident(p.name);
-    case "attr": return (/** @type {import("./emit-go-types.ts").ExceptionClass} */ (exceptionClass))(ctx.cls, CLASSES) ? `abap.ExceptionRead(me, ${JSON.stringify(p.name)}).${ident(p.name)}` : `me.${ident(p.name)}`;
+    case "attr": return ((exceptionClass))(ctx.cls, CLASSES) ? `abap.ExceptionRead(me, ${JSON.stringify(p.name)}).${ident(p.name)}` : `me.${ident(p.name)}`;
     case "static": {
       // The frontend resolves inherited attributes to the declaring class.
       const owner = p.owner;
@@ -1117,7 +1117,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     case "field": return `${PLACES.has(p.base.e) || p.base.e === "const" ? place(p.base, ctx) : `(${expr(p.base, ctx)})`}.${ident(p.name)}`;
     case "dref_field": return `abap.DerefAs[${goType(p.struct)}](${expr(p.base, ctx)}, ${JSON.stringify(`->${p.name}`)}).${ident(p.name)}`;
     case "fs": return p.type.k === "data" ? ident(p.name) : p.type.k === "struct" ? `(*${ident(p.name)})` : `(*abap.CheckedRowPtr(${ident(p.name)}))`;
-    case "refattr": { const b = p.kernelRtti ? `abap.ObjectRttiRead(${expr(p.base, ctx)}, ${JSON.stringify(p.name)})` : ((/** @type {Extract<import("./emit-go-types.ts").Type, {k: "ref"}>} */ ((/** @type {import("./emit-go-types.ts").TypedExpr} */ (p.base)).type)).intf || (/** @type {import("./emit-go-types.ts").ExceptionClass} */ (exceptionClass))(CLASSES.get((/** @type {Extract<import("./emit-go-types.ts").Type, {k: "ref"}>} */ ((/** @type {import("./emit-go-types.ts").TypedExpr} */ (p.base)).type)).name), CLASSES)) ? `abap.ExceptionRead(${expr(p.base, ctx)}, ${JSON.stringify(p.name)})` : expr(p.base, ctx); if ((/** @type {Extract<import("./emit-go-types.ts").Type, {k: "ref"}>} */ ((/** @type {import("./emit-go-types.ts").TypedExpr} */ (p.base)).type)).intf) return `(*${b}.${accessorName(p.name)}())`;
+    case "refattr": { const b = p.kernelRtti ? `abap.ObjectRttiRead(${expr(p.base, ctx)}, ${JSON.stringify(p.name)})` : ((/** @type {Extract<import("./emit-go-types.ts").Type, {k: "ref"}>} */ ((/** @type {import("./emit-go-types.ts").TypedExpr} */ (p.base)).type)).intf || ((exceptionClass))(CLASSES.get((/** @type {Extract<import("./emit-go-types.ts").Type, {k: "ref"}>} */ ((/** @type {import("./emit-go-types.ts").TypedExpr} */ (p.base)).type)).name), CLASSES)) ? `abap.ExceptionRead(${expr(p.base, ctx)}, ${JSON.stringify(p.name)})` : expr(p.base, ctx); if ((/** @type {Extract<import("./emit-go-types.ts").Type, {k: "ref"}>} */ ((/** @type {import("./emit-go-types.ts").TypedExpr} */ (p.base)).type)).intf) return `(*${b}.${accessorName(p.name)}())`;
       return POLY.has((/** @type {Extract<import("./emit-go-types.ts").Type, {k: "ref"}>} */ ((/** @type {import("./emit-go-types.ts").TypedExpr} */ (p.base)).type)).name) && !(/** @type {Extract<import("./emit-go-types.ts").Type, {k: "ref"}>} */ ((/** @type {import("./emit-go-types.ts").TypedExpr} */ (p.base)).type)).intf ? `${b}.As_${typeName((/** @type {Extract<import("./emit-go-types.ts").Type, {k: "ref"}>} */ ((/** @type {import("./emit-go-types.ts").TypedExpr} */ (p.base)).type)).name)}().${ident(p.name)}` : `${b}.${ident(p.name)}`; }
     case "row": {
       const b = place(p.base, ctx);
@@ -1857,7 +1857,7 @@ ${t}	}`));
       const p = place(st.target, ctx);
       return [`${t}if len(${p}) > 0 {`, `${t}\t${p} = ${p}[1:] + ${p}[:1]`, `${t}}`];
     }
-    case "concat_bytes": return (/** @type {import("./emit-go-types.ts").EmitByteConcat} */ (emitByteConcat))(st, ctx, t, {expr, place, rowValue});
+    case "concat_bytes": return ((emitByteConcat))(st, ctx, t, {expr, place, rowValue});
     case "condense": {
       const p = place(st.target, ctx);
       return [`${t}${p} = abap.Condense(${p}, ${st.noGaps})`];
@@ -2300,7 +2300,7 @@ ${t}	}`));
       const args = ["s", ...e.args.map((a) => (a.dir === "importing" ? importingArg(a, ctx)
         : a.wrap ? `&${expr(a.wrap, ctx)}` : a.place === null ? `new(${goType(a.type)})` : `&${place(a.place, ctx)}`))];
       /** @type {string} */ let call;
-      if (e.receiver) call = `${(/** @type {import("./emit-go-types.ts").ExceptionClass} */ (exceptionClass))(CLASSES.get(e.receiver.type.name), CLASSES) ? `abap.ExceptionRead(${expr(e.receiver, ctx)}, "")` : expr(e.receiver, ctx)}.${typeName(e.method)}(${args.join(", ")})`;
+      if (e.receiver) call = `${((exceptionClass))(CLASSES.get(e.receiver.type.name), CLASSES) ? `abap.ExceptionRead(${expr(e.receiver, ctx)}, "")` : expr(e.receiver, ctx)}.${typeName(e.method)}(${args.join(", ")})`;
       else if (e.owner) call = `${funcName(e.owner, e.method)}(${args.join(", ")})`;
       else if (e.static) call = `${funcName(ctx.cls.name, e.method)}(${args.join(", ")})`;
       else if (e.sup) call = `me.${typeName(e.sup)}.${typeName(e.method)}(${args.join(", ")})`;

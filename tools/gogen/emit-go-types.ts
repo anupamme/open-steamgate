@@ -7,78 +7,25 @@ import type {Layers as SymbolLayers} from './symbols.ts';
 
 export type {Type, Field, Param, ResolvedKey, SqlColumn, WriteType, TemplateOptions} from './ir.ts';
 export type SymbolCollector = (cls: Class, method: Method, go: string, receiver: string | null) => void;
-// Reuse the IR tags while carrying the frontend's additional runtime shapes
-// through nested operands, arguments, conditions and statement bodies too.
-// Types have no runtime expression/statement payloads to adapt. Preserve their
-// shared discriminated union instead of recursively rebuilding every type field.
-type RuntimeValue<T> = T extends IR.Type ? T : T extends IR.Expr ? Expr : T extends IR.Stmt ? Stmt
-  : T extends IR.Condition ? Condition : T extends IR.Catch ? Catch
-    : T extends IR.SqlPredicate ? SqlPredicate : T extends readonly (infer V)[] ? readonly RuntimeValue<V>[]
-    : T extends object ? RuntimeFields<T> : T;
-type RuntimeFields<T> = T extends object ? {readonly [K in keyof T]: K extends 'assign'
-  ? readonly (SqlAssignment | null)[] : RuntimeValue<T[K]>} : T;
-type RawCall = Extract<IR.Expr, {e: 'call'}>;
-export type CallExpr = RuntimeFields<Omit<RawCall, 'owner' | 'static' | 'callee'>> & {
-  readonly owner?: string | null;
-  readonly static?: boolean;
-  readonly callee?: string;
-};
-// Ownership probes also synthesize substrings without the renderer's base hint.
-export interface SubstringExpr extends Omit<RuntimeFields<Extract<IR.Expr, {e: 'substr'}>>, 'base'> {
-  readonly base?: IR.Type;
-}
-export type Expr = RuntimeFields<Exclude<IR.Expr, {e: 'call' | 'int' | 'struct' | 'upcast' | 'substr'}>> | CallExpr | SubstringExpr
-  | (RuntimeFields<Omit<Extract<IR.Expr, {e: 'struct'}>, 'type'>> & {readonly type: Extract<IR.Type, {k: 'struct'}>}) | (RuntimeFields<Omit<Extract<IR.Expr, {e: 'upcast'}>, 'type'>> & {readonly type: Extract<IR.Type, {k: 'ref'}>})
-  | {readonly e: 'int' | 'float'; readonly value: number; readonly type?: IR.Type};
-export interface LockField extends Pick<IR.TableColumn, 'name' | 'kind'> { readonly length: number }
-export interface NativeArgument { readonly value: Expr; readonly ref?: boolean }
+// Expressions, statements and their nested operands are the canonical IR objects.
+export type Expr = IR.Expr;
+export type Stmt = IR.Stmt;
+export type Method = IR.Method;
+export type Condition = IR.Condition;
+export type Argument = IR.Argument;
+export type TypedExpr = IR.TypedExpr;
+export type CallExpr = Extract<Expr, {e: 'call'}>;
 export interface ArithmeticBranchProbe { readonly e?: string; readonly reason?: string }
-// IR.TypedExpr retains raw IR children; use the emitter's recursive operands.
-export interface TypedNumberExpr { readonly e: 'int' | 'float'; readonly value: number; readonly type: IR.Type }
-export interface TypedFlagExpr { readonly e: 'flag'; readonly value: boolean; readonly type: IR.Type; readonly conv?: boolean; readonly fromP?: Extract<IR.Type, {k: 'p'}> }
-export interface TypedStringListExpr { readonly e: 'strlist'; readonly values: readonly string[]; readonly type: IR.Type; readonly conv?: boolean; readonly fromP?: Extract<IR.Type, {k: 'p'}> }
-export type TypedExpr = Exclude<Expr, {e: 'int' | 'float' | 'flag' | 'strlist'}> | TypedNumberExpr | TypedFlagExpr | TypedStringListExpr;
-export interface InitialCondition { readonly c: 'initial'; readonly x: TypedExpr }
-export interface ConcatBytesTable { readonly s: 'concat_bytes'; readonly target: Expr; readonly table: TypedExpr; readonly row: Expr }
-export interface AssignmentStmt { readonly s: 'assign' | 'set_data'; readonly target: Expr; readonly value: Expr }
-type StatementFields<T> = T extends {s: 'assign' | 'set_data'} ? AssignmentStmt : T extends {s: 'native'} ? Omit<T, 'args'> & {readonly args?: readonly NativeArgument[]}
-  : T extends {s: 'kernel_loop'} ? Omit<T, 'args' | 'pos'> & {readonly args: readonly NativeArgument[]; readonly pos?: IR.Position}
-  : T extends {s: 'call_enq'} ? Omit<T, 'fields'> & {readonly fields?: readonly LockField[]}
-  : T extends {s: 'concat_bytes'; table: Expr} ? ConcatBytesTable
-  : T extends {s: 'concat'} ? Omit<T, 'sep'> & {readonly sep: Expr | null}
-  : T extends {s: 'select_dyn'} ? Omit<T, 'fields' | 'where'> & {readonly fields: Expr | null; readonly where: Expr | null}
-  : T extends {s: 'stub'} ? Omit<T, 'pos'> & {readonly pos?: IR.Position}
-  : T extends {s: 'call_dyn_static'} ? Omit<T, 'cls'> & {readonly cls: string | Expr}
-  : T extends {s: 'loop'} ? Omit<T, 'key' | 'dynamicKeys'> & {
-    readonly key?: IR.ResolvedKey | null;
-    readonly dynamicKeys?: {readonly value: Expr; readonly options: readonly IR.ResolvedKey[]} | null;
-  } : T extends {s: 'insert_sorted'} ? Omit<T, 'keys' | 'refInto'> & {
-    readonly keys: readonly SortKey[]; readonly refInto?: Expr | null; readonly unique?: boolean;
-  } : T extends {s: 'select_loop' | 'select_single' | 'select_aggregate'} ? Omit<T, 'target'> & {readonly target: Expr | null}
-    : T;
-export type Stmt = StatementFields<RuntimeFields<IR.Stmt>> & {readonly pos?: IR.Position; readonly moveTable?: boolean};
-export type Condition = RuntimeFields<Exclude<IR.Condition, {c: 'cmp' | 'initial'}>>
-  | (RuntimeFields<Omit<Extract<IR.Condition, {c: 'cmp'}>, 'type'>> & {readonly type?: IR.Type})
-  | InitialCondition;
-export type Argument = RuntimeFields<IR.Argument>;
-export interface ImportingArgument { readonly value: Expr; readonly type?: IR.Type; readonly byValue?: boolean }
 export interface EventArgument { readonly name: string; readonly value: Expr }
 export interface DynamicResultMove { readonly key: string; readonly type: IR.Type; readonly value: Expr }
-export type DynamicSqlStrings = Extract<Expr, {e: 'strlist'}> | (Exclude<Expr, {e: 'strlist'}> & {readonly type: IR.Type});
-// whereOf emits INITIAL only with fx, and comparisons only with a value.
-export type Where = {readonly op: 'initial' | 'notinitial'; readonly fx: Expr}
-  | {readonly op: '=' | '<>' | '<' | '<=' | '>' | '>='; readonly name?: string;
-    readonly fx?: Expr; readonly ftype?: IR.Type; readonly value: Expr; readonly calc?: IR.Type};
-export type Catch = RuntimeFields<Omit<IR.Catch, 'into' | 'intoKind' | 'intoType' | 'classes'>> & {
-  readonly classes?: readonly string[]; readonly into?: string | null;
-  readonly intoKind?: 'exc' | 'ref' | null; readonly intoType?: IR.Type | null;
-};
-export type SortKey = Omit<IR.SortKey, 'type'> & {readonly type?: IR.Type};
-export type SqlAssignment = RuntimeFields<IR.SqlAssignment> & {readonly place?: Expr};
-export type SqlArgument = RuntimeFields<IR.SqlArgument>;
-export type SqlPredicate = Omit<IR.SqlPredicate, 'range' | 'type' | 'kind' | 'lowLen'> & {
-  readonly range: Expr; readonly type: IR.WriteType; readonly kind?: string; readonly lowLen?: number;
-};
+type StringListExpr = Extract<Expr, {e: 'strlist'}>;
+export type DynamicSqlStrings = StringListExpr | TypedExpr;
+export type Where = IR.Where;
+export type Catch = IR.Catch;
+export type SortKey = IR.SortKey;
+export type SqlAssignment = IR.SqlAssignment;
+export type SqlArgument = IR.SqlArgument;
+export type SqlPredicate = IR.SqlPredicate;
 // Emitter metadata on the shared frontend identity token.
 export interface LoopCursor { idxVar?: string }
 export type TableType = Extract<IR.Type, {k: 'table'}>;
@@ -92,15 +39,7 @@ export type KeyRead = Extract<Stmt, {s: 'read_seckey'}>;
 export type Loop = Extract<Stmt, {s: 'loop' | 'loop_data'}>;
 export type KeyValues = Extract<Stmt, {s: 'read_seckey' | 'delete_seckey'}>;
 
-// These frontend fields are consumed by the emitter but are not yet all
-// represented in ir.ts. Keep the extra shape here rather than widen IR tags.
-export interface Local extends IR.Field {
-  readonly static?: boolean;
-  readonly statics?: string;
-  readonly value?: LiteralValue;
-  readonly init?: Expr;
-  readonly fieldInits?: Readonly<Record<string, Expr | undefined>>;
-}
+export type Local = IR.Local;
 export interface SupportedAttribute extends Omit<IR.Attribute, 'value'> {
   readonly value?: LiteralValue | Expr;
   readonly unsupported?: undefined;
@@ -113,16 +52,6 @@ export interface UnsupportedAttribute extends Omit<SupportedAttribute, 'type' | 
   readonly unsupported: string;
 }
 export type Attribute = SupportedAttribute | UnsupportedAttribute;
-export interface Method extends Omit<IR.Method, 'locals' | 'body'> {
-  readonly locals?: readonly Local[];
-  readonly body?: readonly Stmt[];
-  readonly reason?: string;
-}
-// Emitted method bodies always carry their declaration and statement arrays.
-export interface LoweredMethod extends Method {
-  readonly locals: readonly Local[];
-  readonly body: readonly Stmt[];
-}
 // Omitted calls inspect only the result type, never a returning field name.
 export interface FactorySignature {
   readonly name: string;
@@ -147,7 +76,7 @@ export interface Class extends Omit<IR.Class, 'attributes' | 'methods' | 'constr
   readonly super?: string | null;
 }
 export type StructDefinitions = Map<string, StructType & {readonly fields: readonly IR.Field[]}>;
-export type LiteralValue = string | number | {readonly [name: string]: LiteralValue | undefined};
+export type LiteralValue = IR.LiteralValue;
 export interface Constant {
   readonly type: IR.Type;
   readonly value?: LiteralValue | Expr;

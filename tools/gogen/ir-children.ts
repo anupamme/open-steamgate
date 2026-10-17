@@ -1,5 +1,4 @@
-import type {Expr as RuntimeExpr, Stmt, Condition as RuntimeCondition, Type as RuntimeType} from './emit-go-types.ts';
-import type {Expr, Condition, Argument, Type, Field, SecondaryKey, TableKey,
+import type {Expr, Stmt, Condition, Argument, Type, Field, SecondaryKey, TableKey,
   TemplatePart, TemplateOptions, ArithmeticBranches, Exceptions} from './ir.ts';
 
 // Visit every own enumerable property in its original insertion order. Keep
@@ -23,9 +22,9 @@ type ExpressionNode = IRNode | Expr | Condition | Argument | Type | Field | Seco
   ConversionField | ConditionalBranch | RefusedBranch;
 type ExpressionValue = ExpressionNode | readonly ExpressionValue[] | string | number | boolean | null | undefined;
 function isArray(value: ExpressionValue): value is readonly ExpressionValue[] { return Array.isArray(value); }
-function isExpression(node: ExpressionNode): node is Expr | RuntimeExpr { return 'e' in node && typeof node.e === 'string'; }
+function isExpression(node: ExpressionNode): node is Expr { return 'e' in node && typeof node.e === 'string'; }
 
-export function someExpression(value: ExpressionValue, predicate: (node: Expr | RuntimeExpr) => boolean): boolean {
+export function someExpression(value: ExpressionValue, predicate: (node: Expr) => boolean): boolean {
   if (!value || typeof value !== 'object') return false;
   if (isArray(value)) return value.some((child) => someExpression(child, predicate));
   if (isExpression(value) && predicate(value)) return true;
@@ -38,15 +37,15 @@ export function someExpression(value: ExpressionValue, predicate: (node: Expr | 
 // children(node) below checks that the graph stays closed as the IR evolves.
 type ObjectValues<T> = T extends readonly (infer V)[] ? ObjectValues<V> : T extends object ? T : never;
 type ChildObjects<T> = ObjectValues<PropertyValue<T>>;
-type Roots = RuntimeExpr | Stmt | RuntimeCondition | RuntimeType;
+type Roots = Expr | Stmt | Condition | Type;
 type Wrappers = ChildObjects<Roots>;
 type NestedWrappers = ChildObjects<Wrappers>;
 export type IRNode = Roots | Wrappers | NestedWrappers | ChildObjects<NestedWrappers>;
 export type IRValue = IRNode | readonly IRValue[] | string | number | boolean | null | undefined;
 export function isIRArray(value: IRValue): value is readonly IRValue[] { return Array.isArray(value); }
-export function isExpr(value: IRNode): value is RuntimeExpr { return 'e' in value && typeof value.e === 'string'; }
+export function isExpr(value: IRNode): value is Expr { return 'e' in value && typeof value.e === 'string'; }
 export function isStmt(value: IRNode): value is Stmt { return 's' in value && typeof value.s === 'string'; }
-export function isCondition(value: IRNode): value is RuntimeCondition { return 'c' in value && typeof value.c === 'string'; }
+export function isCondition(value: IRNode): value is Condition { return 'c' in value && typeof value.c === 'string'; }
 export function irChildren(node: IRNode, excluded: readonly string[] = ['type', 'pos']): readonly IRValue[] {
   return children(node, excluded);
 }

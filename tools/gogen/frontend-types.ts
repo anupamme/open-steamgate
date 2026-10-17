@@ -1,28 +1,20 @@
 // Mutable construction state for frontend.mjs; the public IR stays in ir.ts.
 import type * as abaplint from "@abaplint/core";
 import type {Registry} from "./frontend-session-types.ts";
-import type {Attribute, Catch, Class, DatabaseTable, Diagnostic, Event, Expr, FunctionModule, Method, Param, Program, SqlPredicate, Stmt, Type, TypedExpr, WriteType} from "./ir.ts";
+import type {Attribute, Catch, Class, DatabaseTable, Diagnostic, Event, Expr, FunctionModule, Method, Param, Program, SqlPredicate, Stmt, Type, TypedExpr} from "./ir.ts";
 
 export type Mutable<T> = {-readonly [K in keyof T]: T[K]};
 export type StructType = Mutable<Extract<Type, {k: "struct"}>>;
 export type TableType = Extract<Type, {k: "table"}>;
 export type RefType = Extract<Type, {k: "ref"}>;
 export type PackedType = Extract<Type, {k: "p"}>;
-export type ValueExpr = (TypedExpr | {readonly e: "nop_call"; readonly type: Extract<Type, {k: "void"}>}) & {readonly arith?: boolean; readonly fromP?: PackedType};
-// Shapes still emitted by the JavaScript frontend, including explicit absence values.
-export interface FrontendSqlPredicate extends Omit<SqlPredicate, "type" | "kind"> { readonly type: WriteType; readonly kind?: string }
-type StatementShape<T> = T extends {readonly s: "call_enq"} ? Omit<T, "fields"> & {readonly fields?: readonly LockObject["fields"][number][]}
-  : T extends {readonly s: "concat"} ? Omit<T, "sep"> & {readonly sep: Expr | null}
-  : T extends {readonly s: "select_dyn"} ? Omit<T, "fields" | "where"> & {readonly fields: Expr | null; readonly where: Expr | null}
-  : T extends {readonly s: "select_single" | "select_loop" | "select_aggregate"} ? Omit<T, "target"> & {readonly target: Expr | null}
-  : T extends {readonly s: "call_dyn_static"} ? Omit<T, "cls"> & {readonly cls: Expr | string} : T;
-type FrontendIR<T> = T extends SqlPredicate ? FrontendSqlPredicate
-  : T extends readonly [unknown, ...unknown[]] ? {readonly [K in keyof T]: FrontendIR<T[K]>}
-  : T extends readonly (infer Item)[] ? readonly FrontendIR<Item>[]
-  : T extends object ? {readonly [K in keyof StatementShape<T>]: FrontendIR<StatementShape<T>[K]>} : T;
-export type FrontendStmt = FrontendIR<Stmt> & {readonly pos?: import("./ir.ts").Position};
-export type FrontendCatch = FrontendIR<Catch>;
-export interface FrontendMethod extends Omit<Method, "body"> { readonly body?: readonly FrontendStmt[] }
+// The frontend adds only its arithmetic-construction hint to canonical typed nodes.
+export type ValueExpr = TypedExpr & {readonly arith?: boolean};
+// Completed nodes use the shared IR; mutable construction state stays below.
+export type FrontendSqlPredicate = SqlPredicate;
+export type FrontendStmt = Stmt;
+export type FrontendCatch = Catch;
+export type FrontendMethod = Method;
 export interface FrontendConstant { go: string; type: Type; value?: string | Record<string, string | undefined>; init?: ConstantInitializer; fieldInits?: Record<string, ConstantInitializer | undefined> }
 export type FrontendAttribute = (Omit<Attribute, "value"> & {readonly value?: string; readonly unsupported?: undefined})
   | {readonly name: string; readonly unsupported: string; readonly type?: undefined; readonly value?: undefined; readonly static?: boolean; readonly private?: boolean};
@@ -104,11 +96,9 @@ export interface ExpressionItem {
   node?: SyntaxNode; comps?: SyntaxNode; op?: string; concat?: boolean; sign?: string; hint?: Type;
 }
 
-export interface FactoryMethod { name: string; params: readonly FrontendParam[]; returning: {type: Type} }
-
 export type ConstantIdentifier = Pick<abaplint.TypedIdentifier, "getType" | "getValue">;
 
-export type ConstantInitializer = ValueExpr | {readonly e: "float"; readonly value: number; readonly type: Type};
+export type ConstantInitializer = ValueExpr;
 
 export type LocalConstantHelpers = Pick<typeof import("./frontend-base.mjs"),
   "Nodes" | "Structures" | "Statements" | "Expressions" | "isTok" | "isExpr" | "isStruct" | "isStmt" | "upper" | "goName" | "Unsupported"> & {
@@ -142,9 +132,9 @@ export interface MethodContextState extends Omit<MethodContext, "fieldSymbols" |
 // The registry kinds TABL/VIEW/TTYP/DTEL each implement parseType.
 export type DataTypeObject = abaplint.Objects.Table | abaplint.Objects.View | abaplint.Objects.TableType | abaplint.Objects.DataElement;
 
-export interface StaticSlotExpr { readonly e: "static"; readonly owner: string; readonly name: string; readonly type: Type; readonly go: string }
+export type StaticSlotExpr = Extract<Expr, {e: "static"}>;
 export interface FrontendSelectStar { readonly star: true; readonly fn?: undefined; readonly col?: undefined }
 export interface FrontendSelectField { readonly fn: string; readonly col: string; readonly star?: undefined }
 export interface FrontendSelectColumn { readonly name: string; readonly type: Type; readonly sql?: string; readonly named?: boolean; readonly agg?: FrontendSelectStar | FrontendSelectField }
-export interface FrontendSelectColumns extends Array<FrontendSelectColumn> { grouped?: boolean; groupBy?: string[] }
+export type FrontendSelectColumns = FrontendSelectColumn[] & { grouped?: boolean; groupBy?: string[] };
 export interface FrontendSelectFae { name: string; row: StructType; n: number; table: TypedExpr }

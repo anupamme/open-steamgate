@@ -4,7 +4,8 @@ import type {Registry, ArtifactObject} from "./frontend-session-types.ts";
 import type {ABAPObject} from "@abaplint/core";
 type OwnershipObject = ArtifactObject & Partial<Pick<ABAPObject, "getABAPFiles">>;
 import type {OwnershipSafety, OwnershipSafetyMap} from "./frontend-types.ts";
-import type {ProgramInput, Class, ClassName, Method, Local, Attribute, SupportedAttribute, Expr, Type, Context, Ownership} from "./emit-go-types.ts";
+import type {ProgramInput, Class, ClassName, Attribute, SupportedAttribute, Context, Ownership} from "./emit-go-types.ts";
+import type {Method, Local, Expr, Type} from "./ir.ts";
 import type {AttributeProbe} from "./emit-ownership.ts";
 import {enumerateObjects, semanticQuery, withArtifact} from "./frontend-provenance.mjs";
 // Ownership is per declaration, never a change to an ABAP type or ABI.
