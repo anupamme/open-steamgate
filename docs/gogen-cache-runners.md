@@ -105,7 +105,9 @@ failures or skips. Its CI oracle covers 60 supported mutations in 62 attempts
 with zero mismatches (132.2 s). The production dependency-mode oracle with 300 generated
 controls and the pinned real libraries passes 66 fresh-process observations:
 64 supported mutations, two retained unsupported pool-constant attempts, and
-zero mismatches (884.7 s). Both line modes, multi-edits and reverts are included.
+zero mismatches (921.1 s). Both line modes, multi-edits and reverts are included.
+The production-mode verification ran against implementation `67d444af`
+in a 70 GiB / zero-swap scope with the 24 GiB Node heap.
 The matrix includes closure scheduling, guarded round reuse, both reverse-edge
 fault detectors, and real runner timing/round checks. The host boundary passes all four
 tests; TypeScript and the 153-budget changed-file size gate also pass.
