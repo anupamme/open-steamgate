@@ -215,7 +215,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
 }
 /**  @returns {string[]} */ function descFuncs() {
   /** @type {string[]} */ const out = [];
-  const done = new Set();
+  /** @type {Set<string>} */ const done = new Set();
   /** @type {string[]} */ const inits = [];
   for (let again = true; again;) {
     again = false;
@@ -295,7 +295,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
 
 /**  @returns {string[]} */ function cloneFuncs() {
   /** @type {string[]} */ const out = [];
-  const done = new Set();
+  /** @type {Set<string>} */ const done = new Set();
   for (let again = true; again;) {
     again = false;
     for (const [key, c] of [...CLONES]) {
@@ -596,13 +596,14 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   const ret = goType({k: "ref", name: "CL_ABAP_TYPEDESCR"});
   const head = `func Native_DESCRIBE_BY_DATA(s *abap.Session, p_data abap.Data) ${ret} {`;
   /** @param {import("./emit-go-types.ts").Class} cls @param {string} a @returns {import("./emit-go-types.ts").Attribute | undefined} */ const attr = (cls, a) => [cls, ...ancestorsOf(cls)].flatMap((c) => c.attributes ?? []).find((x) => x.name === a && !x.unsupported && !x.static);
-  /** @type {[import("./emit-go-types.ts").Class | undefined, string][]} */ const need = [[ed, "OUTPUT_LENGTH"], [sd, "MT_REFS"], [sd, "MT_REFS_COMP"], [sd, "COMPONENTS"], [tb, "MO_LINE_TYPE"], [tb, "TABLE_KIND"], [tb, "HAS_UNIQUE_KEY"],
-    [td, "KIND"], [td, "TYPE_KIND"], [td, "LENGTH"], [td, "DECIMALS"], [td, "ABSOLUTE_NAME"], [td, "RELATIVE_NAME"], [td, "DDIC"]];
+  // The ternary below excludes absent/abstract classes before need is consumed.
+  const need = /** @type {[import("./emit-go-types.ts").Class, string][]} */ ([[ed, "OUTPUT_LENGTH"], [sd, "MT_REFS"], [sd, "MT_REFS_COMP"], [sd, "COMPONENTS"], [tb, "MO_LINE_TYPE"], [tb, "TABLE_KIND"], [tb, "HAS_UNIQUE_KEY"],
+    [td, "KIND"], [td, "TYPE_KIND"], [td, "LENGTH"], [td, "DECIMALS"], [td, "ABSOLUTE_NAME"], [td, "RELATIVE_NAME"], [td, "DDIC"]]);
   const missing = [td, ed, sd, tb].some((c) => !c || c.abstract) ? "the RTTI classes" : need.filter(([c, a]) => !attr(c, a)).map(([c, a]) => `${c.name}-${a}`).join(", ");
   if (missing) return [head, `\tpanic(abap.NotCompiled("CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA", ${JSON.stringify(`RTTI needs ${missing} compiled`)}))`, "}", ""];
-  const refRow = attr(sd, "MT_REFS").type.row.go;
-  const compRow = attr(sd, "COMPONENTS").type.row.go;
-  const dataRef = goType(attr(sd, "MT_REFS").type.row.k === "struct" ? STRUCTDEFS.get(refRow).fields.find((f) => f.name === "TYPE").type : null);
+  const refRow = attr(/** @type {import("./emit-go-types.ts").Class} */ (sd), "MT_REFS").type.row.go;
+  const compRow = attr(/** @type {import("./emit-go-types.ts").Class} */ (sd), "COMPONENTS").type.row.go;
+  const dataRef = goType(attr(/** @type {import("./emit-go-types.ts").Class} */ (sd), "MT_REFS").type.row.k === "struct" ? STRUCTDEFS.get(refRow).fields.find((f) => f.name === "TYPE").type : null);
   /** @param {string} a @returns {string} */ const f = (a) => ident(a);
   return [
     // parity-wave1: the output lengths of the data elements the program's
@@ -625,9 +626,9 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     `		base.${f("KIND")} = "S"`,
     "		rttiDescs[t] = d",
     "		for _, c := range t.Comps {",
-    `			sd.${f("MT_REFS")} = append(sd.${f("MT_REFS")}, ${rowStored(attr(sd, "MT_REFS").type, `${refRow}{${f("NAME")}: c.Name, ${f("TYPE")}: abap.Cast[${dataRef}](rttiOf(c.T))}`)})`,
+    `			sd.${f("MT_REFS")} = append(sd.${f("MT_REFS")}, ${rowStored(attr(/** @type {import("./emit-go-types.ts").Class} */ (sd), "MT_REFS").type, `${refRow}{${f("NAME")}: c.Name, ${f("TYPE")}: abap.Cast[${dataRef}](rttiOf(c.T))}`)})`,
     "			ct := rttiOf(c.T).As_CL_ABAP_TYPEDESCR()",
-    `			sd.${f("COMPONENTS")} = append(sd.${f("COMPONENTS")}, ${rowStored(attr(sd, "COMPONENTS").type, `${compRow}{${f("NAME")}: c.Name, ${f("TYPE_KIND")}: ct.${f("TYPE_KIND")}, ${f("LENGTH")}: ct.${f("LENGTH")}, ${f("DECIMALS")}: ct.${f("DECIMALS")}}`)})`,
+    `			sd.${f("COMPONENTS")} = append(sd.${f("COMPONENTS")}, ${rowStored(attr(/** @type {import("./emit-go-types.ts").Class} */ (sd), "COMPONENTS").type, `${compRow}{${f("NAME")}: c.Name, ${f("TYPE_KIND")}: ct.${f("TYPE_KIND")}, ${f("LENGTH")}: ct.${f("LENGTH")}, ${f("DECIMALS")}: ct.${f("DECIMALS")}}`)})`,
     "		}",
     `		sd.${f("MT_REFS_COMP")} = append(sd.${f("MT_REFS_COMP")}[:0:0], sd.${f("MT_REFS")}...)`,
     "	case 'h':",
@@ -767,7 +768,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
 
 /** @param {import("./emit-go-types.ts").Class} cls @returns {import("./emit-go-types.ts").Class[]} */ function ancestorsOf(cls) {
   /** @type {import("./emit-go-types.ts").Class[]} */ const out = [];
-  for (let c = cls; c.super && CLASSES.has(c.super);) { c = CLASSES.get(c.super); out.push(c); }
+  for (let c = cls; c.super && CLASSES.has(c.super);) { c = /** @type {import("./emit-go-types.ts").Class} */ (CLASSES.get(c.super)); out.push(c); }
   return out;
 }
 
@@ -786,9 +787,10 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   out.push(`\tAs_${T}() *${T}`);
   // the accessors of the interfaces the class implements, so the reference converts to them
   for (const a of (cls.attributes ?? []).filter((x) => x.fromIntf && !x.unsupported)) out.push(`\t${accessorName(a.name)}() *${goType(a.type)}`);
+  // Refused signatures carry a nonempty unsupported reason; survivors have params.
   for (const m of cls.signatures?.values() ?? []) {
-    if (m.unsupported || m.static || m.private || m.name === "CONSTRUCTOR" || !definable(program, m)) continue;
-    out.push(`\t${signature({name: cls.name}, m, true)}`);
+    if (m.unsupported || m.static || m.private || m.name === "CONSTRUCTOR" || !definable(program, /** @type {import("./emit-go-types.ts").Method} */ (m))) continue;
+    out.push(`\t${signature({name: cls.name}, /** @type {import("./emit-go-types.ts").Method} */ (m), true)}`);
   }
   out.push("}", "", `func (me *${T}) As_${T}() *${T} { return me }`, "");
   return out;
@@ -808,7 +810,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
 /** @param {string} intf @returns {string} */ const interfaceMarker = (intf) => `AbapΩImplements_${typeName(intf)}`;
 
 /** @param {import("./emit-go-types.ts").ProgramInput} program @param {import("./emit-go-types.ts").Class} cls @returns {Set<string>} */ function implementedInterfaces(program, cls) {
-  const out = new Set();
+  /** @type {Set<string>} */ const out = new Set();
   for (const c of [cls, ...ancestorsOf(cls)]) {
     for (const intf of c.interfaces ?? []) {
       out.add(intf);
@@ -849,7 +851,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
 }
 
 /** @param {import("./emit-go-types.ts").ProgramInput} program @returns {Set<string>} */ export function referencedClasses(program) {
-  const seen = new Set();
+  /** @type {Set<string>} */ const seen = new Set();
   /** @param {import("./emit-go-types.ts").Type | undefined} t @returns {void} */ const visit = (t) => {
     if (!t) return;
     if (t.k === "ref" && !t.intf) seen.add(t.name);
@@ -966,7 +968,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   /** @type {Map<string, string>} */ const staticStores = new Map();
   /** @param {unknown} node @returns {void} */ const collectStatics = (node) => {
     if (!node || typeof node !== "object") return;
-    if ((/** @type {import("./emit-go-types.ts").WalkNode} */ (node)).e === "static" && !staticStores.has((/** @type {import("./emit-go-types.ts").WalkNode} */ (node)).owner)) staticStores.set((/** @type {import("./emit-go-types.ts").WalkNode} */ (node)).owner, `static_${typeName((/** @type {import("./emit-go-types.ts").WalkNode} */ (node)).owner)}`);
+    if ((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "static"}>} */ (node)).e === "static" && !staticStores.has((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "static"}>} */ (node)).owner)) staticStores.set((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "static"}>} */ (node)).owner, `static_${typeName((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "static"}>} */ (node)).owner)}`);
     for (const value of Object.values(node)) collectStatics(value);
   };
   collectStatics(m.body);
@@ -1106,7 +1108,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
       const owner = p.owner;
       const field = `${ctx.staticStores?.get(owner) ?? `St_${typeName(owner)}(s)`}.${ident(p.name)}`;
       const decl = CLASSES.get(owner)?.attributes?.find((a) => a.name === p.name);
-      const type = decl ? ownedType(decl) : goType(p.type);
+      const type = decl ? ownedType(/** @type {import("./emit-go-types.ts").SupportedAttribute} */ (decl)) : goType(p.type);
       return owner !== ctx.cls.name && CLASSES.has(owner) && chainCctor(CLASSES.get(owner))
         ? `(*func() *${type} { Ensure_${typeName(owner)}(s); return &${field} }())` : field;
     }
@@ -1142,7 +1144,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   && (name === undefined || st.target.name === name) && st.value.e === "concat" && leftmost(st.value).e === "var" && leftmost(st.value).name === st.target.name;
 
 /** @param {readonly import("./emit-go-types.ts").Stmt[]} body @param {import("./emit-go-types.ts").Context} ctx @param {readonly unknown[]} [outside] @returns {string[]} */ function builders(body, ctx, outside = []) {
-  const names = new Set();
+  /** @type {Set<string>} */ const names = new Set();
   /** @param {unknown} n @returns {void} */ const walk = (n) => {
     if (Array.isArray(n)) { n.forEach(walk); return; }
     if (!n || typeof n !== "object") return;
