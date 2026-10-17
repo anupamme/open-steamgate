@@ -340,7 +340,7 @@ class Recorder {
   }
   return objects;
 }
-/** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').Query['kind']} kind @param {import('./frontend-session-types.ts').QueryScalar[]} args @param {readonly import('./frontend-session-types.ts').QueryScalar[]} result @param {Partial<import('./frontend-session-types.ts').Query>} details @returns {void} */ export function semanticQuery(reg, kind, args, result, details = {}) {
+/** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').Query['kind']} kind @param {readonly import('./frontend-session-types.ts').QueryScalar[]} args @param {readonly import('./frontend-session-types.ts').QueryScalar[]} result @param {Partial<import('./frontend-session-types.ts').Query>} details @returns {void} */ export function semanticQuery(reg, kind, args, result, details = {}) {
   if (active) active.query(active.state(reg), {kind, args, result, ...details});
 }
 /** @template T @param {import('./frontend-session-types.ts').Role} role @param {() => T} run @returns {T} */ export function withRole(role, run) {

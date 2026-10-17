@@ -152,7 +152,7 @@ export type Role = 'artifact' | 'scheduling' | 'final-output';
 // Hooks normalize strings and undefined, retaining other scalar answers.
 export type QueryScalar = string | number | boolean | null | undefined;
 export interface QueryBase {
-  args: QueryScalar[];
+  args: readonly QueryScalar[];
   result: readonly QueryScalar[];
   role?: Role;
   phase?: string;
@@ -222,8 +222,9 @@ export interface ArtifactFrame {
 }
 export interface QueryContext {kind: string; args: unknown[]}
 export interface InputSource {file: SourceFile; name: string; raw: string; _rawHash: string | undefined; _artifactHash: string | undefined}
+export interface InputObject {obj: ArtifactObject; dependency: boolean; sources: InputSource[]}
 export interface InputSnapshot {
-  objects: Map<string, {obj: ArtifactObject; dependency: boolean; sources: InputSource[]}>;
+  objects: Map<string, InputObject>;
   fileOwners: Map<string, string>;
   files: SourceFile[];
   config: string;

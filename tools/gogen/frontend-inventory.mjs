@@ -9,7 +9,7 @@ const artifactFields = ["syntaxResult", "parsedType", "def", "definition", "pars
 /** @param {import("./frontend-session-types.ts").ArtifactObject} obj @returns {import("./frontend-session-types.ts").ArtifactIdentity} */ export const artifactIdentity = (obj) => artifactFields.map((name) => obj[name]);
 /** @param {import("./frontend-session-types.ts").ArtifactIdentity | undefined} a @param {import("./frontend-session-types.ts").ArtifactIdentity} b @returns {boolean | undefined} */ export const sameArtifactIdentity = (a, b) => a?.every((value, i) => value === b[i]);
 /** @param {import("./frontend-session-types.ts").InputSnapshot} inputs @returns {boolean} */ const hasBuiltArtifacts = (inputs) => [...inputs.objects.values()].some(({obj}) =>
-  obj.syntaxResult || obj.def || obj.definition || obj.parsedType || obj.isDirty?.() === false);
+  Boolean(obj.syntaxResult || obj.def || obj.definition || obj.parsedType) || obj.isDirty?.() === false);
 /** @param {string} s @returns {string} */ const hash = (s) => createHash("sha256").update(s).digest("hex");
 /** @param {import("./frontend-session-types.ts").InputSource} source @returns {string} */ export function rawHashOf(source) {
   return source._rawHash ??= hash(source.raw);
@@ -26,7 +26,7 @@ const artifactFields = ["syntaxResult", "parsedType", "def", "definition", "pars
 /** @param {import("./frontend-session-types.ts").Registry} reg @param {boolean} refresh @returns {import("./frontend-session-types.ts").InputSnapshot} */ export function inputSnapshot(reg, refresh = false) {
   if (!refresh && snapshots.has(reg)) return snapshots.get(reg);
   // AUDITED bookkeeping: enumerate effective inputs, never semantic resolution.
-  const objects = new Map(), fileOwners = new Map(), files = [], signature = [];
+  const /** @type {Map<string, import("./frontend-session-types.ts").InputObject>} */ objects = new Map(), /** @type {Map<string, string>} */ fileOwners = new Map(), /** @type {import("./frontend-session-types.ts").SourceFile[]} */ files = [], /** @type {[string, boolean, [string, string][]][]} */ signature = [];
   for (const obj of reg instanceof core.Registry ? enumerate.call(reg) : reg.getObjects()) {
     const key = objectKey(obj), dependency = reg.isDependency?.(obj) ?? false;
     const sources = obj.getFiles().map((file) => {
@@ -49,7 +49,7 @@ const artifactFields = ["syntaxResult", "parsedType", "def", "definition", "pars
 // that go through these helpers count: a registry a caller parsed some other way
 // (reg.parse(), or core's own parse inside findIssues) reaches freshRegistry
 // unobserved and is rebuilt, which is correct but costs a full parse.
-/** @param {import("@abaplint/core").IRegistry} reg @param {unknown[]} args @param {boolean} async */
+/** @param {import("./frontend-session-types.ts").Registry} reg @param {[] | [unknown]} args @param {boolean} async */
 function observeParse(reg, args, async) {
   const before = inputSnapshot(reg, true), previous = parsed.get(reg);
   // The first observed parse cannot vouch for artifacts built before observation.
@@ -62,9 +62,9 @@ function observeParse(reg, args, async) {
   finish(); return result;
 }
 
-/** @param {import("@abaplint/core").IRegistry} reg @param {...unknown} args @returns {import("@abaplint/core").IRegistry} */
+/** @param {import("@abaplint/core").IRegistry} reg @param {[] | [unknown]} args @returns {import("@abaplint/core").IRegistry} */
 export function parseObserved(reg, ...args) { return observeParse(reg, args, false); }
-/** @param {import("@abaplint/core").IRegistry} reg @param {...unknown} args @returns {Promise<import("@abaplint/core").IRegistry>} */
+/** @param {import("@abaplint/core").IRegistry} reg @param {[] | [unknown]} args @returns {Promise<import("@abaplint/core").IRegistry>} */
 export function parseObservedAsync(reg, ...args) { return observeParse(reg, args, true); }
 
 /** @param {import("./frontend-session-types.ts").Registry} reg @param {import("./frontend-session-types.ts").SessionInput} session @returns {import("./frontend-session-types.ts").Registry} */ export function freshRegistry(reg, session) {
