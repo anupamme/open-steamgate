@@ -8,9 +8,10 @@ import {parseObserved, inputOrigin, rttiClassInventory, rttiLocalSupers} from ".
 import {suppliedIndex, suppliedAnswer, suppliedSignature, localDiscovery, lockAnswer, finalOutput, rttiProjection, selectionHas} from "./frontend-queries.mjs";
 import {enumerateObjects, auditedBookkeeping, withRole, beginProvenanceCompile} from "./frontend-provenance.mjs";
 import {prepareArtifactDigests} from "./frontend-artifact-digests.mjs";
-import {withProvenance, expandProgramSelection, withArtifact, resolvedFunctionModule} from "./frontend-provenance.mjs";
+import {withProvenance, withArtifact, resolvedFunctionModule} from "./frontend-provenance.mjs";
 import {isSourceIdentity, readdirEntries, readdirNames, readFileSync} from "./host-io-compat.mjs";
 import {append} from "./append.ts";
+import {localInterfaceNames, currentTypeNames, amcSource} from "./frontend-source-observations.mjs";
 import {lowerFindResults, inlineFindResultTypes} from "./frontend-find-results.ts";
 import {hoistLocalConstants} from "./frontend-local-constants.mjs";
 // ABAP -> IR, for the Go backend spike (tools/gogen/README.md).
@@ -28,7 +29,7 @@ import {hoistLocalConstants} from "./frontend-local-constants.mjs";
 // why; a method that calls a skipped one is refused in turn.
 import {resolveStatic as lowerStatic, staticSlot} from "./frontend-static.mjs";
 import {prepareSession, finishSession, compileClass} from "./frontend-session.mjs";
-import {syntaxDiagnostics} from "./frontend-diagnostics.ts";
+import {prepareSelection} from "./frontend-selection.mjs";
 import {sourceOwnershipSafety} from "./frontend-owned.ts";
 import {builtin} from "./frontend-builtins.mjs";
 import {literalText, textLiteral} from "./frontend-literals.ts";
@@ -42,7 +43,7 @@ import {join} from "./host-io.ts";
 import {caughtPresence, chainHas, caughtIndex} from "./frontend-hierarchy.mjs";
 import {typeKindOf, typeOf, rttiNamed, structOf, fieldOf, namedType} from "./frontend-types-signatures.mjs";
 
-import {TRANSPILER_MEANING, P_GENERIC, NATIVE, kernelOf, nativeArgs, AMC_HOST, AMC_CALLER, amcProgramOf, amcMethod, NATIVE_FM, DESTINATION_FM, NATIVE_ME, nativeMeSig, RUNTIME_CX, RUNTIME_CX_SUPER} from "./frontend-classes-native.mjs";
+import {TRANSPILER_MEANING, P_GENERIC, NATIVE, kernelOf, nativeArgs, AMC_HOST, amcProgramOf, amcMethod, NATIVE_FM, DESTINATION_FM, NATIVE_ME, nativeMeSig, RUNTIME_CX, RUNTIME_CX_SUPER} from "./frontend-classes-native.mjs";
 import {sqlIrType, writeIrType, irCheck, lowName, mandtPred, andIr, sqlHost, sqlValue, SQL_OPS} from "./frontend-sql.mjs";
 /** @typedef {Pick<typeof import("./frontend-base.mjs"), "Nodes" | "Structures" | "Statements" | "Expressions" | "isTok" | "isExpr" | "isStruct" | "isStmt" | "upper" | "goName" | "Unsupported"> & {initialValue: typeof initialValue}} LocalConstantHelpers */
 import {source, componentsOf, arith, sourceOperand, callMethodChain, excHolder,
@@ -61,20 +62,19 @@ const HOST_REPLACED = new Set(["ZCL_OSD_ENQ_KERNEL"]);
  */
 // skip(path): a file not to load, for a layered build where a later folder
 // hides an object an earlier one holds (osg-build.mjs; ultra/packs)
-export const compileProgram = withProvenance(/** @param {import("./frontend-session-types.ts").CompileOptions} options */ function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry, session, cacheDir, dependencyCache = false, closureContext}) {
+export const compileProgram = withProvenance(/** @param {import("./frontend-session-types.ts").CompileOptions} options */ function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry, session, cacheDir, dependencyCache = false, closureContext, strictRoots}) {
   const config = abaplint.Config.getDefault().get();
   config.syntax = {...config.syntax, version: "v758", errorNamespace: "."};
   // only the syntax check and parser errors are read below (parser_error is a
   // rule too: without it a statement that does not parse is dropped silently);
   // the default config runs every lint rule, which was 45 % of a build
   config.rules = {check_syntax: true, parser_error: true};
-  // Reset the ordinary module counter on each compile, as on main.
+  // Reset counters per compile.
   FAE_N = 0;
   PERSIST_LOWERING = !!cacheDir;
   /** @type {import("./frontend-session-types.ts").Registry} */ const reg = registry ?? /** @type {import("./frontend-session-types.ts").Registry} */ (new abaplint.Registry(new abaplint.Config(JSON.stringify(config))));
-  // Load every file for resolution; lower and report diagnostics for selected objects.
+  // Resolve files; diagnose selection.
   /** @param {string} fn @returns {string} */ const objName = (fn) => fn.split("/").pop().split(".")[0].toLowerCase().replace(/#/g, "/");
-  /** @type {string[]} */ let wanted = objects.map((o) => o.toLowerCase().replace(/#/g, "/"));
   /** @type {import("./frontend-cache-types.ts").CdsSource[]} */ const ddls = [];
   /** @param {string} dir @returns {void} */ const walk = (dir) => {
     for (const e of readdirEntries(dir).sort((x, y) => x.name.localeCompare(y.name))) {
@@ -120,20 +120,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   }
   if (session) session.cdsInputs = cdsIdentity;
   /** @type {typeof compileClass} */ const compile = diskFrontend ? (...args) => diskFrontend.compileDiskClass.call(undefined, ...args) : compileClass;
-  // abaplint's RAISE syntax checker only accepts ObjectReferenceType, not
-  // its generic REF TO object sibling. The dynamic raise path below checks
-  // the actual registered object; retain every other syntax diagnostic.
-  const diagnostics = syntaxDiagnostics(reg, (fn) => selectionHas(wanted, objName(fn)), objName, session)
-    .filter((d) => !d.message.endsWith("RAISE EXCEPTION, must be object reference, got GenericObjectReferenceType"));
-  prepareArtifactDigests(reg, !!session, closureContext);
-  if (diagnostics.length && !tolerant) throw new Error(diagnostics.map((d) => d.message).join("\n"));
-  const broken = new Set(diagnostics.map((d) => d.object.toLowerCase()));
-  if (broken.size > 0) wanted = wanted.filter((w) => !broken.has(w));
-
-  // A literal CALL FUNCTION is a dependency on its function group. The
-  // registry already knows each module's group; include it before signatures
-  // are built, including calls made by a module in another group.
-  withRole("scheduling", () => expandProgramSelection(reg, wanted, /** @type {import("./frontend-session-types.ts").SelectionCore} */ ({VirtualPosition: abaplint.VirtualPosition, MacroContent: abaplint.MacroContent, Objects: abaplint.Objects, Visibility: abaplint.Visibility, Statements: abaplint.Statements, Expressions: abaplint.Expressions, Tokens: abaplint.Tokens}))); Object.freeze(wanted);
+  const {wanted, diagnostics, broken} = prepareSelection(reg, {objects, tolerant, strictRoots}, session, () => prepareArtifactDigests(reg, !!session, closureContext));
 
   // Eager collections keep first writes inside the replay proxies. Anonymous
   // type identities use a Map so their ordered effects can be replayed too;
@@ -158,8 +145,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
     if (LOCAL_CLASSES.has(upper(obj.getName()))) {
       const top = new abaplint.SyntaxLogic(reg, obj).run().spaghetti.getTop();
       for (const file of obj.getABAPFiles()) {
-        for (const match of file.getRaw().matchAll(/\bINTERFACE\s+(LIF_[A-Z0-9_]+)\s*\./gi)) {
-          const name = upper(match[1]);
+        for (const name of localInterfaceNames(file.getRaw())) {
           const def = top.getChildren().find((s) => s.findInterfaceDefinition(name))?.findInterfaceDefinition(name);
           if (def) program.localInterfaces.set(`${upper(obj.getName())}|${name}`, {def, source: file.getRaw()});
         }
@@ -480,6 +466,19 @@ let PERSIST_LOWERING = false;
     }
   }
   return out;
+}
+
+// Reconstruct a cold round's membership on the CURRENT normalized registry.
+// No lowering or persisted wanted participates in this derivation.
+/** @param {import("./frontend-session-types.ts").Registry} reg @param {import("./frontend-session-types.ts").CompileOptions} options @param {import("./frontend-diagnostics.ts").DiagnosticsSession} [session] @returns {string[]} */
+export function deriveProgramWanted(reg, options, session) {
+  const {wanted} = prepareSelection(reg, options, session);
+  const result = new Set(wanted.map(upper)), includeTests = options.includeTests ?? false;
+  for (const obj of enumerateObjects(reg, "local-dispatch", [], "scheduling", (o) => o instanceof abaplint.Objects.Class && selectionHas(wanted, o.getName().toLowerCase()) && (includeTests || LOCAL_CLASSES.has(upper(o.getName()))))) {
+    for (const local of localClasses(reg, obj, includeTests === true || (includeTests instanceof Set && includeTests.has(upper(obj.getName()))))) result.add(local.name);
+  }
+  for (const group of enumerateObjects(reg, "selected-groups", wanted, "scheduling", (o) => o instanceof abaplint.Objects.FunctionGroup && selectionHas(wanted, o.getName().toLowerCase()))) result.add(fugrOwner(group));
+  return [...result];
 }
 
 /*
@@ -879,8 +878,7 @@ function compiledFunctionCall(node, ctx, text, name) {
   program.currentOwner = upper(obj.owner ?? obj.getName());
   const file = obj.getMainABAPFile();
   // the type names this class declares itself (class and method TYPES)
-  program.currentTypes = new Set([...file.getRaw().matchAll(/\bTYPES\s*:?\s*(?:BEGIN\s+OF\s+)?([\w\/]+)/gi)].map((m) => upper(m[1])));
-  for (const m of file.getRaw().matchAll(/,\s*(?:BEGIN\s+OF\s+)?([\w\/]+)\s+TYPE\b/gi)) program.currentTypes.add(upper(m[1]));
+  program.currentTypes = new Set(currentTypeNames(file.getRaw()));
   const def = obj.getDefinition();
   // a local class (localClasses) is read in the scopes of its owner
   const spaghetti = new abaplint.SyntaxLogic(reg, obj.obj ?? obj).run().spaghetti;
@@ -1150,7 +1148,7 @@ function compiledFunctionCall(node, ctx, text, name) {
       // sent from a method that never names the type is this class's call
       // too (the critic on #263). The AMC classes are not callers, as Node's
       // callerProgram skips them
-      if (AMC_CALLER.test(file.getRaw()) && !/^(CL_AMC_|ZCL_AMC_)/.test(upper(ctx.owner))) ir.amcProgram = amcProgramOf(ctx.owner);
+      if (amcSource(file.getRaw()) && !/^(CL_AMC_|ZCL_AMC_)/.test(upper(ctx.owner))) ir.amcProgram = amcProgramOf(ctx.owner);
       if (name === "CONSTRUCTOR") cls.constructor = ir; else cls.methods.push(ir);
     } catch (e) {
       if (!(e instanceof Unsupported)) throw e;
