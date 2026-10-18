@@ -8,7 +8,7 @@ failed a test: compilation has not yet reached that stage.
 
 ## Measurement and scope
 
-The measured pair is OSG `fc8b0702fc5608d1016289335df7579bfb79361e`
+The measured pair is OSG `2461ab76d2ec4419baa8391fb32df12f03a68ff3`
 (a **private, unmerged** G candidate based on main
 `602822731dda56d5b44ce3ec5e5282e7bbdda7c8`) and abapiti core2 source
 `44546af481277e414b01a13bf9a3e12280145fd3`. The typed step-4 driver
@@ -18,7 +18,7 @@ The Node-gogen reference Go has SHA-256
 the trap run checked that reference hash. These identifiers pin the **inputs
 to the diagnostic**, not a completed self-hosting result.
 
-The reached-function scan reports **10 root trap locations, 4,392 hits**,
+The reached-function scan reports **9 root trap locations, 4,388 hits**,
 `0/35 unknown`, and **321 unreached functions**. A hit is
 one occurrence attributed to a trapped root in the lowering/reachability
 report; it is not an independent defect or a count of failed unit tests. The
@@ -34,29 +34,29 @@ the measured OSG commit; line numbers can move on later branches.
 | Front end | `frontend.mjs:1740` `statement` · 839 | Recursive union literal has no admitted tag or compatible payload | IR statement construction, first reported at the `REFRESH`/`FREE` mapped `clear`/`clear_data` literals, is rejected as a recursive discriminated union. Check the produced tag and payload against the IR type, then the compiler's recursive-union admission. |
 | Front end | `frontend.mjs:5085` `call` · 117 | Structural node shape passed as `ExpressionNode` | The hand-built chain prefix satisfies the JavaScript use site but is not accepted as abaplint's concrete `ExpressionNode`. Check whether the helper can consume an explicit smaller interface. |
 | Front end | `frontend.mjs:3515` `constructor_function` · 20 | Boxed `Map` allocation needs value-based `SameValueZero` | A compiler capability gap in JavaScript `Map` semantics, reached by constructor argument handling. A source change is safe only if key identity and lookup behavior remain identical. |
-| Front end | `frontend.mjs:1681` `whereOf` · 4 | Invalid narrowing from `optional<Expr>` to a union member | A nullable expression is narrowed beyond what the compiler proves. Trace the null guard and the IR union tag together. |
 | Emitter | `emit-go.mjs:319` `emitGo` · 1 | Dynamic collection key | A collection in emitter setup has a key type the Go prototype cannot lower. Narrowing one collection has previously exposed another at the next line, so inspect the whole setup path. |
 | Emitter | `emit-go.mjs:953` `method` · 209 | `Method` passed to `sinkLocals`, which expects `SinkMethod` | Two emitter method contracts disagree at a helper boundary. Compare the actual fields used by `sinkLocals` with both declared shapes. |
 | Emitter | `emit-go.mjs:1111` `place` · 1,420 | Union field incompatible in some alternatives | Reference-attribute and place handling reads a field across a union whose alternatives do not all carry the same type. A local cast moved the failure but did not remove the trap. |
 | Emitter | `emit-go.mjs:2225` `expr` · 1,740 | Invalid narrowing from `optional<dynamic>` to emitter `Expr` | An expression operand remains optional/dynamic at a call site. Establish the guard and concrete IR type before relying on the expression branch. |
 
 The high-hit emitter roots (`expr`, `place`) account for 3,160 of
-4,392 hits. That makes them useful integration targets, but hit count is not
+4,388 hits. That makes them useful integration targets, but hit count is not
 an effort estimate: a one-hit root can still block `compileProgram` or
 `emitGo` as an entry point. Several failures are source contract mismatches;
 the boxed `Map`, dynamic key and recursive-union errors may require abapiti
 lowering support. That division is a diagnostic hypothesis until a candidate
 removes the exact root without introducing another one.
 
-The previous productive G candidate `9299a46fea7274ad9a49662e23e64b8bca2042cf`
-had **11 roots and 5,214 hits** on the same abapiti binary and typed driver.
-Intermediate candidates first moved the failure inside `stmtLines` from an
-optional argument name to a `TableKey` shape mismatch, then to a loop-cursor
-type mismatch. At `fc8b0702`, that **822-hit root is gone with no new root**.
-The candidate type-checks, passes 40 emitter tests, and generates 243
-byte-identical artifacts in each of six sink/cache comparison modes against
-its parent. It is still **private and unmerged**, pending G review and PR
-checks; the table reports its measured state rather than the state of main.
+On the same abapiti binary and typed driver, private G candidate
+`9299a46fea7274ad9a49662e23e64b8bca2042cf` had **11 roots / 5,214
+hits**; `fc8b0702fc5608d1016289335df7579bfb79361e` cleared the 822-hit
+`stmtLines` root for **10 / 4,392**; and the measured candidate in the table
+cleared the four-hit `whereOf` root for **9 / 4,388**. Neither step introduced
+a new root. Both candidates type-check, pass their changed-path tests, and
+produce 243 byte-identical artifacts in each of six sink/cache comparison
+modes against their respective parents. These G changes are still **private
+and unmerged**, pending review and PR checks; the table reports their measured
+state rather than the state of main.
 
 ## Completion gate
 
