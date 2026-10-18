@@ -80,6 +80,19 @@ real parser node in recursive calls. It passed 40 emitter tests and the
 six-mode direct byte comparison against its parent, but remains private and
 awaits review.
 
+Two more private diagnostic branches also left the counts unchanged. Passing
+the original method definition to `addSig` with a separate name override
+(`9ca99cc6c05c143290b6f232fcee5b9d379fc818`) kept **6 / 1,111** on the
+measured G chain: the 41-hit `classIr` root moved from the interface argument
+error to a runtime call rejecting a built-in object for a structural class
+shape. On the separate statement branch, declaring the `REPLACE` helper's
+return type (`f704769030017286075019877e004112c5ad5e6c`) kept **7 / 1,228**;
+its 839-hit root now reports `array<dynamic>` against an array of a specific
+union family in a runtime call. Neither branch is a ready G fix. The shifted
+failures suggest the remaining work crosses abapiti's structural-shape and
+array-variance lowering, but that is an inference from the diagnostics, not
+yet a confirmed compiler defect.
+
 ## Completion gate
 
 For each candidate, compare the reached trap locations and hit counts on the
