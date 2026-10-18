@@ -703,7 +703,13 @@ the scheduling role with one current syntax-issue list. A mismatching ledger
 discards the tentative seeded compile and restarts from the current roots before
 emission. Compiler expansion and tolerant filtering are supported derivations.
 The checksum is an integrity check, not authentication: the cache directory is
-trusted local state, just like object-cache entries.
+trusted local state, just like object-cache entries. Re-deriving round 0 from
+the current request catches corruption and the simplest forgery, but a writer
+who coherently rewrites the persisted `missing`/`supers` lists (or object-cache
+IR) can still steer the result; that is outside this cache's threat model.
+Genuine edits cannot produce a stale superset: only equal-width local string
+initializer edits are certified for one-round reuse, and those cannot add or
+remove a dependency.
 Selection publication precedes read-grant validation, emission, gofmt and Go
 build, so a later-failing invocation can leave a correct, reusable selection.
 Exact-source and AST-proof digests have distinct domains; changed files must
