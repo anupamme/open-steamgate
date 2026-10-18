@@ -59,6 +59,16 @@ modes against its respective parent. These G changes are still **private
 and unmerged**, pending review and PR checks; the table reports their measured
 state rather than the state of main.
 
+A later private diagnostic, `4b315009c78f4fbd1dbb229ec409114720a78d67`,
+made the `REFRESH`/`FREE` `clear` tags literal and kept their checked Go output
+byte-identical to its parent. On the same pinned abapiti binary and driver,
+however, the scan still found **7 roots / 1,228 hits**, with `0/35 unknown`
+and 321 unreached. The 839-hit `statement` root moved from the recursive
+literal error to an HIR assignment type mismatch at the
+`dbWriteStatement("insert", ...)` return. This is evidence about the next
+failure inside the root, not a cleared trap; that candidate is not part of
+the ready G patch chain.
+
 ## Completion gate
 
 For each candidate, compare the reached trap locations and hit counts on the
