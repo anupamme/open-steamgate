@@ -121,6 +121,18 @@ individual emitter statements to its inspection statement family, while the
 209-hit `method` root advanced to a dynamic collection key. This follow-up is
 also excluded.
 
+The next private G candidate (`79be328c0e4c8ab97196ab0d40c38a595dbc1005`)
+gives the disk-cache facade its existing interface type and makes the ignored
+selection callback return `void`. On the unmerged core5 compiler it removed
+only the one-hit `compileProgram` root: **4 roots / 1,090 hits**, `0/35
+unknown`, 322 unreached, with all four remaining rows unchanged. Direct
+parent-to-candidate comparison produced 243 byte-identical artifacts in each
+of six sink/cache modes; all 49 focused cache and digest tests passed. On the
+published compiler the same G change kept **6 / 1,111**: `compileProgram`
+advanced to an unresolved `compileDiskClass` field. The G candidate is
+therefore awaiting review together with core5; neither is an integrated
+self-hosting result.
+
 ## Completion gate
 
 For each candidate, compare the reached trap locations and hit counts on the
