@@ -903,3 +903,80 @@ reuse check; the complete 25-test osabap suite was rerun with no edits and
 passed (193.8 s). The four host-boundary tests, TypeScript, all 153 size budgets
 and the explicit 13-path leak-scan exit-code gate passed. `frontend.mjs` is
 net -2 lines and -330 bytes against `origin/main` at `c9dad34f`.
+
+### Six-case proof at `1c788ef7` (2026-10-18)
+
+`tools/gogen/cache-runner-proof.mjs` completed all six cases on the committed
+current-registry replay implementation. A fresh cold-enabled case ran first:
+the changed compiler identity prevents reusing the earlier cold namespace.
+Every completed case was saved immediately; none was rerun. The source copy's
+5,978 files match the earlier proof inputs apart from reverting the intended
+literal edit before the cold cases. Installed inputs and shared libraries
+were not modified.
+
+| Run | Cache | Frontend (s) | Emission (s) | gofmt (s) | Total (s) | Rounds | Final-round lowered / reused |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Cold | on | 1,446.6 | 39.2 | 18.5 | 1,506.4 | 6 | 9 / 3,046 |
+| Cold | off | 457.5 | 33.5 | 18.4 | 511.5 | 6 | 3,055 / 0 |
+| Warm | on | 152.7 | 42.2 | 18.4 | 215.2 | 1 | 9 / 3,046 |
+| Warm | off | 457.4 | 33.5 | 18.4 | 511.4 | 6 | 3,055 / 0 |
+| Edited | on | 298.8 | 62.8 | 18.5 | 382.1 | 1 | 14 / 3,041 |
+| Edited | off | 457.6 | 33.3 | 18.4 | 511.3 | 6 | 3,055 / 0 |
+
+Emission excludes gofmt in this table; the runner's aggregate `emit` phase
+includes both. Totals also include runner setup. The final-round class counts
+are not sums over all executed rounds.
+
+**Real ledger accepted.** The newly written ledger again has 3,139 raw roots,
+3,129 distinct roots and 3,132 first-round wanted names, including the function
+group and local identities described above. Warm reports `exact-inputs`, and
+edited reports `local-string-initializers`, both with one executed round.
+The edited invocation retains scoped dependency recording, 14 lowerings and
+3,041 guarded reuses. Warm reuse is 99.705%, meeting the 99% gate.
+
+**Measured performance.** Warm is 215.2 s, 13.2% above the retained
+190.1 s proof; edited is 382.1 s, 22.3% above the retained 312.3 s proof.
+Those earlier absolute times were not reproduced. The certified one-round path
+is restored on the real runner: warm takes 42.1% of its disabled control, and
+edited is 25.3% faster than its disabled control. The 450 s edited
+planning gate and the supplied 339.6 s warm target pass.
+Current-registry ledger derivation is included in frontend time. Relative to
+the retained proof, edited frontend is 46.1 s longer and emission is 23.6 s
+longer; gofmt is effectively unchanged. There was no matched old-version rerun,
+so these samples do not isolate validation overhead from other run variation.
+
+**Independent byte oracle.** All four comparisons pass for `zz_app.go`,
+`zz_generated.go`, `zz_db.json` and `symbols.json`: unchanged warm versus
+cold-enabled, cold-enabled versus original-roots cold-disabled, disabled
+repeat versus cold-disabled, and edited-enabled versus edited-disabled. Both
+object caching and selection seeding are off in the independent roots oracle
+invocations.
+A separate verification performed all sixteen direct file-byte comparisons
+and checked every saved artifact against its recorded SHA-256. Only
+`zz_generated.go` changes across the literal edit.
+
+The unchanged combined manifest SHA-256 is
+`ab7a8bfde0838fd043f63bd30aa019683eb4d9a8287bd92ad2216f68cf7e7939`.
+The edited manifest is
+`3f8f446621f69331e115e85d47ac2941cdf84b80982a407130ad4b0ae4700965`.
+
+The Node heap was 24 GiB, `TMPDIR=/mnt/ssd-510/osg/stoker/tmp`, and
+`GOCACHE=/mnt/ssd-510/osg/go-build`. Every large child ran alone within this
+proof in its own 70 GiB / zero-swap systemd scope; the actual cgroup limits were
+also checked. Go compilation was explicitly skipped in all six logs. All
+test suites finished before the large proof began; no test suite overlapped
+these measurements. Other host work was not controlled, so the timings remain
+shared-host measurements.
+Thirty-second samples during the edited pair show:
+
+| Run | One-minute load range | Minimum available memory (GiB) |
+| --- | ---: | ---: |
+| edited-enabled | 1.22–1.98 | 92.6 |
+| edited-disabled | 1.07–1.64 | 93.1 |
+
+The complete report, logs, diagnostics and artifacts are retained at
+`/mnt/ssd-510/osg/stoker/tmp/c4b3-follow-proof/report.json`; direct-byte results
+are in `verified.json` and load samples in `load.ndjson` beside it. Validation
+logs, including the expected four failures on `57cfbdbb` and the clean osabap
+rerun, are under `/mnt/ssd-510/osg/stoker/tmp/c4b3-follow-validation`.
+The copied inputs are `/mnt/ssd-510/osg/stoker/tmp/c4b3-follow-input`.
