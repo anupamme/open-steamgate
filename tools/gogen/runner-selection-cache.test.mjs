@@ -5,7 +5,7 @@ import {createHash} from "node:crypto";
 import {mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync} from "node:fs";
 import {join} from "node:path";
 import {tmpdir} from "node:os";
-import {runnerSelectionCache} from "./runner-selection-cache.mjs";
+import {syntheticCorpus} from "./cache-oracle-corpus.mjs";
 import {discoveryEvidence} from "./runner-selection-evidence.mjs";
 const source = (name, body, superclass = "") => `CLASS ${name} DEFINITION PUBLIC ${superclass ? `INHERITING FROM ${superclass}` : ""}.
 PUBLIC SECTION. CLASS-METHODS run. ENDCLASS.
@@ -85,7 +85,7 @@ for (const noline of [false, true]) {
         put("zentry", source("zentry", "DATA o TYPE REF TO zother. CREATE OBJECT o. o->work( p = 1 )."));
       }
       oracle(input, cache, {}, noline);
-      assert.equal(oracle(input, cache, {}, noline).evidence, change === "superclass" ? "discovery-from-roots" : "exact-inputs");
+      assert.equal(oracle(input, cache, {}, noline).evidence, "exact-inputs");
       if (change === "addition") put("zentry", source("zentry", "zleaf=>run( ). zother=>run( )."));
       if (change === "removal") put("zentry", source("zentry", "DATA(t5) = CONV string( |value 1| )."));
       if (change === "superclass") put("zleaf", source("zleaf", "", "zother"));
@@ -102,9 +102,9 @@ for (const noline of [false, true]) {
       if (change === "superclass") assert.ok(!edited.wanted.includes("ZOLDBASE"));
       if (change === "catch") assert.ok(!edited.wanted.includes("ZCX_OLD"));
       const warm = oracle(input, cache, {}, noline);
-      assert.equal(warm.evidence, ["broken", "superclass"].includes(change) ? "discovery-from-roots" : "exact-inputs");
+      assert.equal(warm.evidence, "exact-inputs");
       if (change === "broken") {
-        assert.equal(warm.rounds, 2, "filtered wanted cannot be derived from inputs; rediscover while retaining diagnostics");
+        assert.equal(warm.rounds, 1, "rederive tolerant filtering while retaining diagnostics");
         assert.ok(JSON.parse(warm.artifacts.diagnostics).some(d => d.object.toUpperCase() === "ZLEAF"));
         assert.match(capture(input, cache, {objects: ["zleaf"]}, noline).error, /cannot be generic/);
       }
@@ -168,7 +168,7 @@ test("literal edits must preserve the frontend's actual raw-source probe answers
   assert.notEqual(key("CL_AMC_CHANNEL_MANAGER"), key("ZL_AMC_CHANNEL_MANAGER"));
   assert.equal(key("add 2 to lv_foo."), key("add 3 to lv_foo."));
 });
-for (const noline of [false, true]) test(`non-derivable in-place expansion rediscovers original controller membership; noline=${noline}`, () => fixture(({input, cache, put}) => {
+for (const noline of [false, true]) test(`current-registry expansion certifies original controller membership; noline=${noline}`, () => fixture(({input, cache, put}) => {
   put("zentry", source("zentry", "zleaf=>run( )."));
   put("zleaf", source("zleaf", "DATA x TYPE i. x = zattr=>counter."));
   put("zbase", source("zbase", ""));
@@ -178,8 +178,8 @@ for (const noline of [false, true]) test(`non-derivable in-place expansion redis
   assert.ok(cold.wanted.includes("ZATTR"));
   assert.ok(!cold.wanted.includes("ZBASE"), "reference discovery checks its retained membership, not final wanted");
   const seeded = oracle(input, cache, {}, noline);
-  assert.equal(seeded.rounds, 2);
-  assert.equal(seeded.evidence, "discovery-from-roots");
+  assert.equal(seeded.rounds, 1);
+  assert.equal(seeded.evidence, "exact-inputs");
   assert.ok(!seeded.wanted.includes("ZBASE"), "seeding must not add an extra superclass absent from the reference result");
 }));
 
@@ -216,41 +216,50 @@ for (const noline of [false, true]) for (const edited of [false, true]) test(`co
   if (edited) put("zentry", source("zentry", "DATA(t5) = CONV string( |value 2| ). zleaf=>run( )."));
   const result = oracle(input, cache, {}, noline);
   assert.equal(result.evidence, "discovery-from-roots");
-  assert.equal(result.rounds, 2);
+  assert.equal(result.rounds, 3, "discard the seeded attempt, then execute the two reference rounds");
   assert.ok(!result.wanted.includes("ZOTHER"));
 }));
 
-test("ledger replay derives every round, normalized roots, and complete additions", () => fixture(({cache}) => {
-  mkdirSync(cache);
-  const roots = ["zEntry", "zentry", "#demo#root"], wanted = ["ZENTRY", "/DEMO/ROOT"];
-  const valid = {
-    key: {identity: "test", policy: "test", roots, tolerant: false, includeTests: false}, inputs: [],
-    scope: {config: "test", cds: "test", files: ["ZENTRY", "/DEMO/ROOT", "ZLEAF"].map(owner =>
-      ({owner: `CLAS ${owner}`, dependency: false, name: "test", hash: "test", evidence: "test"}))},
-    rounds: [
-      {inputs: roots, wanted, missing: ["ZLEAF", "ZABSENT"], supers: [], added: ["ZLEAF"]},
-      {inputs: [...wanted, "ZLEAF"], wanted: [...wanted, "ZLEAF"], missing: [], supers: [], added: []},
-    ], selection: [...wanted, "ZLEAF"],
-  };
-  const read = saved => {
-    const checksum = createHash("sha256").update(JSON.stringify(saved)).digest("hex");
-    writeFileSync(join(cache, "runner-selection.json"), JSON.stringify({contents: saved, checksum}));
-    return runnerSelectionCache(cache, "test", [], "test").read({objects: roots});
-  };
-  assert.deepEqual(read(valid).closed, valid.selection, "case, namespace conversion and Set ordering match discovery");
-  const single = {...valid, selection: roots,
-    rounds: [{inputs: roots, wanted, missing: [], supers: [], added: []}]};
-  assert.deepEqual(read(single).closed, wanted, "a closed first round preserves raw compile inputs and normalized membership");
+for (const noline of [false, true]) test(`current selection handles duplicate/namespace roots; noline=${noline}`, () => fixture(({input, cache, put}) => {
+  put("#demo#root", source("/demo/root", ""));
+  const extra = {objects: ["zEntry", "zentry", "#demo#root"]};
+  const cold = oracle(input, cache, extra, noline);
+  assert.equal(cold.rounds, 2);
+  const warm = oracle(input, cache, extra, noline);
+  assert.equal(warm.rounds, 1);
+  assert.equal(warm.evidence, "exact-inputs");
+}));
+
+for (const noline of [false, true]) test(`replay validates later wanted, inputs, additions, order and termination; noline=${noline}`, () => fixture(({input, cache}) => {
+  oracle(input, cache, {}, noline);
+  const file = join(cache, "runner-selection.json"), valid = JSON.parse(readFileSync(file, "utf8"));
   for (const mutate of [
-    s => { s.rounds[0].wanted.push("ZOTHER"); },
     s => { s.rounds[1].wanted.push("ZOTHER"); },
     s => { s.rounds[1].inputs.reverse(); },
     s => { s.rounds[0].added = []; },
     s => { s.rounds[0].added.push("ZABSENT"); },
     s => { s.selection.reverse(); },
-    s => { s.rounds.pop(); s.selection = roots; },
+    s => { s.rounds.pop(); s.selection = s.key.roots; },
   ]) {
-    const saved = structuredClone(valid); mutate(saved);
-    assert.equal(read(saved), undefined, "checksummed inconsistent derivation fails closed");
+    const saved = structuredClone(valid); mutate(saved.contents);
+    saved.checksum = createHash("sha256").update(JSON.stringify(saved.contents)).digest("hex");
+    writeFileSync(file, JSON.stringify(saved));
+    const result = oracle(input, cache, {}, noline);
+    assert.equal(result.evidence, "discovery-from-roots", "checksummed inconsistent derivation fails closed");
   }
+}));
+
+for (const noline of [false, true]) test(`cold compiler expansions certify local and function-group identities; noline=${noline}`, () => fixture(({input, cache, put}) => {
+  const corpus = syntheticCorpus({classes: 4});
+  for (const [name, text] of Object.entries(corpus.files)) if (name.startsWith("zoracle_group.")) writeFileSync(join(input, name), text);
+  put("zentry", source("zentry", "CALL FUNCTION 'ZORACLE_FUNCTION' EXPORTING iv_value = 7."));
+  put("cl_abap_unit_assert", source("cl_abap_unit_assert", ""));
+  writeFileSync(join(input, "cl_abap_unit_assert.clas.locals_imp.abap"), "CLASS lcl_dump DEFINITION. ENDCLASS. CLASS lcl_dump IMPLEMENTATION. ENDCLASS.");
+  const extra = {objects: ["zentry", "cl_abap_unit_assert"]};
+  assert.equal(oracle(input, cache, extra, noline).rounds, 1, "a closed first round keeps its raw compile inputs and expanded membership distinct");
+  const ledger = JSON.parse(readFileSync(join(cache, "runner-selection.json"), "utf8")).contents;
+  for (const name of ["ZORACLE_GROUP", "FUGR:ZORACLE_GROUP", "CL_ABAP_UNIT_ASSERT:LCL_DUMP"]) assert.ok(ledger.rounds[0].wanted.includes(name), name);
+  const warm = oracle(input, cache, extra, noline);
+  assert.equal(warm.rounds, 1);
+  assert.equal(warm.evidence, "exact-inputs");
 }));

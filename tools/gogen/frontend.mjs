@@ -8,7 +8,7 @@ import {parseObserved, inputOrigin, rttiClassInventory, rttiLocalSupers} from ".
 import {suppliedIndex, suppliedAnswer, suppliedSignature, localDiscovery, lockAnswer, finalOutput, rttiProjection, selectionHas} from "./frontend-queries.mjs";
 import {enumerateObjects, auditedBookkeeping, withRole, beginProvenanceCompile} from "./frontend-provenance.mjs";
 import {prepareArtifactDigests} from "./frontend-artifact-digests.mjs";
-import {withProvenance, expandProgramSelection, withArtifact, resolvedFunctionModule} from "./frontend-provenance.mjs";
+import {withProvenance, withArtifact, resolvedFunctionModule} from "./frontend-provenance.mjs";
 import {isSourceIdentity, readdirEntries, readdirNames, readFileSync} from "./host-io-compat.mjs";
 import {append} from "./append.ts";
 import {localInterfaceNames, currentTypeNames, amcSource} from "./frontend-source-observations.mjs";
@@ -29,7 +29,7 @@ import {hoistLocalConstants} from "./frontend-local-constants.mjs";
 // why; a method that calls a skipped one is refused in turn.
 import {resolveStatic as lowerStatic, staticSlot} from "./frontend-static.mjs";
 import {prepareSession, finishSession, compileClass} from "./frontend-session.mjs";
-import {syntaxDiagnostics} from "./frontend-diagnostics.ts";
+import {prepareSelection} from "./frontend-selection.mjs";
 import {sourceOwnershipSafety} from "./frontend-owned.ts";
 import {builtin} from "./frontend-builtins.mjs";
 import {literalText, textLiteral} from "./frontend-literals.ts";
@@ -75,7 +75,6 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   /** @type {import("./frontend-session-types.ts").Registry} */ const reg = registry ?? /** @type {import("./frontend-session-types.ts").Registry} */ (new abaplint.Registry(new abaplint.Config(JSON.stringify(config))));
   // Resolve files; diagnose selection.
   /** @param {string} fn @returns {string} */ const objName = (fn) => fn.split("/").pop().split(".")[0].toLowerCase().replace(/#/g, "/");
-  /** @type {string[]} */ let wanted = objects.map((o) => o.toLowerCase().replace(/#/g, "/"));
   /** @type {import("./frontend-cache-types.ts").CdsSource[]} */ const ddls = [];
   /** @param {string} dir @returns {void} */ const walk = (dir) => {
     for (const e of readdirEntries(dir).sort((x, y) => x.name.localeCompare(y.name))) {
@@ -121,20 +120,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   }
   if (session) session.cdsInputs = cdsIdentity;
   /** @type {typeof compileClass} */ const compile = diskFrontend ? (...args) => diskFrontend.compileDiskClass.call(undefined, ...args) : compileClass;
-  // abaplint's RAISE syntax checker only accepts ObjectReferenceType, not
-  // its generic REF TO object sibling. The dynamic raise path below checks
-  // the actual registered object; retain every other syntax diagnostic.
-  const diagnostics = syntaxDiagnostics(reg, (fn) => selectionHas(wanted, objName(fn)), objName, session)
-    .filter((d) => !d.message.endsWith("RAISE EXCEPTION, must be object reference, got GenericObjectReferenceType"));
-  prepareArtifactDigests(reg, !!session, closureContext);
-  if (diagnostics.length && (!tolerant || diagnostics.some(d => strictRoots?.has(d.object.toUpperCase())))) throw new Error(diagnostics.map((d) => d.message).join("\n"));
-  const broken = new Set(diagnostics.map((d) => d.object.toLowerCase()));
-  if (broken.size > 0) wanted = wanted.filter((w) => !broken.has(w));
-
-  // A literal CALL FUNCTION is a dependency on its function group. The
-  // registry already knows each module's group; include it before signatures
-  // are built, including calls made by a module in another group.
-  withRole("scheduling", () => expandProgramSelection(reg, wanted, /** @type {import("./frontend-session-types.ts").SelectionCore} */ ({VirtualPosition: abaplint.VirtualPosition, MacroContent: abaplint.MacroContent, Objects: abaplint.Objects, Visibility: abaplint.Visibility, Statements: abaplint.Statements, Expressions: abaplint.Expressions, Tokens: abaplint.Tokens}))); Object.freeze(wanted);
+  const {wanted, diagnostics, broken} = prepareSelection(reg, {objects, tolerant, strictRoots}, session, () => prepareArtifactDigests(reg, !!session, closureContext));
 
   // Eager collections keep first writes inside the replay proxies. Anonymous
   // type identities use a Map so their ordered effects can be replayed too;
@@ -480,6 +466,19 @@ let PERSIST_LOWERING = false;
     }
   }
   return out;
+}
+
+// Reconstruct a cold round's membership on the CURRENT normalized registry.
+// No lowering or persisted wanted participates in this derivation.
+/** @param {import("./frontend-session-types.ts").Registry} reg @param {import("./frontend-session-types.ts").CompileOptions} options @param {import("./frontend-diagnostics.ts").DiagnosticsSession} [session] @returns {string[]} */
+export function deriveProgramWanted(reg, options, session) {
+  const {wanted} = prepareSelection(reg, options, session);
+  const result = new Set(wanted.map(upper)), includeTests = options.includeTests ?? false;
+  for (const obj of enumerateObjects(reg, "local-dispatch", [], "scheduling", (o) => o instanceof abaplint.Objects.Class && selectionHas(wanted, o.getName().toLowerCase()) && (includeTests || LOCAL_CLASSES.has(upper(o.getName()))))) {
+    for (const local of localClasses(reg, obj, includeTests === true || (includeTests instanceof Set && includeTests.has(upper(obj.getName()))))) result.add(local.name);
+  }
+  for (const group of enumerateObjects(reg, "selected-groups", wanted, "scheduling", (o) => o instanceof abaplint.Objects.FunctionGroup && selectionHas(wanted, o.getName().toLowerCase()))) result.add(fugrOwner(group));
+  return [...result];
 }
 
 /*

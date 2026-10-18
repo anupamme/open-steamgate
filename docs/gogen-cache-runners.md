@@ -687,14 +687,21 @@ identity, runner syntax/skip policy, tolerant mode and test inclusion. Its round
 ledger records the input and expanded selections, lowering-time missing names,
 owner/superclass edges and additions. The reader checks the derivation from the
 original roots to the final selection, including a terminating closed round.
-The ledger is re-derived from the current request's roots, normalized with the
-frontend's case and namespace conversion. Every round's `wanted` must match its
-derived inputs; additions are recomputed from missing/superclass names present
-in the loaded class inventory, and the derived final selection must match the
-persisted selection. Any mismatch restarts discovery from roots, including
-ledgers with compiler expansions or broken-dependency filtering that this
-replay cannot derive. Compile inputs and retained membership keep their
-distinct original meanings.
+Replay derives each round's `wanted` from the CURRENT normalized loaded
+registry. Cold compilation and replay call the same `prepareSelection` function
+for case/namespace normalization, strict-root diagnostics, tolerant broken-object
+filtering and parsed function-module/static-attribute expansion. Replay also
+uses the compiler's local-class discovery and function-group identity constructors.
+Round zero uses the original request and syntax policy; later rounds use the
+controller's derived input list and tolerant policy. No persisted `wanted` is
+used as the starting membership. Additions use the controller's current class
+lookup; retained controller membership remains distinct from later per-round
+expansions. Every ordered `wanted`, input list and addition must match, and the
+terminating round's inputs must match the saved selection.
+Validation waits for the loaded-scope check, then reconstructs all rounds under
+the scheduling role with one current syntax-issue list. A mismatching ledger
+discards the tentative seeded compile and restarts from the current roots before
+emission. Compiler expansion and tolerant filtering are supported derivations.
 The checksum is an integrity check, not authentication: the cache directory is
 trusted local state, just like object-cache entries.
 Selection publication precedes read-grant validation, emission, gofmt and Go
@@ -864,21 +871,35 @@ The coherent-ledger regression recomputes the checksum after injecting an
 unrequested class into the first `wanted` and consistently extending later
 rounds and the final selection. Both unchanged inputs and an eligible literal
 edit must rediscover from roots and match cache-disabled Go/JS output in both
-source-line modes. Separate adapter checks cover normalized roots, later
+source-line modes. Separate fresh-process checks cover normalized roots, later
 `wanted`/input mismatches, incomplete or nonexistent additions, selection order
 and termination.
 
-Strict derivation narrows eligibility: the retained six-case proof above has
-3,139 explicit roots and 3,132 first-round `wanted` names after frontend
-filtering/expansion. Its ledger now fails closed, so its byte comparisons remain
-historical evidence, but its one-round timings do not describe this revision.
-No full zlnt run was repeated. Independently proving those compiler selection
-transformations would be needed to restore seeding for that ledger.
+At `698ac7f4`, equality with normalized raw roots rejected the genuine zlnt
+ledger. Its 3,139 requested names include ten duplicates: 3,129 distinct roots
+remain. Parsed CALL FUNCTION discovery adds `OPENABAP`, function-group signature
+preparation adds `FUGR:OPENABAP`, and supported local discovery adds
+`CL_ABAP_UNIT_ASSERT:LCL_DUMP`, yielding 3,132 first-round wanted names. No
+root was filtered in this particular round. The report wrapper, statement
+classes and runtime/host classes are already in the original runner request;
+they are not extra host-side exceptions in replay.
 
-A host microbenchmark on Node v26.9.0 used nine samples of 100 iterations after
-50 warmups, comparing `57cfbdbb` with strict replay. A replayable six-round,
-3,055-class ledger took a median 6.90 ms versus 3.23 ms previously (3.67 ms
-additional validation per invocation). The retained proof ledger is rejected
-in 2.47 ms versus 3.43 ms for its previous acceptance. These isolate ledger
-validation, exclude filesystem loading and compilation, and ran under shared
-host load; they are not end-to-end runner timings.
+The follow-up replaces that equality check with current compiler derivation.
+Focused fresh-process cases now certify genuine static expansion, local and
+function-group identities, duplicate/namespaced roots, superclasses and tolerant
+broken dependencies, retaining the independent roots oracle in both line modes.
+The coherent first-wanted forgery still restarts from roots; its discarded seed
+counts as an executed round. The old synthetic replay microbenchmark does not
+measure this implementation, which validates actual compiler inputs.
+
+Follow-up validation exercised 327 distinct cache, certificate, replay,
+provenance, query, runner and selection tests with
+`GOGEN_CACHE_SHADOW_VALIDATE=1`. All 40 selection tests passed, including the
+four coherent-ledger cases; those same four cases fail on `57cfbdbb` because
+its emitted Go/JS contains the injected class. The 60-mutation oracle ran 62
+attempts with zero mismatches (128.6 s), and both reverse-edge controls passed.
+An overlapping tracked-test edit invalidated the first concurrent kept-binary
+reuse check; the complete 25-test osabap suite was rerun with no edits and
+passed (193.8 s). The four host-boundary tests, TypeScript, all 153 size budgets
+and the explicit 13-path leak-scan exit-code gate passed. `frontend.mjs` is
+net -2 lines and -330 bytes against `origin/main` at `c9dad34f`.

@@ -16,7 +16,7 @@ export function compileClosedProgram(options) {
     strictRoots: options.tolerant ? undefined : new Set(original.objects.map(n => n.toUpperCase().replaceAll("#", "/")))};
   options = {...options, closureContext};
   let program = compileProgram(options);
-  let selected = new Set(seed?.closed ?? program.wanted);
+  /** @type {Set<string> | undefined} */ let selected;
   for (;;) {
     const certified = withRole("scheduling", () => cache?.check?.(program.reg, !!seed));
     if (certified === false) {
@@ -29,6 +29,7 @@ export function compileClosedProgram(options) {
       selected = new Set(program.wanted);
       continue;
     }
+    selected ??= new Set(seed?.closed ?? program.wanted);
     if (seed && typeof certified === "string") seed.evidence = certified;
     const more = withRole("scheduling", () => {
       const superEdges = [...selected].map(n => [n, program.reg.getObject("CLAS", n)?.getDefinition()?.getSuperClass()?.toUpperCase()]).filter(row => row[1]);
