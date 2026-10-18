@@ -5,21 +5,25 @@ import {join} from "node:path";
 import {selectionScope} from "./runner-selection-scope.mjs";
 import {discoveryEvidence} from "./runner-selection-evidence.mjs";
 const digest = value => createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex");
-function closedSelection(saved) {
+function closedSelection(saved, roots) {
   const strings = value => Array.isArray(value) && value.every(n => typeof n === "string");
+  const same = (left, right) => left.length === right.length && left.every((n, i) => n === right[i]);
+  const normalize = names => [...new Set(names.map(n => n.toLowerCase().replaceAll("#", "/").toUpperCase()))];
   if (!Array.isArray(saved.rounds) || !saved.rounds.length || !strings(saved.selection)) return undefined;
-  let expected = saved.key.roots, selected;
+  const classes = new Set(saved.scope.files.map(row => row.owner).filter(owner => owner.startsWith("CLAS ")).map(owner => owner.slice(5)));
+  let expected = roots, selected = new Set(normalize(roots));
   for (const row of saved.rounds) {
-    if (![row.inputs, row.wanted, row.missing, row.supers, row.added].every(strings) || digest(row.inputs) !== digest(expected)) return undefined;
-    selected ??= new Set(row.wanted);
-    for (const name of row.added) {
-      if (selected.has(name) || ![...row.missing, ...row.supers].includes(name)) return undefined;
-    }
-    row.added.forEach(n => selected.add(n));
+    if (![row.inputs, row.wanted, row.missing, row.supers, row.added].every(strings)
+        || !same(row.inputs, expected) || !same(row.wanted, normalize(expected))) return undefined;
+    // Replay the controller from the request, never from persisted wanted.
+    const added = [...row.missing, ...row.supers].filter(n => !selected.has(n) && classes.has(n));
+    if (!same(row.added, added)) return undefined;
+    added.forEach(n => selected.add(n));
     expected = [...selected];
   }
-  if (saved.rounds.at(-1).added.length || digest(saved.rounds.at(-1).inputs) !== digest(saved.selection)) return;
-  return [...selected];
+  if (saved.rounds.at(-1).added.length || !same(saved.rounds.at(-1).inputs, saved.selection)
+      || !same(expected, normalize(saved.selection))) return undefined;
+  return expected;
 }
 export function runnerSelectionCache(cacheDir, identity, files, policy) {
   const file = join(cacheDir, "runner-selection.json");
@@ -40,7 +44,7 @@ export function runnerSelectionCache(cacheDir, identity, files, policy) {
         if (!scope.available || options.registry || options.session || digest(previous?.key) !== digest(key(options))) return;
         if (!Array.isArray(previous?.inputs) || previous.inputs.length !== files.length
             || !previous.inputs.every(row => row && typeof row.hash === "string" && typeof row.evidence === "string")) return;
-        const closed = closedSelection(previous);
+        const closed = closedSelection(previous, options.objects);
         if (!closed) return;
         const exact = previous.inputs.every((old, i) => old.layer === files[i].layer && old.name === files[i].name && old.hash === files[i].hash);
         if (exact) inputs = previous.inputs;

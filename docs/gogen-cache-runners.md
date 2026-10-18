@@ -687,10 +687,18 @@ identity, runner syntax/skip policy, tolerant mode and test inclusion. Its round
 ledger records the input and expanded selections, lowering-time missing names,
 owner/superclass edges and additions. The reader checks the derivation from the
 original roots to the final selection, including a terminating closed round.
-The controller's retained membership is reconstructed from this ledger; it is
-not reconstructed from final `wanted`, which drops broken dependencies and can
-include later in-place expansions. Compile inputs and retained membership keep
-their distinct original meanings.
+The ledger is re-derived from the current request's roots, normalized with the
+frontend's case and namespace conversion. Every round's `wanted` must match its
+derived inputs; additions are recomputed from missing/superclass names present
+in the loaded class inventory, and the derived final selection must match the
+persisted selection. Any mismatch restarts discovery from roots, including
+ledgers with compiler expansions or broken-dependency filtering that this
+replay cannot derive. Compile inputs and retained membership keep their
+distinct original meanings.
+The checksum is an integrity check, not authentication: the cache directory is
+trusted local state, just like object-cache entries.
+Selection publication precedes read-grant validation, emission, gofmt and Go
+build, so a later-failing invocation can leave a correct, reusable selection.
 Exact-source and AST-proof digests have distinct domains; changed files must
 carry a valid AST proof. Missing, malformed or inconsistent metadata starts
 discovery from roots.
@@ -849,3 +857,28 @@ Files changed in step 4b.3 (all paths except the documentation are under
 | Controller and compiler contracts | `frontend-closure.mjs`, `frontend-session-types.ts`, `frontend.mjs`, `frontend-source-observations.mjs` |
 | Runner and host certificates | `osabap.mjs`, `runner-cache-recording.mjs`, `runner-selection-cache.mjs`, `runner-selection-evidence.mjs`, `runner-selection-scope.mjs` |
 | Proof, tests and documentation | `cache-runner-proof.mjs`, `runner-selection-cache.test.mjs`, `docs/gogen-cache-runners.md` |
+
+### Round-3 ledger replay hardening
+
+The coherent-ledger regression recomputes the checksum after injecting an
+unrequested class into the first `wanted` and consistently extending later
+rounds and the final selection. Both unchanged inputs and an eligible literal
+edit must rediscover from roots and match cache-disabled Go/JS output in both
+source-line modes. Separate adapter checks cover normalized roots, later
+`wanted`/input mismatches, incomplete or nonexistent additions, selection order
+and termination.
+
+Strict derivation narrows eligibility: the retained six-case proof above has
+3,139 explicit roots and 3,132 first-round `wanted` names after frontend
+filtering/expansion. Its ledger now fails closed, so its byte comparisons remain
+historical evidence, but its one-round timings do not describe this revision.
+No full zlnt run was repeated. Independently proving those compiler selection
+transformations would be needed to restore seeding for that ledger.
+
+A host microbenchmark on Node v26.9.0 used nine samples of 100 iterations after
+50 warmups, comparing `57cfbdbb` with strict replay. A replayable six-round,
+3,055-class ledger took a median 6.90 ms versus 3.23 ms previously (3.67 ms
+additional validation per invocation). The retained proof ledger is rejected
+in 2.47 ms versus 3.43 ms for its previous acceptance. These isolate ledger
+validation, exclude filesystem loading and compilation, and ran under shared
+host load; they are not end-to-end runner timings.
