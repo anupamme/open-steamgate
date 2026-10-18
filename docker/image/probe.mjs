@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {get} from "node:https";
 import {createConnection} from "node:net";
+import {readFileSync} from "node:fs";
 const base = 'http://127.0.0.1:3030';
 const service = `${base}/sap/opu/odata/sap/ZSTG_DEMO_SRV`;
 const request = (url, options = {}) => fetch(url, {...options, signal: AbortSignal.timeout(10000)});
@@ -30,7 +31,8 @@ if (mode === 'create') {
   assert.equal((await res.json()).d.Description, 'Image persistence probe');
 }
 await new Promise((resolve, reject) => {
-  const req = get('https://127.0.0.1:44300/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata', {rejectUnauthorized: false}, res => {
+  const ca = readFileSync('.local/tls/osd.crt');
+  const req = get('https://127.0.0.1:44300/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata', {ca}, res => {
     res.resume();
     res.on('end', () => res.statusCode === 200 ? resolve() : reject(new Error(`HTTPS ${res.statusCode}`)));
   });
