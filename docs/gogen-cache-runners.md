@@ -713,8 +713,8 @@ recognize the complete statement and method context; macros, INCLUDEs, unknown
 statements, interpolation, escape sequences and multiline literals do not
 qualify. Raw text outside qualifying template values remains bound byte for
 byte. Width is part of the certificate because source normalization can use
-columns in generated local names. The compiler's existing raw-source probes for local interfaces, local types
-and AMC markers are shared with the validator; their actual answers must also
+columns in generated local names. The compiler's existing raw-source probes for
+local interfaces, local types and AMC markers are shared with the validator; their actual answers must also
 remain identical. No new lexical dependency approximation is introduced.
 The initializer's string type, declaration, references and all other
 statements therefore remain unchanged. Discovery does not propagate this local
@@ -740,15 +740,112 @@ negative control deliberately compiles a stale closed superset and requires
 its bytes to differ from discovery from roots.
 
 Pre-proof validation passed 264 focused cache, certificate, replay, provenance,
-closure and osabap tests (600.5 s), plus 30 hardened fresh-process selection tests
+closure and osabap tests (599.8 s), plus 30 hardened fresh-process selection tests
 (91.4 s), with no failures or skips. The CI oracle inside that matrix exercised
-60 supported mutations in 62 attempts with zero mismatches (125.0 s). Both
-reverse-edge negative controls passed. Node suites used `--preserve-symlinks
---test-concurrency=1`; the four host-boundary checks, TypeScript, the 153-budget
-size gate and the explicit twelve-path leak-scan exit-code gate also passed.
+60 supported mutations in 62 attempts with zero mismatches (123.9 s). Both
+reverse-edge negative controls passed. The focused matrix enabled
+`GOGEN_CACHE_SHADOW_VALIDATE=1`. Node suites used
+`--preserve-symlinks --test-concurrency=1`; the four host-boundary checks,
+TypeScript, the 153-budget size gate and the explicit twelve-path leak-scan exit-code gate also passed.
 `frontend.mjs` is net one line and 183 bytes smaller than `origin/main`
 `c9dad34f`.
 
 A real osabap emit-only smoke closes in seven cold rounds and one exact-input
 warm round, with all four generated artifacts byte-identical. Loaded-input
 scan/load and edit/revert races restart from roots in both source-line modes.
+
+### Six-case proof at `eb9ca3e5` (2026-10-17–18)
+
+Measured with `tools/gogen/cache-runner-proof.mjs`, copied `zlnt-system` inputs,
+a 24 GiB Node heap, and a separate 70 GiB / zero-swap systemd scope for every
+large child. Go compilation was skipped in all six cases. Totals are the
+child's `total` phase; they include runner setup. Each completed case was saved
+immediately, and no completed measurement was rerun. Earlier unfinished cold
+attempts stopped for certificate hardening are retained separately and are not
+measurements.
+
+| Run | Cache | Frontend (s) | Emission (s) | gofmt (s) | Total (s) | Rounds | Final-round lowered / reused |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Cold | on | 1,389.5 | 41.3 | 18.5 | 1,451.3 | 6 | 9 / 3,046 |
+| Cold | off | 466.5 | 33.3 | 18.4 | 520.2 | 6 | 3,055 / 0 |
+| Warm | on | 127.8 | 41.8 | 18.5 | 190.1 | 1 | 9 / 3,046 |
+| Warm | off | 462.2 | 33.4 | 18.5 | 516.2 | 6 | 3,055 / 0 |
+| Edited | on | 252.6 | 39.2 | 18.4 | 312.3 | 1 | 14 / 3,041 |
+| Edited | off | 457.9 | 33.3 | 18.4 | 511.6 | 6 | 3,055 / 0 |
+
+Cold-enabled starts with 3,010 lowerings in round 1 and converges at 3,055
+classes after six rounds. The class counts in the table are the final round,
+not the sum across rounds. Both enabled warm and edited invocations execute
+only one round.
+
+**Targets passed.** Edited-enabled is 312.3 s versus 511.6 s disabled, 39.0%
+lower and inside the 300–450 s planning range. Warm-enabled is 190.1 s, below
+the 339.6 s supplied warm target. Warm final-round reuse is 99.7%, passing the
+99% reuse gate. Cold-enabled remains expensive: it still records the original
+six-round discovery and constructs reusable selection evidence.
+
+**Certification actually used.** Warm-enabled reports `exact-inputs`.
+Edited-enabled reports `local-string-initializers` for the existing
+`ZCL_LNT_ADD_MODULE` edit from `|add 2 to lv_foo.|` to `|add 3 to lv_foo.|`.
+The AST shape, template width, source-probe answers, original roots, inventory,
+ordering, configuration, CDS and tool identities remain certified; the
+normalized loaded-registry check also passes. Dependency recording remains
+enabled in scoped mode for the edited invocation. Seventeen provider ledgers
+refresh and 3,962 remain retained.
+
+The fourteen edited lowerings comprise three dependency invalidations for the
+edited owner and its two reverse-dependent parser providers, one supplied-query
+miss, one ordered replay refusal, and nine no-candidate cases. Thus five
+additional classes lower compared with unchanged warm; three are the expected
+dependency invalidations, and the other two are conservative query/replay
+refusals. Every reused IR entry still passes its ordinary cache guards.
+
+Per-round subcounters for the two one-round invocations (seconds):
+
+| Run | Graph loading | Certificate validation | Observation | Replay | Finalization |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Warm | 0.000 | 0.000 | 0.000 | 2.423 | 0.002 |
+| Edited | 18.069 | 14.471 | 0.103 | 4.214 | 36.780 |
+
+These counters overlap and do not partition frontend time. Loaded-scope
+validation and selection-certificate publication are included in the overall
+frontend phase.
+
+**Byte identity passed.** All four comparisons pass for `zz_app.go`,
+`zz_generated.go`, `zz_db.json` and `symbols.json`: warm equals cold-enabled,
+cold-enabled equals original-roots cold-disabled, disabled repeat equals cold,
+and edited-enabled equals edited-disabled. The reference side disables both
+object caching and selection seeding. A final direct byte comparison also
+verified the saved artifacts and their recorded SHA-256 values. The edit changes
+only `zz_generated.go`.
+
+The unchanged combined manifest SHA-256 is
+`a6f3eba84d2ee7e4ed5efd296863317a66a64cecdd10c11749576041ee5ad950`.
+The edited manifest is
+`096a9d4afb22fe02d9f87bc7de7aa4d04d29f4210d778ac2bd24533ab1a0b1e9`.
+
+**Shared-host caveat.** The final focused matrix overlapped part of
+cold-enabled and completed before warm-enabled. No other work from this task
+overlapped the warm or edited measurements; other host work was not controlled.
+Thirty-second samples during the edited pair show:
+
+| Run | One-minute load range | Minimum available memory (GiB) |
+| --- | ---: | ---: |
+| edited-enabled | 1.52–2.72 | 91.7 |
+| edited-disabled | 1.09–2.09 | 89.8 |
+
+The six-case report, logs, diagnostics and generated artifacts are retained at
+`/mnt/ssd-510/osg/stoker/tmp/c4b3-final-proof/report.json`; validation logs and the
+real-runner smoke are under its `validation/` directory. The copied inputs are
+`/mnt/ssd-510/osg/stoker/tmp/c4b3-final-input`. The installed inputs and shared
+libraries were not modified. Unsupported edit shapes deliberately retain
+discovery from roots; broader edit certification remains future work.
+
+Files changed in step 4b.3 (all paths except the documentation are under
+`tools/gogen/`):
+
+| Area | Files |
+| --- | --- |
+| Controller and compiler contracts | `frontend-closure.mjs`, `frontend-session-types.ts`, `frontend.mjs`, `frontend-source-observations.mjs` |
+| Runner and host certificates | `osabap.mjs`, `runner-cache-recording.mjs`, `runner-selection-cache.mjs`, `runner-selection-evidence.mjs`, `runner-selection-scope.mjs` |
+| Proof, tests and documentation | `cache-runner-proof.mjs`, `runner-selection-cache.test.mjs`, `docs/gogen-cache-runners.md` |
