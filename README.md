@@ -16,6 +16,13 @@
 
 Each release also carries `sqlite.yml`, `duckdb.yml` and `postgres.yml`; start one with `docker compose -f sqlite.yml up -d`. `./osd doctor` checks a downloaded binary.
 
+## Engineering report: self-hosting step 4
+
+[**The remaining TypeScript-to-Go lowering traps**](docs/self-hosting-step4-traps.md)
+are documented by failure type, measured frequency and the exact compiler and
+gogen commits used for the 2026-10-18 snapshot. The report also states what
+still has to pass before gogen can be called self-hosted.
+
 ## What it is
 
 open-steamgate (OSD) cross-compiles real ABAP — `_MPC_EXT` / `_DPC_EXT`
