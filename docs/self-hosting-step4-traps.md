@@ -99,6 +99,15 @@ It admitted the disk-cache facade assignment, then failed at the next call:
 an anonymous closure was rejected for an optional callback interface in
 `prepareSelection`. This candidate remains diagnostic and unmerged.
 
+An independent run of the same G commit `9251dd10f4169f43bbc16aa9364659ec7c77ba4d`
+compared published abapiti integration `964884687c516465688dfebeac49898ffdbdd2ea`
+with its unmerged core5 candidate `c53c35518077ac6a8aff0e4dfd8a66043f354da4`.
+The published binary reproduced **6 / 1,111** exactly. Core5 removed only
+the 20-hit `constructor_function` boxed-`Map` root: **5 reached roots / 1,091
+hits**, `0/35 unknown`, 322 unreached. All five remaining reached TSV rows
+were byte-identical; no root was added. This is a measured candidate result,
+not the integrated compiler state or a completed generator build.
+
 ## Completion gate
 
 For each candidate, compare the reached trap locations and hit counts on the
