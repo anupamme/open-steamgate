@@ -8,7 +8,7 @@ failed a test: compilation has not yet reached that stage.
 
 ## Measurement and scope
 
-The measured pair is OSG `19fce4f9d7f765e457d0985f62540d13cea7f78e`
+The measured pair is OSG `9251dd10f4169f43bbc16aa9364659ec7c77ba4d`
 (a **private, unmerged** G candidate based on main
 `602822731dda56d5b44ce3ec5e5282e7bbdda7c8`) and abapiti core2 source
 `44546af481277e414b01a13bf9a3e12280145fd3`. The typed step-4 driver
@@ -18,7 +18,7 @@ The Node-gogen reference Go has SHA-256
 the trap run checked that reference hash. These identifiers pin the **inputs
 to the diagnostic**, not a completed self-hosting result.
 
-The reached-function scan reports **7 root trap locations, 1,228 hits**,
+The reached-function scan reports **6 root trap locations, 1,111 hits**,
 `0/35 unknown`, and **321 unreached functions**. A hit is
 one occurrence attributed to a trapped root in the lowering/reachability
 report; it is not an independent defect or a count of failed unit tests. The
@@ -31,14 +31,13 @@ the measured OSG commit; line numbers can move on later branches.
 | --- | --- | --- | --- |
 | Front end | `frontend.mjs:65` `compileProgram` · 1 | HIR assignment type mismatch | An assignment in the entry-point closure fails typed lowering. Inspect the inferred source and target types at the recorded node before changing the initialization path. |
 | Front end | `frontend.mjs:874` `classIr` · 41 | `IMethodDefinition` interface passed where a concrete structural class shape is expected by `fn_addSig` | Method-definition typing crosses an abaplint interface/shape boundary. A broader union exposed another failure in `fn_addSig`; this needs a compatible contract or a compiler fix, not only a wider annotation. |
-| Front end | `frontend.mjs:1740` `statement` · 839 | Recursive union literal has no admitted tag or compatible payload | IR statement construction, first reported at the `REFRESH`/`FREE` mapped `clear`/`clear_data` literals, is rejected as a recursive discriminated union. Check the produced tag and payload against the IR type, then the compiler's recursive-union admission. |
-| Front end | `frontend.mjs:5085` `call` · 117 | Structural node shape passed as `ExpressionNode` | The hand-built chain prefix satisfies the JavaScript use site but is not accepted as abaplint's concrete `ExpressionNode`. Check whether the helper can consume an explicit smaller interface. |
-| Front end | `frontend.mjs:3515` `constructor_function` · 20 | Boxed `Map` allocation needs value-based `SameValueZero` | A compiler capability gap in JavaScript `Map` semantics, reached by constructor argument handling. A source change is safe only if key identity and lookup behavior remain identical. |
+| Front end | `frontend.mjs:1741` `statement` · 839 | Recursive union literal has no admitted tag or compatible payload | IR statement construction, first reported at the `REFRESH`/`FREE` mapped `clear`/`clear_data` literals, is rejected as a recursive discriminated union. Check the produced tag and payload against the IR type, then the compiler's recursive-union admission. |
+| Front end | `frontend.mjs:3516` `constructor_function` · 20 | Boxed `Map` allocation needs value-based `SameValueZero` | A compiler capability gap in JavaScript `Map` semantics, reached by constructor argument handling. A source change is safe only if key identity and lookup behavior remain identical. |
 | Emitter | `emit-go.mjs:319` `emitGo` · 1 | Dynamic collection key | A collection in emitter setup has a key type the Go prototype cannot lower. Narrowing one collection has previously exposed another at the next line, so inspect the whole setup path. |
 | Emitter | `emit-go.mjs:953` `method` · 209 | `Method` passed to `sinkLocals`, which expects `SinkMethod` | Two emitter method contracts disagree at a helper boundary. Compare the actual fields used by `sinkLocals` with both declared shapes. |
 
 The largest remaining root, front-end `statement`, accounts for 839 of
-1,228 hits. That makes it a useful integration target, but hit count is not
+1,111 hits. That makes it a useful integration target, but hit count is not
 an effort estimate: a one-hit root can still block `compileProgram` or
 `emitGo` as an entry point. Several failures are source contract mismatches;
 the boxed `Map`, dynamic key and recursive-union errors may require abapiti
@@ -51,15 +50,17 @@ hits**; `fc8b0702fc5608d1016289335df7579bfb79361e` cleared the 822-hit
 `stmtLines` root for **10 / 4,392**; `2461ab76d2ec4419baa8391fb32df12f03a68ff3`
 cleared the four-hit `whereOf` root for **9 / 4,388**;
 `ca0f308c9bbf8d62b7a83b5cb4f3fa6fa4a37ce3` cleared the 1,740-hit
-`expr` root for **8 / 2,648**; and the measured candidate cleared the
-1,420-hit `place` root for **7 / 1,228**. No step added a new root. Each
+`expr` root for **8 / 2,648**;
+`19fce4f9d7f765e457d0985f62540d13cea7f78e` cleared the 1,420-hit
+`place` root for **7 / 1,228**; and the measured candidate cleared the
+117-hit `call` root for **6 / 1,111**. No step added a new root. Each
 candidate type-checks, passes its changed-path tests, and
 produces 243 byte-identical artifacts in each of six sink/cache comparison
 modes against its respective parent. These G changes are still **private
 and unmerged**, pending review and PR checks; the table reports their measured
 state rather than the state of main.
 
-A later private diagnostic, `4b315009c78f4fbd1dbb229ec409114720a78d67`,
+A separate private diagnostic, `4b315009c78f4fbd1dbb229ec409114720a78d67`,
 made the `REFRESH`/`FREE` `clear` tags literal and kept their checked Go output
 byte-identical to its parent. On the same pinned abapiti binary and driver,
 however, the scan still found **7 roots / 1,228 hits**, with `0/35 unknown`
@@ -68,6 +69,16 @@ literal error to an HIR assignment type mismatch at the
 `dbWriteStatement("insert", ...)` return. This is evidence about the next
 failure inside the root, not a cleared trap; that candidate is not part of
 the ready G patch chain.
+
+Adding an explicit `FrontendStmt` return contract to that branch
+(`a9af15715feb03303b3567b7af4da4680779be41`) still left **7 / 1,228**;
+the first `statement` error moved further to a `CONCATENATE` parts-array type
+mismatch. An interface-only attempt at `call`
+(`e49de8201d7ced815de18c906d8c423e2e96cce3`) added two roots, for
+**9 / 2,362**, and is excluded. The measured `call` fix instead keeps the
+real parser node in recursive calls. It passed 40 emitter tests and the
+six-mode direct byte comparison against its parent, but remains private and
+awaits review.
 
 ## Completion gate
 
