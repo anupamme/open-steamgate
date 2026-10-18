@@ -8,7 +8,7 @@ failed a test: compilation has not yet reached that stage.
 
 ## Measurement and scope
 
-The measured pair is OSG `9299a46fea7274ad9a49662e23e64b8bca2042cf`
+The measured pair is OSG `fc8b0702fc5608d1016289335df7579bfb79361e`
 (a **private, unmerged** G candidate based on main
 `602822731dda56d5b44ce3ec5e5282e7bbdda7c8`) and abapiti core2 source
 `44546af481277e414b01a13bf9a3e12280145fd3`. The typed step-4 driver
@@ -18,7 +18,7 @@ The Node-gogen reference Go has SHA-256
 the trap run checked that reference hash. These identifiers pin the **inputs
 to the diagnostic**, not a completed self-hosting result.
 
-The reached-function scan reports **11 root trap locations, 5,214 hits**,
+The reached-function scan reports **10 root trap locations, 4,392 hits**,
 `0/35 unknown`, and **321 unreached functions**. A hit is
 one occurrence attributed to a trapped root in the lowering/reachability
 report; it is not an independent defect or a count of failed unit tests. The
@@ -37,25 +37,26 @@ the measured OSG commit; line numbers can move on later branches.
 | Front end | `frontend.mjs:1681` `whereOf` · 4 | Invalid narrowing from `optional<Expr>` to a union member | A nullable expression is narrowed beyond what the compiler proves. Trace the null guard and the IR union tag together. |
 | Emitter | `emit-go.mjs:319` `emitGo` · 1 | Dynamic collection key | A collection in emitter setup has a key type the Go prototype cannot lower. Narrowing one collection has previously exposed another at the next line, so inspect the whole setup path. |
 | Emitter | `emit-go.mjs:953` `method` · 209 | `Method` passed to `sinkLocals`, which expects `SinkMethod` | Two emitter method contracts disagree at a helper boundary. Compare the actual fields used by `sinkLocals` with both declared shapes. |
-| Emitter | `emit-go.mjs:1375` `stmtLines` · 822 | Optional argument name passed to `ident(string)` | Named actuals are optional in the generic IR argument shape. Typed variants can move the first failure deeper into this large switch without eliminating its root; the whole function must lower. |
 | Emitter | `emit-go.mjs:1111` `place` · 1,420 | Union field incompatible in some alternatives | Reference-attribute and place handling reads a field across a union whose alternatives do not all carry the same type. A local cast moved the failure but did not remove the trap. |
 | Emitter | `emit-go.mjs:2225` `expr` · 1,740 | Invalid narrowing from `optional<dynamic>` to emitter `Expr` | An expression operand remains optional/dynamic at a call site. Establish the guard and concrete IR type before relying on the expression branch. |
 
-The high-hit emitter roots (`expr`, `place`, `stmtLines`) account for 3,982 of
-5,214 hits. That makes them useful integration targets, but hit count is not
+The high-hit emitter roots (`expr`, `place`) account for 3,160 of
+4,392 hits. That makes them useful integration targets, but hit count is not
 an effort estimate: a one-hit root can still block `compileProgram` or
 `emitGo` as an entry point. Several failures are source contract mismatches;
 the boxed `Map`, dynamic key and recursive-union errors may require abapiti
 lowering support. That division is a diagnostic hypothesis until a candidate
 removes the exact root without introducing another one.
 
-A later **diagnostic, unmerged** emitter candidate
-`7a90c25a8b22cfdaeced0838c98ae669ab4f0068` was measured with the same
-abapiti binary and typed driver. It still has **11 roots and 5,214 hits**.
-Inside `stmtLines`, the first failure moved from the optional argument name
-to a `TableKey` versus structural-family-shape mismatch at
-`emit-go.mjs:2068`. This narrows the investigation but does not clear the
-822-hit root; the table deliberately uses the last productive candidate.
+The previous productive G candidate `9299a46fea7274ad9a49662e23e64b8bca2042cf`
+had **11 roots and 5,214 hits** on the same abapiti binary and typed driver.
+Intermediate candidates first moved the failure inside `stmtLines` from an
+optional argument name to a `TableKey` shape mismatch, then to a loop-cursor
+type mismatch. At `fc8b0702`, that **822-hit root is gone with no new root**.
+The candidate type-checks, passes 40 emitter tests, and generates 243
+byte-identical artifacts in each of six sink/cache comparison modes against
+its parent. It is still **private and unmerged**, pending G review and PR
+checks; the table reports its measured state rather than the state of main.
 
 ## Completion gate
 
