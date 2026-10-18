@@ -1155,7 +1155,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   // ultra/events: a name the loop's own condition (WHILE, LOOP ... WHERE)
   // reads must stay current on every pass: no builder for it (a WHILE
   // strlen( v ) < 32 appending to v never ended, ZCL_OSD_TRAN_SESSION=>NEW_ID)
-  const read = new Set();
+  /** @type {Set<string>} */ const read = new Set();
   /** @param {unknown} n @returns {void} */ const seen = (n) => {
     if (Array.isArray(n)) { n.forEach(seen); return; }
     if (!n || typeof n !== "object") return;
