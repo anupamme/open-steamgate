@@ -115,6 +115,11 @@ Its focused tests passed **76/76**, but exact lowering regressed to **6 roots /
 209-hit root converting an array of emitter statements to its inspection
 statement family. The patch is excluded from the ready G chain; passing
 TypeScript and emitter tests did not establish this compiler boundary.
+Aligning its body type with the emitter's `Stmt` array (`89eb7273`) still
+regressed: **6 / 1,445**. The helper then gained a 354-hit root converting
+individual emitter statements to its inspection statement family, while the
+209-hit `method` root advanced to a dynamic collection key. This follow-up is
+also excluded.
 
 ## Completion gate
 
