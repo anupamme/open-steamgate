@@ -93,6 +93,12 @@ failures suggest the remaining work crosses abapiti's structural-shape and
 array-variance lowering, but that is an inference from the diagnostics, not
 yet a confirmed compiler defect.
 
+A further type-annotation probe on the one-hit `compileProgram` root
+(`70d5db28386add832b92630e7feb97b08fda3e8f`) also kept **6 / 1,111**.
+It admitted the disk-cache facade assignment, then failed at the next call:
+an anonymous closure was rejected for an optional callback interface in
+`prepareSelection`. This candidate remains diagnostic and unmerged.
+
 ## Completion gate
 
 For each candidate, compare the reached trap locations and hit counts on the
