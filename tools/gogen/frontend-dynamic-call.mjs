@@ -66,7 +66,9 @@ export function prepareDynamicStatics(program, {defaultValue, aliasTarget}) {
     if (classes.has(cls.name)) continue;
     classes.set(cls.name, cls);
     /** @type {Map<string, import("./frontend-types.ts").FrontendMethod | (import("./frontend-types.ts").MethodSignature & {reason: string})>} */ const methods = new Map();
-    for (const method of [...cls.methods, ...cls.stubs])
+    for (const method of cls.methods)
+      if (method.static && !methods.has(method.name)) methods.set(method.name, method);
+    for (const method of cls.stubs)
       if (method.static && !methods.has(method.name)) methods.set(method.name, method);
     statics.set(cls.name, methods);
   }
