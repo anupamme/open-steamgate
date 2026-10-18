@@ -108,6 +108,14 @@ hits**, `0/35 unknown`, 322 unreached. All five remaining reached TSV rows
 were byte-identical; no root was added. This is a measured candidate result,
 not the integrated compiler state or a completed generator build.
 
+A source-contract probe on that five-root pair
+(`9175ab0b`, private G) let `sinkLocals` accept the renderer's `Method` type.
+Its focused tests passed **76/76**, but exact lowering regressed to **6 roots /
+1,300 hits**: the 209-hit `method` root remained, and `sinkLocals` gained a
+209-hit root converting an array of emitter statements to its inspection
+statement family. The patch is excluded from the ready G chain; passing
+TypeScript and emitter tests did not establish this compiler boundary.
+
 ## Completion gate
 
 For each candidate, compare the reached trap locations and hit counts on the
